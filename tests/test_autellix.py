@@ -1,16 +1,19 @@
 import subprocess
 import sys
 import unittest
+from pathlib import Path
 
 from autellix import Simulator, make_figure2_workload
 from autellix.baselines import make_baseline
 from autellix.client import AutellixClient
+from autellix.datasets import load_programs_from_file, workload_analysis
 from autellix.engine import AsyncMultiLLMEngine
 from autellix.experiments import ExperimentRunner, plot_records, write_records
 from autellix.load_balancer import LocalityAwareLoadBalancer
 from autellix.models import CallSpec, EngineState, ProcessEntry, ProgramSpec
 from autellix.service import AutellixService
 from autellix.schedulers import make_scheduler
+from integrations.vllm import AutellixRequestMetadata, AutellixVLLMAdapter
 
 
 class Figure2Tests(unittest.TestCase):
@@ -291,6 +294,26 @@ class RobustnessTests(unittest.TestCase):
                 ),
             )
 
+    def test_vllm_adapter_is_import_safe_without_backend(self):
+        class Request:
+            pass
+
+        request = AutellixVLLMAdapter().annotate_request(
+            Request(),
+            AutellixRequestMetadata(
+                program_id="P",
+                call_id="c",
+                thread_id="t",
+                parents=("p",),
+                framework_metadata={"framework": "test"},
+            ),
+        )
+        self.assertEqual(request.autellix_program_id, "P")
+        self.assertEqual(request.autellix_call_id, "c")
+        self.assertEqual(request.autellix_thread_id, "t")
+        self.assertEqual(request.autellix_parents, ("p",))
+        self.assertEqual(request.autellix_metadata["framework"], "test")
+
 
 class ServiceTests(unittest.TestCase):
     def test_dynamic_session_matches_static_trace(self):
@@ -376,6 +399,26 @@ class ServiceTests(unittest.TestCase):
         result = client.service.drain()
         self.assertIn(("P", "c1"), result.calls)
 
+    def test_session_context_manager_and_thread_metadata(self):
+        client = AutellixClient(scheduler="atlas", batch_size=2)
+        with client.session("P", drain_on_exit=True) as session:
+            client.chat.completions.create(
+                session_id=session.session_id,
+                messages=[{"role": "user", "content": "root"}],
+                call_id="root",
+                thread_id="main",
+                framework_metadata={"framework": "langgraph"},
+            )
+
+        self.assertEqual(client.service.sessions, {})
+        result = client.service.last_result
+        self.assertIsNotNone(result)
+        state = result.calls[("P", "root")]
+        self.assertEqual(state.spec.thread_id, "main")
+        meta = result.process_table["P"].thread_metadata["root"]
+        self.assertEqual(meta.thread_id, "main")
+        self.assertEqual(meta.metadata["framework"], "langgraph")
+
 
 class AsyncMultiEngineTests(unittest.TestCase):
     def test_future_resolves_after_request_finishes(self):
@@ -442,6 +485,35 @@ class AsyncMultiEngineTests(unittest.TestCase):
         self.assertTrue(child.done())
         self.assertEqual(result.makespan, static.makespan)
 
+    def test_process_mode_still_resolves_futures_and_shutdown(self):
+        engine = AsyncMultiLLMEngine(
+            scheduler="plas",
+            num_engines=2,
+            batch_size=1,
+            process_mode=True,
+        )
+        try:
+            first = engine.submit_call("P", "first", model_time=1, thread_id="t0")
+            second = engine.submit_call("P", "second", model_time=1, parents=("first",), thread_id="t0")
+            result = engine.drain()
+            self.assertTrue(first.done())
+            self.assertTrue(second.done())
+            self.assertEqual(result.process_table["P"].thread_metadata["first"].thread_id, "t0")
+        finally:
+            engine.shutdown()
+
+
+class DatasetTests(unittest.TestCase):
+    def test_jsonl_importer_and_analysis(self):
+        fixture = Path(__file__).parent / "fixtures" / "tiny_workload.jsonl"
+        programs = load_programs_from_file(fixture)
+        self.assertEqual(len(programs), 2)
+        self.assertEqual(programs[0].calls[1].parents, ("root",))
+        self.assertEqual(programs[0].calls[0].thread_id, "main")
+        analysis = workload_analysis(programs)
+        self.assertEqual(analysis["programs"], 2)
+        self.assertEqual(analysis["calls"], 3)
+
 
 class ExecutionModelTests(unittest.TestCase):
     def test_cache_model_reduces_later_same_program_prefill(self):
@@ -495,6 +567,24 @@ class ExperimentTests(unittest.TestCase):
             {"round-robin", "least-used", "autellix"},
         )
 
+    def test_paper_presets_smoke_with_dataset(self):
+        fixture = Path(__file__).parent / "fixtures" / "tiny_workload.jsonl"
+        runner = ExperimentRunner(seed=0, batch_size=2)
+        analysis = runner.paper_preset(
+            "workload-analysis",
+            workload="sharegpt",
+            num_programs=4,
+            dataset_path=str(fixture),
+        )
+        self.assertEqual(analysis[0]["calls"], 3)
+        timing = runner.paper_preset(
+            "timing-breakdown",
+            workload="sharegpt",
+            num_programs=2,
+            dataset_path=str(fixture),
+        )
+        self.assertIn("wait_fraction", timing[0])
+
 
 class CLITests(unittest.TestCase):
     def test_run_and_compare_commands(self):
@@ -533,6 +623,27 @@ class CLITests(unittest.TestCase):
         )
         self.assertIn("policy", compare.stdout)
         self.assertIn("plas", compare.stdout)
+
+    def test_paper_preset_cli(self):
+        fixture = Path(__file__).parent / "fixtures" / "tiny_workload.jsonl"
+        run = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "autellix.cli",
+                "paper-preset",
+                "--preset",
+                "workload-analysis",
+                "--dataset",
+                str(fixture),
+                "--programs",
+                "2",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        self.assertIn("mean_prefill_tokens", run.stdout)
 
 
 if __name__ == "__main__":

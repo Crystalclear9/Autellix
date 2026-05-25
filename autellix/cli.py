@@ -4,18 +4,17 @@ import argparse
 import json
 from typing import Iterable
 
-from .baselines import make_baseline
-from .experiments import ExperimentRunner, plot_records, write_records
-from .load_balancer import make_load_balancer
-from .schedulers import (
+from .experiments import ExperimentRunner, make_baseline, plot_records, write_records
+from .core.load_balancer import make_load_balancer
+from .core.schedulers import (
     DEFAULT_PRIORITY_BOUNDARIES,
     DEFAULT_QUEUE_QUANTA,
     make_scheduler,
     parse_float_tuple,
     parse_int_tuple,
 )
-from .simulator import Simulator
-from .workloads import make_figure2_workload, make_synthetic_workload
+from .core.simulator import Simulator
+from .experiments import make_figure2_workload, make_synthetic_workload
 
 
 def _make_workload(name: str, seed: int, programs: int, arrival_rate: float):
@@ -154,6 +153,27 @@ def build_parser() -> argparse.ArgumentParser:
     suite_parser.add_argument("--schedule-interval", type=int, default=1)
     suite_parser.add_argument("--quick", action="store_true")
 
+    preset_parser = subparsers.add_parser("paper-preset", help="run one paper-style experiment preset")
+    preset_parser.add_argument(
+        "--preset",
+        required=True,
+        choices=[
+            "workload-analysis",
+            "latency-throughput",
+            "load-balancer",
+            "offline-makespan",
+            "timing-breakdown",
+        ],
+    )
+    preset_parser.add_argument("--workload", default="sharegpt", choices=["sharegpt", "bfcl", "lats", "mixed"])
+    preset_parser.add_argument("--dataset", default=None, help="optional JSON/JSONL/CSV dataset path")
+    preset_parser.add_argument("--output", default=None)
+    preset_parser.add_argument("--seed", type=int, default=0)
+    preset_parser.add_argument("--batch-size", type=int, default=8)
+    preset_parser.add_argument("--schedule-interval", type=int, default=1)
+    preset_parser.add_argument("--programs", type=int, default=24)
+    preset_parser.add_argument("--engines", type=int, default=1)
+
     plot_parser = subparsers.add_parser("plot", help="plot records from a JSON result file")
     plot_parser.add_argument("--input", required=True)
     plot_parser.add_argument("--output", required=True)
@@ -203,6 +223,26 @@ def main(argv: list[str] | None = None) -> int:
         json_path, csv_path = write_records(records, args.output)
         print(f"wrote {json_path}")
         print(f"wrote {csv_path}")
+        return 0
+    if args.command == "paper-preset":
+        runner = ExperimentRunner(
+            seed=args.seed,
+            batch_size=args.batch_size,
+            schedule_interval=args.schedule_interval,
+        )
+        records = runner.paper_preset(
+            args.preset,
+            workload=args.workload,
+            num_programs=args.programs,
+            engines=args.engines,
+            dataset_path=args.dataset,
+        )
+        if args.output:
+            json_path, csv_path = write_records(records, args.output)
+            print(f"wrote {json_path}")
+            print(f"wrote {csv_path}")
+        else:
+            print(json.dumps(records, indent=2, sort_keys=True))
         return 0
     if args.command == "plot":
         figures = plot_records(args.input, args.output)

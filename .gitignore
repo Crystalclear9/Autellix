@@ -1,1 +1,12 @@
 *.pdf
+__pycache__/
+*.py[cod]
+.Python
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+tmp/
+temp/

@@ -1,0 +1,3 @@
+{"program_id":"P0","call_id":"root","index":0,"arrival_time":0,"prefill_tokens":128,"decode_tokens":32,"model_time":1,"dependency":"root","thread_id":"main","kind":"sharegpt"}
+{"program_id":"P0","call_id":"child","index":1,"arrival_time":0,"prefill_tokens":256,"decode_tokens":64,"model_time":2,"parent_id":"root","thread_id":"main","kind":"sharegpt"}
+{"program_id":"P1","call_id":"root","index":0,"arrival_time":1,"prefill_tokens":512,"decode_tokens":16,"model_time":1,"dependency":"root","thread_id":"branch-a","kind":"lats"}

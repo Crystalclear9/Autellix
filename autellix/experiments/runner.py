@@ -8,8 +8,9 @@ from statistics import mean
 from typing import Iterable
 
 from .baselines import make_baseline
-from .models import SimulationResult
-from .simulator import Simulator
+from .datasets import load_programs_from_file, workload_analysis
+from ..core.models import SimulationResult
+from ..core.simulator import Simulator
 from .workloads import make_paper_workload
 
 
@@ -82,12 +83,14 @@ class ExperimentRunner:
         num_programs: int,
         arrival_rate: float,
         engines: int,
+        dataset_path: str | None = None,
     ) -> tuple[SimulationResult, dict[str, float | int | str]]:
         programs = make_paper_workload(
             workload,
             seed=self.seed,
             num_programs=num_programs,
             arrival_rate=arrival_rate,
+            dataset_path=dataset_path,
         )
         baseline = make_baseline(
             baseline_name,
@@ -123,6 +126,7 @@ class ExperimentRunner:
         engines: int,
         num_programs: int,
         load_balancers: Iterable[str] | None = None,
+        dataset_path: str | None = None,
     ) -> list[dict[str, float | int | str]]:
         if load_balancers is not None:
             return self.sweep_load_balancers(
@@ -131,6 +135,7 @@ class ExperimentRunner:
                 arrival_rates=arrival_rates,
                 engines=engines,
                 num_programs=num_programs,
+                dataset_path=dataset_path,
             )
         records: list[dict[str, float | int | str]] = []
         for rate in arrival_rates:
@@ -142,6 +147,7 @@ class ExperimentRunner:
                         num_programs=num_programs,
                         arrival_rate=rate,
                         engines=engines,
+                        dataset_path=dataset_path,
                     )
                     record["status"] = "ok"
                 except RuntimeError as exc:
@@ -186,6 +192,7 @@ class ExperimentRunner:
         arrival_rates: Iterable[float],
         engines: int,
         num_programs: int,
+        dataset_path: str | None = None,
     ) -> list[dict[str, float | int | str]]:
         records: list[dict[str, float | int | str]] = []
         for rate in arrival_rates:
@@ -194,6 +201,7 @@ class ExperimentRunner:
                 seed=self.seed,
                 num_programs=num_programs,
                 arrival_rate=rate,
+                dataset_path=dataset_path,
             )
             for load_balancer_name in load_balancers:
                 baseline = make_baseline(
@@ -261,6 +269,86 @@ class ExperimentRunner:
             )
         )
         return records
+
+    def paper_preset(
+        self,
+        preset: str,
+        *,
+        workload: str = "sharegpt",
+        num_programs: int = 24,
+        engines: int = 1,
+        dataset_path: str | None = None,
+    ) -> list[dict[str, float | int | str]]:
+        normalized = preset.lower().replace("_", "-")
+        if normalized == "workload-analysis":
+            programs = (
+                load_programs_from_file(dataset_path, default_kind=workload)[:num_programs]
+                if dataset_path
+                else make_paper_workload(
+                    workload,
+                    seed=self.seed,
+                    num_programs=num_programs,
+                    arrival_rate=1.0,
+                )
+            )
+            row = workload_analysis(programs)
+            return [{**row, "preset": normalized, "workload": workload, "status": "ok"}]
+        if normalized == "latency-throughput":
+            return self.sweep(
+                workload=workload,
+                baseline_names=["vllm", "vllm-opt", "mlfq", "autellix"],
+                arrival_rates=[0.1, 0.2, 0.4, 0.8],
+                engines=engines,
+                num_programs=num_programs,
+                dataset_path=dataset_path,
+            )
+        if normalized == "load-balancer":
+            return self.sweep(
+                workload=workload,
+                baseline_names=["autellix"],
+                arrival_rates=[0.4],
+                engines=max(2, engines),
+                num_programs=num_programs,
+                load_balancers=["round-robin", "least-used", "autellix"],
+                dataset_path=dataset_path,
+            )
+        if normalized == "offline-makespan":
+            return self.sweep(
+                workload=workload,
+                baseline_names=["vllm", "vllm-opt", "mlfq", "autellix"],
+                arrival_rates=[10**9],
+                engines=engines,
+                num_programs=num_programs,
+                dataset_path=dataset_path,
+            )
+        if normalized == "timing-breakdown":
+            records = self.sweep(
+                workload=workload,
+                baseline_names=["vllm", "vllm-opt", "mlfq", "autellix"],
+                arrival_rates=[0.4],
+                engines=engines,
+                num_programs=num_programs,
+                dataset_path=dataset_path,
+            )
+            for row in records:
+                total = max(
+                    1.0,
+                    float(row["total_wait_time"])
+                    + float(row["total_prefill_time"])
+                    + float(row["total_decode_time"])
+                    + float(row["total_swap_time"])
+                    + float(row["total_scheduler_time"]),
+                )
+                row["wait_fraction"] = float(row["total_wait_time"]) / total
+                row["prefill_fraction"] = float(row["total_prefill_time"]) / total
+                row["decode_fraction"] = float(row["total_decode_time"]) / total
+                row["swap_fraction"] = float(row["total_swap_time"]) / total
+                row["scheduler_fraction"] = float(row["total_scheduler_time"]) / total
+            return records
+        raise ValueError(
+            "preset must be one of: workload-analysis, latency-throughput, "
+            "load-balancer, offline-makespan, timing-breakdown"
+        )
 
 
 def write_records(records: list[dict[str, float | int | str]], output_dir: str | Path) -> tuple[Path, Path]:

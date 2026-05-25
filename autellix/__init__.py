@@ -5,20 +5,31 @@ algorithms described in the Autellix paper. It models LLM calls as timed
 jobs and focuses on program-aware scheduling rather than real inference.
 """
 
-from .load_balancer import LocalityAwareLoadBalancer, make_load_balancer
-from .baselines import make_baseline
-from .client import AutellixClient
-from .engine import AsyncMultiLLMEngine, SimulatedRequestFuture
-from .response import SimulatedChatResponse
-from .schedulers import make_scheduler
-from .service import AutellixService, Session
-from .simulator import Simulator
-from .workloads import make_figure2_workload, make_paper_workload, make_synthetic_workload
+from .core import LocalityAwareLoadBalancer, Simulator, make_load_balancer, make_scheduler
+from .experiments import (
+    ExperimentRunner,
+    load_programs_from_file,
+    make_baseline,
+    make_figure2_workload,
+    make_paper_workload,
+    make_synthetic_workload,
+    programs_from_records,
+    workload_analysis,
+)
+from .frontend import (
+    AsyncMultiLLMEngine,
+    AutellixClient,
+    AutellixService,
+    Session,
+    SimulatedChatResponse,
+    SimulatedRequestFuture,
+)
 
 __all__ = [
     "AsyncMultiLLMEngine",
     "AutellixClient",
     "AutellixService",
+    "ExperimentRunner",
     "LocalityAwareLoadBalancer",
     "Session",
     "SimulatedChatResponse",
@@ -30,4 +41,7 @@ __all__ = [
     "make_paper_workload",
     "make_scheduler",
     "make_synthetic_workload",
+    "load_programs_from_file",
+    "programs_from_records",
+    "workload_analysis",
 ]
