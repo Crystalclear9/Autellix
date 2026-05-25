@@ -7,15 +7,22 @@ jobs and focuses on program-aware scheduling rather than real inference.
 
 from .load_balancer import LocalityAwareLoadBalancer, make_load_balancer
 from .baselines import make_baseline
+from .client import AutellixClient
+from .engine import AsyncMultiLLMEngine, SimulatedRequestFuture
+from .response import SimulatedChatResponse
 from .schedulers import make_scheduler
 from .service import AutellixService, Session
 from .simulator import Simulator
 from .workloads import make_figure2_workload, make_paper_workload, make_synthetic_workload
 
 __all__ = [
+    "AsyncMultiLLMEngine",
+    "AutellixClient",
     "AutellixService",
     "LocalityAwareLoadBalancer",
     "Session",
+    "SimulatedChatResponse",
+    "SimulatedRequestFuture",
     "Simulator",
     "make_baseline",
     "make_figure2_workload",

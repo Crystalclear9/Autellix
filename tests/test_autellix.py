@@ -4,6 +4,8 @@ import unittest
 
 from autellix import Simulator, make_figure2_workload
 from autellix.baselines import make_baseline
+from autellix.client import AutellixClient
+from autellix.engine import AsyncMultiLLMEngine
 from autellix.experiments import ExperimentRunner, plot_records, write_records
 from autellix.load_balancer import LocalityAwareLoadBalancer
 from autellix.models import CallSpec, EngineState, ProcessEntry, ProgramSpec
@@ -333,6 +335,112 @@ class ServiceTests(unittest.TestCase):
 
         self.assertEqual(dynamic.makespan, static.makespan)
         self.assertEqual(service.sessions, {})
+
+    def test_chat_completion_estimates_usage_and_end_session_drains(self):
+        service = AutellixService(scheduler="plas", batch_size=1)
+        session = service.start_session("P")
+        response = service.chat_completion(
+            session.session_id,
+            [{"role": "user", "content": "hello simulated autellix"}],
+            call_id="chat",
+            max_tokens=12,
+        )
+
+        self.assertEqual(response.session_id, session.session_id)
+        self.assertEqual(response.program_id, "P")
+        self.assertEqual(response.call_id, "chat")
+        self.assertEqual(response.usage["completion_tokens"], 12)
+        self.assertEqual(response.status, "pending")
+
+        program = service.end_session(session.session_id)
+        result = service.drain()
+        self.assertEqual(program.program_id, "P")
+        self.assertEqual(service.sessions, {})
+        self.assertEqual(result.calls[("P", "chat")].finish_time, response.metrics["model_time"])
+
+    def test_openai_style_client_creates_call(self):
+        client = AutellixClient(scheduler="plas", batch_size=1)
+        session = client.service.start_session("P")
+        response = client.chat.completions.create(
+            model="simulated-model",
+            session_id=session.session_id,
+            messages=[{"role": "user", "content": "route this request"}],
+            call_id="c1",
+            max_tokens=8,
+            temperature=0.2,
+        )
+
+        self.assertEqual(response.usage["completion_tokens"], 8)
+        self.assertEqual(response.metrics["request_metadata"]["model"], "simulated-model")
+        self.assertEqual(response.metrics["request_metadata"]["temperature"], 0.2)
+        result = client.service.drain()
+        self.assertIn(("P", "c1"), result.calls)
+
+
+class AsyncMultiEngineTests(unittest.TestCase):
+    def test_future_resolves_after_request_finishes(self):
+        engine = AsyncMultiLLMEngine(scheduler="plas", num_engines=2, batch_size=1)
+        future = engine.submit_call("P", "c1", model_time=2, prefill_tokens=100, decode_tokens=10)
+
+        self.assertFalse(future.done())
+        with self.assertRaises(RuntimeError):
+            future.result()
+
+        engine.drain()
+        self.assertTrue(future.done())
+        response = future.result()
+        self.assertEqual(response.program_id, "P")
+        self.assertEqual(response.call_id, "c1")
+        self.assertIsNotNone(response.engine_id)
+        self.assertEqual(response.status, "finished")
+
+    def test_multi_engine_short_balances_and_long_pins(self):
+        engine = AsyncMultiLLMEngine(
+            scheduler="plas",
+            load_balancer="autellix",
+            num_engines=2,
+            batch_size=1,
+            execution_model="autellix",
+        )
+        blocker = engine.submit_call("B", "busy", model_time=5, prefill_tokens=100, decode_tokens=1)
+        engine.step()
+
+        short = engine.submit_call("P", "short", model_time=1, prefill_tokens=100, decode_tokens=100)
+        engine.step()
+        self.assertEqual(blocker.engine_id, 0)
+        self.assertEqual(short.engine_id, 1)
+
+        long1 = engine.submit_call("P", "long1", model_time=1, prefill_tokens=3000, decode_tokens=10)
+        long2 = engine.submit_call("P", "long2", model_time=1, prefill_tokens=4000, decode_tokens=10)
+        engine.step()
+
+        self.assertEqual(long2.engine_id, long1.engine_id)
+
+        engine.drain()
+        self.assertTrue(all(future.done() for future in [blocker, short, long1, long2]))
+
+    def test_dynamic_engine_trace_matches_static_simulator(self):
+        engine = AsyncMultiLLMEngine(scheduler="plas", batch_size=1)
+        root = engine.submit_call("P", "root", model_time=2)
+        child = engine.submit_call("P", "child", model_time=1, parents=("root",))
+        result = engine.drain()
+        static = Simulator(
+            [
+                ProgramSpec(
+                    "P",
+                    (
+                        CallSpec("root", "P", model_time=2, submit_time=0),
+                        CallSpec("child", "P", model_time=1, parents=("root",), submit_time=0),
+                    ),
+                )
+            ],
+            scheduler="plas",
+            batch_size=1,
+        ).run()
+
+        self.assertTrue(root.done())
+        self.assertTrue(child.done())
+        self.assertEqual(result.makespan, static.makespan)
 
 
 class ExecutionModelTests(unittest.TestCase):

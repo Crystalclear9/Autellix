@@ -149,3 +149,60 @@ records = runner.sweep(
     load_balancers=["round-robin", "least-used", "autellix"],
 )
 ```
+
+## Stateful API Prototype
+
+The repository also includes an in-process prototype of the paper's stateful
+frontend and multi-engine meta-engine. It is still a deterministic simulator:
+it does not call a real model, vLLM, CUDA, or multiprocessing IPC.
+
+OpenAI-style chat facade:
+
+```python
+from autellix import AutellixClient
+
+client = AutellixClient(scheduler="plas", num_engines=2, batch_size=1)
+session = client.service.start_session("program-1")
+
+response = client.chat.completions.create(
+    model="simulated-model",
+    session_id=session.session_id,
+    messages=[{"role": "user", "content": "Plan a tool call"}],
+    call_id="root",
+    max_tokens=64,
+)
+
+result = client.service.drain()
+print(response.usage)
+print(result.calls[("program-1", "root")].engine_id)
+```
+
+Async multi-engine facade:
+
+```python
+from autellix import AsyncMultiLLMEngine
+
+engine = AsyncMultiLLMEngine(
+    scheduler="plas",
+    load_balancer="autellix",
+    num_engines=2,
+    batch_size=1,
+)
+
+future = engine.submit_call(
+    "program-1",
+    "call-1",
+    model_time=2,
+    prefill_tokens=4096,
+    decode_tokens=128,
+)
+
+engine.drain()
+print(future.done())
+print(future.result().metrics)
+```
+
+`AutellixService.end_session()` is a semantic alias for
+`complete_session()`. `drain()` marks completed sessions done and removes them
+from the live service registry, matching the frontend session lifecycle in the
+paper at simulation level.

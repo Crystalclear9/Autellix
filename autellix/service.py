@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from itertools import count
+from math import ceil
+from typing import Any
 
 from .execution import ExecutionModel, make_execution_model
 from .load_balancer import LoadBalancer, make_load_balancer
 from .models import CallSpec, ProgramSpec, SimulationResult
+from .response import SimulatedChatResponse, make_simulated_response
 from .schedulers import Scheduler, make_scheduler
 from .simulator import Simulator
 
@@ -49,6 +52,7 @@ class AutellixService:
         self.last_result: SimulationResult | None = None
         self._simulator: Simulator | None = None
         self._program_session_ids: dict[str, str] = {}
+        self._call_counters: dict[str, count] = {}
 
     def start_session(
         self,
@@ -64,6 +68,7 @@ class AutellixService:
         )
         self.sessions[sid] = session
         self._program_session_ids[session.program_id] = sid
+        self._call_counters[sid] = count(1)
         return session
 
     def submit_call(
@@ -105,6 +110,83 @@ class AutellixService:
         session = self.sessions[session_id]
         session.completed = True
         return session.to_program()
+
+    def end_session(self, session_id: str) -> ProgramSpec:
+        """Mark a session complete, mirroring the paper's frontend lifecycle."""
+
+        return self.complete_session(session_id)
+
+    def chat_completion(
+        self,
+        session_id: str,
+        messages: list[dict[str, Any]],
+        *,
+        call_id: str | None = None,
+        model_time: int | None = None,
+        prefill_tokens: int | None = None,
+        decode_tokens: int | None = None,
+        parents: tuple[str, ...] = (),
+        release_delay: int = 0,
+        max_tokens: int | None = None,
+        **metadata: Any,
+    ) -> SimulatedChatResponse:
+        """Submit a deterministic OpenAI Chat Completion-style simulated call."""
+
+        if call_id is None:
+            call_id = f"chat{next(self._call_counters[session_id]):06d}"
+        prompt_tokens = (
+            prefill_tokens
+            if prefill_tokens is not None
+            else self._estimate_prompt_tokens(messages)
+        )
+        completion_tokens = (
+            decode_tokens
+            if decode_tokens is not None
+            else max(1, max_tokens if max_tokens is not None else min(256, max(16, prompt_tokens // 8)))
+        )
+        simulated_model_time = (
+            model_time
+            if model_time is not None
+            else max(1, ceil(prompt_tokens / 512) + ceil(completion_tokens / 64))
+        )
+        call = self.submit_call(
+            session_id,
+            call_id,
+            model_time=simulated_model_time,
+            prefill_tokens=prompt_tokens,
+            decode_tokens=completion_tokens,
+            parents=parents,
+            release_delay=release_delay,
+        )
+        state = self._call_state(call)
+        response_metadata = {"request_metadata": metadata} if metadata else None
+        return make_simulated_response(
+            session_id=session_id,
+            state=state,
+            result=self.last_result,
+            metrics=response_metadata,
+        )
+
+    @staticmethod
+    def _estimate_prompt_tokens(messages: list[dict[str, Any]]) -> int:
+        total_chars = 0
+        for message in messages:
+            content = message.get("content", "")
+            if isinstance(content, list):
+                total_chars += sum(len(str(part)) for part in content)
+            else:
+                total_chars += len(str(content))
+            total_chars += len(str(message.get("role", "")))
+        return max(1, ceil(total_chars / 4))
+
+    def _call_state(self, call: CallSpec):
+        if self._simulator is not None and call.key in self._simulator.calls:
+            return self._simulator.calls[call.key]
+        if self.last_result is not None and call.key in self.last_result.calls:
+            return self.last_result.calls[call.key]
+        from .models import CallState
+
+        return CallState(call)
 
     def _programs(self, *, include_open: bool) -> list[ProgramSpec]:
         programs = [
@@ -215,6 +297,7 @@ class AutellixService:
                 session.completed = True
                 del self.sessions[session_id]
                 self._program_session_ids.pop(session.program_id, None)
+                self._call_counters.pop(session_id, None)
         self._simulator = None
         return result
 
