@@ -1,9 +1,6 @@
-"""Autellix scheduling simulator.
+"""Autellix scheduling simulator and optional real inference runtime."""
 
-This package is a lightweight, CPU-only reproduction of the scheduling
-algorithms described in the Autellix paper. It models LLM calls as timed
-jobs and focuses on program-aware scheduling rather than real inference.
-"""
+from .runtime import InferenceEngine, InferenceClient, ReplicaConfig, PolicyConfig
 
 from .core import LocalityAwareLoadBalancer, Simulator, make_load_balancer, make_scheduler
 from .experiments import (
@@ -26,6 +23,10 @@ from .frontend import (
 )
 
 __all__ = [
+    "InferenceEngine",
+    "InferenceClient",
+    "ReplicaConfig",
+    "PolicyConfig",
     "AsyncMultiLLMEngine",
     "AutellixClient",
     "AutellixService",

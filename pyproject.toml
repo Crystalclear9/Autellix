@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "autellix"
+version = "0.2.0"
+description = "Program-aware scheduling for real LLM engines and simulations"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+vllm = ["vllm==0.6.1", "numpy<2", "transformers==4.44.2", "huggingface-hub<1"]
+sglang = ["sglang[all]==0.4.9.post6", "numpy<2"]
+server = ["fastapi>=0.115", "uvicorn>=0.30"]
+
+[project.scripts]
+autellix-serve = "autellix.runtime.server:main"
+autellix-sglang = "integrations.sglang.launch:main"
+autellix-benchmark = "autellix.runtime.benchmark:main"
+
+[tool.setuptools.packages.find]
+include = ["autellix*", "integrations*"]

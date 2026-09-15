@@ -1,28 +1,25 @@
-# Autellix vLLM Integration Scaffold
+# vLLM 0.6.1 integration
 
-This directory is a Linux/WSL-oriented scaffold for mapping the in-repository
-Autellix simulator concepts to vLLM v0.6.1. It is intentionally import-safe:
-the main package does not require vLLM unless a caller explicitly imports this
-integration.
+`backend.py` creates a real LLMEngine. `scheduler.py` selects program-aware
+cohorts inside the native scheduler while preserving native token budgets and
+KV block ownership. No installed vLLM files are modified.
 
-## Target
+Use the root README to install a separate Linux/WSL environment and start
+`autellix-serve --backend vllm`. The metadata adapter is retained for compatibility;
+its `create_backend()` method constructs the real implementation.
 
-- vLLM v0.6.1
-- Linux or WSL with CUDA
-- One or more CUDA-capable GPUs
+Supported mode: decoder-only text generation, one GPU per replica, one sampled
+sequence per request, prefix caching, CPU swap, and optional batched transfers.
+Independent replicas may run on different GPUs. TP/PP and chunked prefill are
+rejected. `PolicyConfig.schedule_interval` maps to native multi-step execution.
+The integration handles transfer-only barriers and ensures cached multi-step
+worker inputs do not replay swap-in or copy operations.
 
-## Patch Surface
+`overprovision` retains displaced GPU KV blocks up to the configured reserve
+count. This is a resident reserve, not arbitrary insertion into a running cached
+multi-step batch. Version checks fail closed on other vLLM releases.
 
-- Annotate incoming requests with `program_id`, `thread_id`, parent call IDs,
-  and framework metadata.
-- Maintain an Autellix process table beside vLLM's scheduler state.
-- Add PLAS/ATLAS queue assignment and anti-starvation promotion at scheduler
-  admission/demotion points.
-- Route long requests by program locality and short requests by least-used
-  engine when using a multi-engine coordinator.
-
-## Status
-
-This scaffold does not patch vLLM yet. It provides adapter shape and patch
-notes so the simulator's public API can stay stable while a real vLLM backend
-is developed.
+Run `tests/test_gpu_runtime.py` with the environment variables in the root README.
+The tests compare interrupted greedy outputs to uninterrupted outputs from the
+same loaded model, verify program inheritance, and optionally exercise two real
+replicas and cancellation.

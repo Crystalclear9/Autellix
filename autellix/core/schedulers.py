@@ -258,10 +258,19 @@ class ATLASScheduler(Scheduler):
     name: str = "atlas"
 
     def priority_for_call(self, call: CallState, entry: ProcessEntry) -> float:
-        return call.critical_path_service
+        return entry.service_time
 
     def update_service_time(self, entry: ProcessEntry, call: CallState) -> None:
-        entry.service_time = max(entry.service_time, call.critical_path_service + call.model_time)
+        entry.service_time = max(entry.service_time, call.service_priority + call.model_time)
+
+
+@dataclass
+class DAGATLASScheduler(ATLASScheduler):
+    """Explicit-parent equation (2) variant, separate from online Algorithm 1."""
+    name: str = "atlas-dag"
+
+    def priority_for_call(self, call: CallState, entry: ProcessEntry) -> float:
+        return call.critical_path_service
 
 
 @dataclass
@@ -410,6 +419,8 @@ def make_scheduler(
         return PLASScheduler(**kwargs)
     if normalized == "atlas":
         return ATLASScheduler(**kwargs)
+    if normalized == "atlas-dag":
+        return DAGATLASScheduler(**kwargs)
     if normalized == "srpt":
         return SRPTScheduler(**kwargs)
     raise ValueError(f"unknown scheduler: {name}")

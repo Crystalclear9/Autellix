@@ -29,7 +29,7 @@ def require_vllm():
 
 
 class AutellixVLLMAdapter:
-    """Adapter shape for future vLLM scheduler integration."""
+    """Metadata compatibility helper and factory for the real pinned backend."""
 
     def __init__(self, *, require_backend: bool = False) -> None:
         self.vllm = require_vllm() if require_backend else None
@@ -41,3 +41,7 @@ class AutellixVLLMAdapter:
         setattr(request, "autellix_parents", metadata.parents)
         setattr(request, "autellix_metadata", dict(metadata.framework_metadata))
         return request
+
+    def create_backend(self, model: str, table_path: str, **kwargs):
+        from .backend import VLLMBackend
+        return VLLMBackend(model, table_path, **kwargs)

@@ -116,7 +116,9 @@ class CallState:
     decode_time: int = 0
     cache_hit_rate: float = 0.0
     swap_time: int = 0
+    swap_remaining: int = 0
     scheduler_time: int = 0
+    scheduler_remaining: int = 0
     status: CallStatus = CallStatus.PENDING
     ready_time: int | None = None
     start_time: int | None = None

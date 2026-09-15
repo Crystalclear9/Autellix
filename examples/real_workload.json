@@ -1,0 +1,12 @@
+[
+  {"program_id":"sequential","calls":[
+    {"call_id":"city","prompt":"Name a European capital.","max_tokens":16},
+    {"call_id":"country","parents":["city"],"prompt":"State the country of the city mentioned below.","max_tokens":16}
+  ]},
+  {"program_id":"fork_join","calls":[
+    {"call_id":"root","prompt":"Name a common fruit.","max_tokens":8},
+    {"call_id":"left","parents":["root"],"prompt":"Describe the color of this fruit.","max_tokens":16},
+    {"call_id":"right","parents":["root"],"prompt":"Describe the taste of this fruit.","max_tokens":16},
+    {"call_id":"join","parents":["left","right"],"prompt":"Summarize these descriptions in one sentence.","max_tokens":24}
+  ]}
+]

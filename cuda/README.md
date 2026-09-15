@@ -1,22 +1,23 @@
-# Autellix CUDA Swap Kernel Scaffold
+# GPU KV swap benchmark
 
-The paper reports a batched GPU-CPU KV swap path that gathers many small KV
-blocks into a contiguous transfer. This directory contains a standalone
-research scaffold for that path. It is not wired into the Python simulator or
-vLLM integration yet.
+The benchmark performs real GPU/CPU transfers, validates exact KV round-trip
+correctness with a nontrivial block mapping, synchronizes CUDA for timing, and
+reports median times after warm-up.
 
-## Target Environment
+```bash
+python cuda/batched_swap_benchmark.py --blocks 128 --layers 4 --iterations 10
+```
 
-- Linux or WSL
-- NVIDIA CUDA toolkit
-- A CUDA-capable GPU
+The default baseline is vLLM's actual compiled `swap_blocks` operation. Use
+`--baseline python` only when intentionally comparing against per-block Python
+copy calls; those timings include Python dispatch overhead.
 
-## Intended Flow
+The batched path is `autellix/runtime/swap.py`, also used by the real vLLM
+backend. It packs all layers' K/V blocks with PyTorch CUDA kernels, transfers
+one contiguous payload through pinned host memory, and scatters into the
+mapped destination blocks. No separate CUDA compiler is required for this
+path. It supports contiguous `[2, blocks, ...]` KV layouts and rejects unsafe
+shapes, mappings, and duplicate destinations.
 
-1. Build a standalone block-copy benchmark.
-2. Validate that copied blocks round-trip correctly.
-3. Compare many small transfers with one gathered transfer.
-4. Only after standalone validation, integrate the transfer path with vLLM's KV
-   cache block manager.
-
-The current repository remains runnable without CUDA.
+The benchmark raises an error without CUDA; there is no CPU simulation fallback.
+It does not assume the batched path is faster for every payload size or machine.

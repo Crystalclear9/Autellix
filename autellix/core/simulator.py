@@ -248,6 +248,12 @@ class Simulator:
             finished: list[CallState] = []
             exhausted: list[CallState] = []
             for call in list(engine.running):
+                if call.swap_remaining:
+                    call.swap_remaining -= 1
+                    continue
+                if call.scheduler_remaining:
+                    call.scheduler_remaining -= 1
+                    continue
                 call.remaining_time -= 1
                 call.executed_time += 1
                 call.run_time_window += 1
@@ -287,6 +293,7 @@ class Simulator:
                 penalty = self.execution_model.preemption_penalty(len(exhausted))
                 if penalty:
                     call.swap_time += penalty
+                    call.swap_remaining += penalty
                 self.scheduler.demote(call, engine)
 
             self.scheduler.fill_from_prefetch(engine, time + 1)

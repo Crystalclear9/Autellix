@@ -46,8 +46,9 @@ class ExecutionModel:
         call.prefill_time = prefill_time
         call.decode_time = max(1, decode_time)
         call.scheduler_time = self.scheduler_overhead_per_call
+        call.scheduler_remaining = call.scheduler_time
         call.swap_time = 0
-        call.model_time = max(1, call.prefill_time + call.decode_time + call.scheduler_time)
+        call.model_time = max(1, call.prefill_time + call.decode_time)
         call.remaining_time = call.model_time
 
     def cache_hit_rate(
