@@ -4,9 +4,12 @@ Part of the unofficial Autellix method reproduction attempt. This adapter was
 implemented independently; it is not the paper authors' released code. See the
 [root README](../../README.md#reproduction-scope) for scope and validation limits.
 
-`backend.py` creates a real LLMEngine. `scheduler.py` selects program-aware
-cohorts inside the native scheduler while preserving native token budgets and
-KV block ownership. No installed vLLM files are modified.
+`backend.py` creates a real LLMEngine. Default `paper.py` builds globally ordered
+batches without calling native `_schedule()`. Priority selection runs at window
+boundaries; continuation materializes the saved plan, with resident reserve
+refill. Native block ownership and attention metadata are preserved. Mixed
+prefill/decode execution prevents native phase preference from overriding
+priority. No installed vLLM files are modified.
 
 Use the root README to install a separate Linux/WSL environment and start
 `autellix-serve --backend vllm`. The metadata adapter is retained for compatibility;
@@ -17,16 +20,16 @@ sequence per request, prefix caching, CPU swap, and optional batched transfers.
 Independent replicas may run on different GPUs. Tensor-parallel replicas use a
 custom multiprocessing executor to install transfer hooks on every rank; the
 two-GPU test is opt-in and requires hardware not present on the development host.
-PP and chunked prefill in Autellix policy mode are rejected.
-Without reserves on one GPU, `schedule_interval` maps to native multi-step execution.
-The integration handles transfer-only barriers and ensures cached multi-step
-worker inputs do not replay swap-in or copy operations.
+PP is rejected. Paper mode enables mixed-phase attention support but performs
+whole-call prefill admission within the configured token budget. A prompt that
+cannot fit must use a larger budget. Future decode slots are reserved at window
+preparation. Token metadata continues to advance once per execution step.
 
-With reserves (or tensor parallelism), a policy window freezes the cohort for N
-decode steps while native per-step block/tensor updates remain enabled. Reserve
-prefill or swap-in prepares GPU KV ahead of replacement; an early completion
-triggers a `refill` before the next policy boundary. Memory pressure drops the
-reserve for that window. Version checks fail closed on other vLLM releases.
+Use `--implementation compat` to select the former scheduler wrapper. In that
+mode, without reserves on one GPU, `schedule_interval` maps to native cached
+multi-step execution. With reserves or TP it uses native per-step selection
+within the filtered cohort. Paper mode is the default (N=8, one reserve).
+Version checks fail closed on other vLLM releases.
 
 Benchmark modes `vllm`, `vllm-opt`, and `vllm-opt-multistep` observe native scheduling
 without replacing it. The last two separate chunked-prefill and multi-step

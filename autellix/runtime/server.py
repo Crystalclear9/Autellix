@@ -208,8 +208,9 @@ def main(argv=None):
     parser.add_argument("--policy", choices=("fcfs", "mlfq", "plas", "atlas"), default="atlas")
     parser.add_argument("--engine-args", default="{}", help="JSON arguments for the pinned backend")
     parser.add_argument("--state-dir")
-    parser.add_argument("--schedule-interval", type=int, default=1)
-    parser.add_argument("--overprovision", type=int, default=0)
+    parser.add_argument("--schedule-interval", type=int, default=8)
+    parser.add_argument("--overprovision", type=int, default=1)
+    parser.add_argument("--implementation", choices=("paper", "compat"), default="paper")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
     args = parser.parse_args(argv)
@@ -218,7 +219,8 @@ def main(argv=None):
                 for d in groups]
     engine = InferenceEngine(replicas, state_dir=args.state_dir,
                              policy=PolicyConfig(policy=args.policy, schedule_interval=args.schedule_interval,
-                                                 overprovision=args.overprovision))
+                                                 overprovision=args.overprovision,
+                                                 implementation=args.implementation))
     import uvicorn
     try:
         uvicorn.run(create_app(engine), host=args.host, port=args.port)

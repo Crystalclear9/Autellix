@@ -9,6 +9,41 @@ from integrations.sglang.scheduler import encode_request, install
 
 
 class CompletedDecodeTests(unittest.TestCase):
+    def test_prepared_window_bypasses_native_prefill_admission(self):
+        with tempfile.TemporaryDirectory() as directory:
+            class Native:
+                def __init__(self):
+                    self.policy = SimpleNamespace()
+                    self.server_args = SimpleNamespace(max_running_requests=1)
+                    self.waiting_queue = []
+                _add_request_to_queue = Mock()
+                _extend_requests_to_queue = Mock()
+                run_batch = Mock()
+                process_batch_result = Mock()
+                abort_request = Mock()
+                check_memory = Mock()
+                def get_new_batch_prefill(self):
+                    raise AssertionError("native admission ran inside prepared window")
+            with patch.dict("sys.modules", {"torch": Mock()}):
+                install(Native, {"table_path": str(Path(directory, "state.sqlite")),
+                                 "config": {"schedule_interval": 3, "overprovision": 0}, "capacity": 1})
+            scheduler = Native()
+            ctl = scheduler.autellix
+            try:
+                ctl.table.open("p")
+                ctl.admit("active", "p")
+                ctl.admit("waiting", "p")
+                scheduler._autellix_window.select(["active", "waiting"], ["active"])
+                scheduler._autellix_window.executed()
+                scheduler.running_batch = SimpleNamespace(reqs=[SimpleNamespace(rid="active")],
+                                                          filter_batch=lambda: None)
+                scheduler.waiting_queue = [SimpleNamespace(rid="waiting")]
+                self.assertIsNone(scheduler.get_new_batch_prefill())
+                self.assertEqual(scheduler.waiting_queue[0].rid, "waiting")
+                self.assertTrue(scheduler.is_mixed_chunk)
+            finally:
+                ctl.table.close()
+
     def test_retired_decode_is_filtered_before_priority_and_slot_counting(self):
         for step in (0, 1):  # Policy refresh and the intervening multi-step iteration.
             with self.subTest(step=step), tempfile.TemporaryDirectory() as directory:

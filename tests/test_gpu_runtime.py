@@ -55,7 +55,8 @@ class RealInferenceTests(unittest.TestCase):
         policy = PolicyConfig(boundaries=(0, .001, .002, math.inf),
                               quanta=(.0001, .0002, .0004), beta=1e12,
                               schedule_interval=int(os.environ.get("AUTELLIX_TEST_STEPS", "1")),
-                              overprovision=int(os.environ.get("AUTELLIX_TEST_RESERVE", "0")))
+                              overprovision=int(os.environ.get("AUTELLIX_TEST_RESERVE", "0")),
+                              implementation=os.environ.get("AUTELLIX_TEST_IMPLEMENTATION", "paper"))
         with tempfile.TemporaryDirectory(prefix="autellix-gpu-") as directory:
             engine = InferenceEngine([ReplicaConfig(BACKEND, MODEL, engine_args=args)],
                                      policy=policy, state_dir=directory)
@@ -76,6 +77,9 @@ class RealInferenceTests(unittest.TestCase):
                 events = [json.loads(line) for line in Path(directory, "replica-0.jsonl").read_text().splitlines()]
                 counts = Counter(event["event"] for event in events)
                 self.assertGreater(counts["demote"], 0)
+                if policy.implementation == "paper" and policy.schedule_interval > 1:
+                    self.assertGreater(counts["continue_plan"], 0)
+                    self.assertLess(counts["schedule_window"], counts["execute"])
                 if policy.overprovision and BACKEND == "vllm":
                     self.assertGreater(counts["reserve"], 0)
                     if policy.schedule_interval > 1:

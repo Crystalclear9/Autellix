@@ -20,12 +20,13 @@ class VLLMBackend:
         if mode not in {"autellix", "vllm", "vllm-opt", "vllm-opt-multistep"}:
             raise ValueError("invalid autellix_mode")
         native = mode != "autellix"
+        paper = not native and config.implementation == "paper"
         if engine_args.get("pipeline_parallel_size", 1) != 1:
             raise ValueError("pipeline parallelism is not supported; use tensor parallelism")
         tp = engine_args.get("tensor_parallel_size", 1)
         if "num_scheduler_steps" in engine_args and engine_args["num_scheduler_steps"] != config.schedule_interval:
             raise ValueError("num_scheduler_steps must match PolicyConfig.schedule_interval")
-        if engine_args.get("enable_chunked_prefill", False) and not native:
+        if engine_args.get("enable_chunked_prefill", False) and not native and not paper:
             raise ValueError("chunked prefill is not supported by this pinned integration")
         from vllm.engine.arg_utils import EngineArgs
         from vllm.engine.llm_engine import LLMEngine
@@ -41,11 +42,16 @@ class VLLMBackend:
         args["disable_async_output_proc"] = True
         # Native cached multi-step metadata cannot accept replacements. Reserve
         # mode uses our policy window plus native per-step tensor/block updates.
-        refill_mode = (config.overprovision > 0 or tp > 1) and not native
+        refill_mode = (paper or config.overprovision > 0 or tp > 1) and not native
         capacity = args["max_num_seqs"]
         args["num_scheduler_steps"] = 1 if refill_mode else config.schedule_interval
         if refill_mode:
             args["max_num_seqs"] = capacity + config.overprovision
+        if paper:
+            # Mixed prefill/decode kernels, with admission controlled entirely
+            # by PaperPlan rather than native chunk-prefill scheduling.
+            args["enable_chunked_prefill"] = True
+            args.setdefault("max_num_batched_tokens", max(args.get("max_model_len", 2048), capacity + config.overprovision))
         if tp > 1 and not native:
             from .executor import AutellixMPExecutor
             args["distributed_executor_backend"] = AutellixMPExecutor
@@ -56,6 +62,10 @@ class VLLMBackend:
         if refill_mode:
             from autellix.runtime.window import SchedulingWindow
             self.scheduler._autellix_window = SchedulingWindow(self.controller, capacity)
+        if paper:
+            from .paper import PaperPlan
+            self.scheduler._autellix_paper = PaperPlan(self.scheduler, self.controller, capacity)
+            self.scheduler._autellix_window = self.scheduler._autellix_paper.window
         worker = self.engine.model_executor.driver_worker
         if batched_swap and not native:
             for cache in worker.cache_engine:

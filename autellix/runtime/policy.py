@@ -24,10 +24,13 @@ class PolicyConfig:
     boundaries: tuple[float, ...] = (0, .02, .04, .08, .16, .32, .64, math.inf)
     quanta: tuple[float, ...] = (.01, .02, .04, .08, .16, .32, .64)
     beta: float = 8.0
-    schedule_interval: int = 1
-    overprovision: int = 0
+    schedule_interval: int = 8
+    overprovision: int = 1
+    implementation: str = "paper"
 
     def __post_init__(self):
+        if self.implementation not in {"paper", "compat"}:
+            raise ValueError("implementation must be paper or compat")
         if self.policy not in {"fcfs", "mlfq", "plas", "atlas"}:
             raise ValueError("policy must be fcfs, mlfq, plas, or atlas")
         if (len(self.boundaries) != len(self.quanta) + 1 or

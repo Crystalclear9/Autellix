@@ -25,12 +25,22 @@ Algorithm 1: calls inherit the longest observed program service path; completion
 updates it with the maximum of the previous value and inherited service plus
 the call's measured execution time. It does not require a user-supplied DAG.
 
-Queue boundaries, quanta and starvation thresholds are configurable choices
-because the paper does not provide all numerical settings. KV packing uses
-PyTorch CUDA operations and pinned host memory. Reserve-enabled execution uses
-native per-step engine metadata within a fixed policy window; this is an
-implementation choice, not a claim of matching the authors' CUDA kernels or
-CPU overhead. SGLang support is an extension of the paper's vLLM-based design.
+The default `--implementation paper` uses global-priority admission and an
+execution plan lasting N decode steps. vLLM's native prefill/decode/swap queue
+preferences do not choose the batch. Between boundaries, the executor advances
+the existing plan and fills vacancies from prepared GPU reserves; it does not
+run native batch selection again. Per-token tensor, output and KV bookkeeping
+still runs: multi-step scheduling does not mean token execution stops needing
+metadata updates. SGLang mixes admitted prefills and decodes and bypasses native
+prefill selection during decode-only continuation.
+
+`--implementation compat` explicitly restores the former backend-mediated
+scheduler. Both modes retain real inference. Default N=8 and reserve count=1
+enable both optimizations; these values, queue boundaries, quanta and starvation
+thresholds are configurable project choices because the paper does not publish
+all numerical settings. KV packing uses PyTorch CUDA operations and pinned host
+memory. No identical CUDA kernels or CPU overhead are claimed. SGLang support
+is an extension of the paper's vLLM-based design.
 
 Small-model tests have exercised both pinned backends, resumed-output equality,
 real host KV transfers, mid-window refill, routing, cancellation and HTTP
@@ -99,8 +109,8 @@ engine under `if __name__ == "__main__"` when using multiprocessing.
 - Transactional program statistics shared between replica processes. Sessions
   close after their admitted calls finish or are cancelled.
 - Real tokenizer-based short-request balancing and long-request engine affinity.
-- vLLM: native block allocation, GPU/CPU KV swap, batched CUDA packing and pinned
-  host transfers, and native multi-step execution (`--schedule-interval N`).
+- vLLM: global-priority batch construction, native block ownership, GPU/CPU KV
+  swap, batched CUDA packing, and multi-step plans (`--schedule-interval N`).
 - SGLang: synchronous packed GPU/CPU KV swap for MHA token pools (page size 1),
   and resident radix-prefix reserves. `autellix_swap_space` in engine arguments
   limits pinned host KV storage in GiB (default 1); requests retain their
@@ -112,9 +122,10 @@ engine under `if __name__ == "__main__"` when using multiprocessing.
   swap-in. Decode capacity stays at the requested batch size; reserve preparation
   can temporarily prefill up to batch-size + K requests. Memory pressure releases
   reserves rather than blocking the active cohort indefinitely.
-- In reserve mode, vLLM uses native per-step metadata/block updates with the
-  Autellix policy window; it does not mutate vLLM's frozen multi-step tensors.
-  Without reserves, single-GPU vLLM retains native cached multi-step execution.
+- In default paper mode, vLLM reserves future KV slots when preparing a window
+  and supports mixed prefill/decode batches without native phase preference.
+  `--implementation compat --overprovision 0` on one GPU retains the old native
+  cached multi-step execution; with reserves, compat uses the former wrapper.
 - Use `--devices 0,1` for independent single-GPU replicas. vLLM tensor-parallel
   replicas use `--device-groups '0,1;2,3'` and
   `--engine-args '{"tensor_parallel_size":2,...}'`; worker hooks run on every
@@ -134,7 +145,8 @@ AUTELLIX_GPU_BACKEND=vllm AUTELLIX_TEST_MODEL=/path/to/model \
   python -m unittest discover -s tests -p test_gpu_runtime.py -v
 
 # Repeat in the SGLang environment with AUTELLIX_GPU_BACKEND=sglang.
-# Native vLLM multi-step validation: add AUTELLIX_TEST_STEPS=3.
+# Paper multi-step validation: add AUTELLIX_TEST_STEPS=3.
+# For the former adapter, also set AUTELLIX_TEST_IMPLEMENTATION=compat.
 python cuda/batched_swap_benchmark.py --blocks 128 --layers 4
 ```
 
@@ -354,8 +366,10 @@ print(workload_analysis(programs))
 The paper does not publish exact numeric values for queue boundaries, time
 quanta, or beta. For real inference, `autellix.runtime.PolicyConfig` uses seconds:
 boundaries `0,.02,.04,.08,.16,.32,.64,inf`, quanta
-`.01,.02,.04,.08,.16,.32,.64`, beta `8`, schedule interval `1`, and no reserves
-by default. Pass a custom `PolicyConfig` to `InferenceEngine` to tune these.
+`.01,.02,.04,.08,.16,.32,.64`, beta `8`, schedule interval `8`, one reserve,
+and `implementation="paper"` by default. Pass a custom `PolicyConfig` to
+`InferenceEngine` to tune these. The server and real benchmark expose
+`--implementation paper|compat`, `--schedule-interval` and `--overprovision`.
 
 The separate simulator uses:
 

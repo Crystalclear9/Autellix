@@ -34,12 +34,18 @@ def install(cls, options):
     original_result = cls.process_batch_result
     original_abort = cls.abort_request
     original_check_memory = cls.check_memory
+    original_update_running = getattr(cls, "update_running_batch", None)
 
     def init(self, *a, **kw):
         original_init(self, *a, **kw)
         self.autellix = RuntimeScheduler(ProgramTable(options["table_path"]),
                                         PolicyConfig(**options["config"]), options.get("trace"))
         self._autellix_steps = 0
+        self._autellix_paper = self.autellix.config.implementation == "paper"
+        if self._autellix_paper:
+            # Mixed execution prevents native prefill preference from excluding
+            # higher-priority decodes already admitted by the global plan.
+            self.is_mixed_chunk = True
         self._autellix_rids = {}
         self._autellix_reserve = {}
         self._autellix_window = None
@@ -53,7 +59,11 @@ def install(cls, options):
             self._autellix_host = None
         # The underlying FCFS policy must not overwrite Autellix queue ordering.
         def priority(waiting_queue, *args, **kwargs):
-            waiting_queue.sort(key=lambda req: self.autellix.key(req.rid))
+            if self._autellix_paper and self._autellix_window is not None:
+                order = {rid: i for i, rid in enumerate(self._autellix_window.cohort)}
+                waiting_queue.sort(key=lambda req: order[req.rid])
+            else:
+                waiting_queue.sort(key=lambda req: self.autellix.key(req.rid))
             return False
         self.policy.calc_priority = priority
 
@@ -85,20 +95,35 @@ def install(cls, options):
         self._autellix_steps += 1
         selected = None
         if self._autellix_window is not None:
+            old_remaining = self._autellix_window.remaining
             selected, _ = self._autellix_window.select(
                 [r.rid for r in batch.reqs + self.waiting_queue],
                 [r.rid for r in batch.reqs] + list(self._autellix_reserve))
             for rid in list(self._autellix_reserve):
                 if rid not in self._autellix_window.cohort:
                     self.tree_cache.dec_lock_ref(self._autellix_reserve.pop(rid))
+            if (self._autellix_paper and old_remaining > 0 and
+                    selected == {r.rid for r in batch.reqs}):
+                ctl.emit("continue_plan", requests=[r.rid for r in batch.reqs])
+                return None
         if selected is not None or (self._autellix_steps - 1) % ctl.config.schedule_interval == 0:
             if selected is None:
                 ctl.refresh()
             batch = self.running_batch
             if batch.reqs and (self.waiting_queue or selected is not None):
-                ranked = sorted(batch.reqs + self.waiting_queue, key=lambda r: ctl.key(r.rid))
                 limit = self.server_args.max_running_requests
-                keep = selected if selected is not None else {r.rid for r in ranked[:limit]}
+                keep = selected if selected is not None else {
+                    r.rid for r in sorted(batch.reqs + self.waiting_queue, key=lambda r: ctl.key(r.rid))[:limit]}
+                if self._autellix_paper and self._autellix_window is not None:
+                    order = {rid: i for i, rid in enumerate(self._autellix_window.cohort)}
+                    pending = [order[r.rid] for r in self.waiting_queue if r.rid in keep]
+                    if pending:
+                        # Native admission accounts running requests before new
+                        # prefills. Release the lower-priority running suffix so
+                        # it cannot consume the space needed by a higher arrival.
+                        # Re-admit that suffix in the same global FIFO order.
+                        cutoff = min(pending)
+                        keep = {rid for rid in keep if order[rid] < cutoff}
                 victims = [i for i, r in enumerate(batch.reqs) if r.rid not in keep]
                 # Use the pinned engine's native retraction ownership rules.
                 # Generated output_ids are preserved by reset_for_retract().
@@ -137,6 +162,9 @@ def install(cls, options):
         slots = max(0, self.server_args.max_running_requests - len(self.running_batch.reqs))
         ready = sorted((r for r in self.waiting_queue if selected is None or r.rid in selected),
                        key=lambda r: ctl.key(r.rid))[:slots]
+        if self._autellix_paper and self._autellix_window is not None and not ready:
+            # Decode continuation: no native prefill admission / priority pass.
+            return None
         blocked = set()
         for req in ready:
             if self._autellix_host is not None and req.rid in self._autellix_host.saved:
@@ -161,6 +189,8 @@ def install(cls, options):
         held = [r for r in self.waiting_queue if (selected is not None and r.rid not in selected) or r.rid in blocked]
         self.waiting_queue = [r for r in self.waiting_queue if r not in held]
         try:
+            if self._autellix_paper and ready:
+                self.running_batch.batch_is_full = False
             result = original_prefill(self)
             if result is None and slots and self.waiting_queue and self._autellix_reserve:
                 for node in self._autellix_reserve.values():
@@ -172,6 +202,17 @@ def install(cls, options):
                 result = original_prefill(self)
         finally:
             self.waiting_queue.extend(held)
+        if self._autellix_paper and self._autellix_window is not None:
+            admitted = {r.rid for r in self.running_batch.reqs}
+            if result is not None:
+                admitted.update(r.rid for r in result.reqs)
+            ready_ids = {r.rid for r in ready}
+            for i, rid in enumerate(self._autellix_window.cohort):
+                if rid in ready_ids and rid not in admitted:
+                    if i == 0:
+                        raise RuntimeError("highest-priority request cannot fit the configured token/KV budget")
+                    self._autellix_window.retain_prefix(i)
+                    break
         if result is not None and self._autellix_host is not None:
             for req in result.reqs:
                 self._autellix_host.discard(req.rid)
@@ -187,8 +228,27 @@ def install(cls, options):
         end.synchronize()
         self.autellix.executed(rids, start.elapsed_time(end) / 1000.)
         if self._autellix_window is not None:
-            self._autellix_window.executed(batch.forward_mode.is_extend())
+            only_prefill = batch.forward_mode.is_extend() and not getattr(batch, "decoding_reqs", None)
+            ctl = self.autellix
+            if self._autellix_paper:
+                ctl.emit("plan_step", requests=rids, decode=not only_prefill,
+                         remaining=self._autellix_window.remaining)
+            self._autellix_window.executed(only_prefill)
         return result
+
+    def update_running(self, batch):
+        if not self._autellix_paper:
+            return original_update_running(self, batch)
+        batch.filter_batch()
+        if batch.is_empty():
+            batch.batch_is_full = False
+            return batch
+        # Advance the admitted plan; never use native length-based retraction
+        # to replace paper priorities in the middle of a scheduling window.
+        if not batch.check_decode_mem(self.decode_mem_cache_buf_multiplier):
+            raise RuntimeError("paper plan exhausted decode KV capacity; reduce batch size or scheduling interval")
+        batch.prepare_for_decode()
+        return batch
 
     def process(self, batch, result, *a, **kw):
         reqs = list(batch.reqs)
@@ -234,3 +294,5 @@ def install(cls, options):
     cls.process_batch_result = process
     cls.abort_request = abort
     cls.check_memory = check_memory
+    if original_update_running is not None:
+        cls.update_running_batch = update_running

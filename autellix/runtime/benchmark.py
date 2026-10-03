@@ -194,8 +194,9 @@ def main(argv=None):
     parser.add_argument("--arrival-rates", help="comma-separated Poisson program arrival rates per second")
     parser.add_argument("--programs", type=int, default=100, help="sampled programs per rate")
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--schedule-interval", type=int, default=1)
-    parser.add_argument("--overprovision", type=int, default=0)
+    parser.add_argument("--schedule-interval", type=int, default=8)
+    parser.add_argument("--overprovision", type=int, default=1)
+    parser.add_argument("--implementation", choices=("paper", "compat"), default="paper")
     parser.add_argument("--native-opt-steps", type=int, default=8)
     args = parser.parse_args(argv)
     programs = load_workloads(args.workload)
@@ -216,7 +217,8 @@ def main(argv=None):
                         for d in groups if d.strip()]
             interval = args.native_opt_steps if policy == "vllm-opt-multistep" else (1 if native else args.schedule_interval)
             config = PolicyConfig(policy="fcfs" if native else policy, schedule_interval=interval,
-                                  overprovision=0 if native else args.overprovision)
+                                  overprovision=0 if native else args.overprovision,
+                                  implementation=args.implementation)
             with InferenceEngine(replicas, policy=config) as engine:
                 sid = engine.start_session()
                 engine.submit(sid, prompt="Hello", sampling=dict(max_tokens=2, temperature=0)).result(120)
@@ -225,6 +227,7 @@ def main(argv=None):
                 record.update(policy=policy, arrival_rate=rate, seed=args.seed,
                               engine_args=engine_args, schedule_interval=interval,
                               overprovision=config.overprovision,
+                              implementation=config.implementation,
                               workload_sha256=hashlib.sha256(json.dumps(trace, sort_keys=True).encode()).hexdigest())
                 record["versions"] = {}
                 for package in ("autellix", args.backend, "torch", "transformers"):

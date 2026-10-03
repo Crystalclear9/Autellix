@@ -39,3 +39,10 @@ class SchedulingWindow:
         self.controller.emit("release_reserve", requests=list(self.reserve))
         self.cohort = self.cohort[:self.capacity]
         self.reserve = set()
+
+    def retain_prefix(self, length):
+        """Algorithm 1's first non-fitting request ends admission this window."""
+        self.cohort = self.cohort[:length]
+        self.active = set(self.cohort[:self.capacity])
+        self.reserve = set(self.cohort[self.capacity:])
+        self.controller.emit("capacity_limit", requests=list(self.cohort))

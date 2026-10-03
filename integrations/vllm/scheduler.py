@@ -12,6 +12,8 @@ def attach_scheduler(native, controller, observe_only=False):
     class ProgramAwareScheduler(Scheduler):
         def _schedule(self):
             ctl = self.autellix
+            if self._autellix_paper is not None:
+                return self._autellix_paper.next_step()
             if observe_only:
                 outputs = super()._schedule()
                 self._autellix_execution = [g.seq_group.request_id for g in outputs.scheduled_seq_groups]
@@ -124,4 +126,5 @@ def attach_scheduler(native, controller, observe_only=False):
     native._autellix_resident_reserve = set()
     native._autellix_window = None
     native._autellix_is_prefill = False
+    native._autellix_paper = None
     return native

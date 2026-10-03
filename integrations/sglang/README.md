@@ -26,9 +26,13 @@ storage in GiB (default 1); unsupported non-MHA layouts fail explicitly.
 Restoration locks an existing GPU prefix and allocates/transfers only its missing
 suffix, so shared prefixes do not need duplicate GPU capacity. Failed allocation
 or transfer releases the temporary lock and keeps the host copy for retry.
-Policy order is frozen for N decode steps. Extra reserve prefills prepare GPU
-prefixes ahead of completion; `refill` records mid-window replacement. Native
-SGLang still updates execution metadata each iteration. Host copies are released
+Default `--implementation paper` selects the global cohort once per N decode
+steps, mixes its prefills and decodes, bypasses native prefill admission during
+decode-only continuation, and disables native length-based decode retraction.
+`--implementation compat` restores the previous native scheduling hooks. Default
+N=8 and one reserve are configurable project settings. Extra reserve prefills
+prepare GPU prefixes ahead of completion; `refill` records mid-window replacement.
+Native SGLang still updates execution metadata each iteration. Host copies are released
 after successful admission or cancellation; reserve locks are released on
 readmission, memory pressure, cancellation, or idle.
 
