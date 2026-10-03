@@ -48,6 +48,17 @@ streaming/session cleanup. Multi-GPU tensor parallelism remains unverified on
 hardware. Paper-scale datasets, reported speedups and exact implementation
 equivalence have not been reproduced or established.
 
+### How to describe this implementation
+
+You can describe this project as: **"An independent implementation of the core
+Autellix methods, with real vLLM and SGLang integration and small-model functional
+validation."** Attribute the method to the paper and identify SGLang as an
+extension. This does not establish a complete or identical reproduction of the
+authors' system, its CUDA implementation, all configurations, or reported
+performance. `implementation="paper"` names the intended scheduling semantics;
+it is not a certification of equivalence. Use the pinned backends and supported
+configurations below for actual inference.
+
 ## Real inference: Linux / Ubuntu WSL
 
 Use separate Python 3.10 environments: vLLM **0.6.1** and SGLang **0.4.9.post6**
@@ -99,6 +110,24 @@ with InferenceClient("http://127.0.0.1:8000") as client:
         temperature=0, max_tokens=32,
     )
     print(answer["choices"][0]["message"]["content"])
+```
+
+The client also supports streaming. Consume the iterator or close it when
+stopping early so the HTTP connection is released and the server can cancel
+unfinished generation. Server errors and a missing `[DONE]` terminator raise
+an exception instead of silently treating a partial response as complete.
+
+```python
+from contextlib import closing
+from autellix.runtime import InferenceClient
+
+with InferenceClient("http://127.0.0.1:8000") as client:
+    with closing(client.chat(
+        [{"role": "user", "content": "Explain program-aware scheduling."}],
+        stream=True, max_tokens=64,
+    )) as chunks:
+        for chunk in chunks:
+            print(chunk["choices"][0]["delta"].get("content", ""), end="", flush=True)
 ```
 
 For direct Python use, see `examples/real_inference.py`. `InferenceEngine.submit`

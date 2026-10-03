@@ -73,6 +73,31 @@ class InferenceClient:
         with urlopen(req, timeout=self.timeout) as response:
             return json.load(response)
 
+    def _stream_request(self, body):
+        """Yield OpenAI SSE chunks; closing the iterator closes the response."""
+        self._check_open()
+        req = Request(self.base_url + "/v1/chat/completions",
+                      data=json.dumps(body).encode(), method="POST",
+                      headers={"Content-Type": "application/json", "Accept": "text/event-stream"})
+        with urlopen(req, timeout=self.timeout) as response:
+            data = []
+            for raw in response:
+                line = raw.decode("utf-8").rstrip("\r\n")
+                if line.startswith("data:"):
+                    value = line[5:]
+                    data.append(value[1:] if value.startswith(" ") else value)
+                elif not line and data:
+                    payload = "\n".join(data)
+                    data.clear()
+                    if payload == "[DONE]":
+                        return
+                    chunk = json.loads(payload)
+                    if "error" in chunk:
+                        error = chunk["error"]
+                        raise RuntimeError(error.get("message", str(error)) if isinstance(error, dict) else str(error))
+                    yield chunk
+            raise RuntimeError("stream ended before [DONE]")
+
     @contextmanager
     def session(self, program_id=None):
         self._check_open()
@@ -102,5 +127,7 @@ class InferenceClient:
         session_id = session_id or self._session.get() or self._automatic_session()
         options.setdefault("thread_id", str(threading.get_ident()))
         options.setdefault("call_id", uuid.uuid4().hex)
-        return self._request("POST", "/v1/chat/completions",
-                             dict(messages=messages, session_id=session_id, **options))
+        body = dict(messages=messages, session_id=session_id, **options)
+        if options.get("stream"):
+            return self._stream_request(body)
+        return self._request("POST", "/v1/chat/completions", body)

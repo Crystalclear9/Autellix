@@ -50,6 +50,18 @@ class ProtocolEngine:
 
 @unittest.skipUnless(TestClient, "requires fastapi/httpx")
 class HTTPTests(unittest.TestCase):
+    def test_custom_program_id_with_slash_can_be_closed(self):
+        from autellix.runtime.server import create_app
+        from urllib.parse import quote
+        engine = ProtocolEngine()
+        with TestClient(create_app(engine)) as client:
+            pid = "experiment/程序 1"
+            self.assertEqual(client.post("/sessions", json={"program_id": pid}).status_code, 200)
+            response = client.delete("/sessions/" + quote(pid, safe=""))
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()["session_id"], pid)
+            self.assertEqual(engine.sessions, set())
+
     def test_invalid_identity_is_rejected_without_creating_session(self):
         from autellix.runtime.server import create_app
         engine = ProtocolEngine()

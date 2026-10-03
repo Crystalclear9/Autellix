@@ -51,7 +51,7 @@ def create_app(engine):
     async def describe_sessions():
         return await asyncio.to_thread(engine.table.describe)
 
-    @app.delete("/sessions/{pid}")
+    @app.delete("/sessions/{pid:path}")
     async def end(pid: str):
         engine.end_session(pid)
         return {"session_id": pid, "status": "closing"}

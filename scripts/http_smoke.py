@@ -57,12 +57,16 @@ def main():
             with request("/sessions/" + sid, method="DELETE") as response:
                 json.load(response)
             from autellix.runtime.client import InferenceClient
-            with InferenceClient(f"http://127.0.0.1:{port}") as client:
+            with InferenceClient(f"http://127.0.0.1:{port}", program_id="smoke/程序 1") as client:
                 automatic_first = client.chat(body["messages"], temperature=0, max_tokens=4)
                 automatic_next = client.chat(body["messages"], temperature=0, max_tokens=4)
                 assert automatic_first["session_id"] == automatic_next["session_id"]
                 assert automatic_next["autellix"]["metrics"]["inherited"] > 0
                 assert automatic_next["autellix"]["metrics"]["metadata"]["thread_id"]
+                chunks = list(client.chat(body["messages"], temperature=0, max_tokens=4, stream=True))
+                streamed_text = "".join(chunk["choices"][0]["delta"].get("content", "") for chunk in chunks)
+                assert streamed_text == automatic_first["choices"][0]["message"]["content"]
+                assert chunks[-1]["choices"][0]["finish_reason"] in {"stop", "length"}
                 with request("/sessions") as response:
                     active = json.load(response)[automatic_first["session_id"]]
                 assert active["last_arrival"] is not None and active["last_completion"] is not None
@@ -73,6 +77,7 @@ def main():
                 assert db.execute("SELECT count(*) FROM programs").fetchone()[0] == 0
             result = dict(backend=args.backend, health=health, completion=first,
                           streaming_completed=True, session_table_empty=True,
+                          client_stream_matches_nonstream=True, custom_session_id_closed=True,
                           automatic_session_inherits_service=True, shared_timestamps_visible=True)
             path = Path(args.output)
             path.parent.mkdir(parents=True, exist_ok=True)
