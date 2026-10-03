@@ -1,83 +1,55 @@
 # Autellix
 
-An **unofficial, independent reproduction attempt** of
-["Autellix: An Efficient Serving Engine for LLM Agents as General Programs"
-(arXiv:2502.13965v1)](https://arxiv.org/abs/2502.13965v1).
-This is not the authors' implementation and is not affiliated with the paper's
-authors. The paper is the method reference, not a source of executable code.
+对论文 [Autellix: An Efficient Serving Engine for LLM Agents as General Programs（arXiv:2502.13965v1）](https://arxiv.org/abs/2502.13965v1) 的**非官方、独立复现尝试**。
 
-The repository contains **real GPU inference backends** and a separate CPU
-simulator. Use `autellix.runtime` for real inference. The original
-`AutellixClient`, `AsyncMultiLLMEngine`, and simulation CLI remain simulation
-APIs for backward compatibility.
+本项目实现程序感知调度，并接入真实 vLLM 和 SGLang 推理后端。可将项目描述为：**独立实现了 Autellix 的核心方法，并完成小模型功能验证。** 这不代表作者原始代码、完全相同的 CUDA 实现或论文性能结果。SGLang 是在论文 vLLM 方案之外增加的适配。
 
-The goal is an independent implementation of the paper's methods. Correctness
-checks use a small local model; reproducing the paper's large-model/A100
-performance figures is not a requirement for using or validating this project.
+## 实现范围
 
-### Reproduction scope
+- **PLAS / ATLAS**：按已完成调用累计服务时间或最长已观察服务路径，为新调用确定初始优先级。在线 ATLAS 对应算法 1，不要求用户提供调用 DAG。
+- **程序状态表**：跨副本共享服务时间、等待时间、活动调用、线程信息及到达和完成时间。
+- **分级 FIFO 队列**：时间片耗尽后降级，逐调用结合程序历史判断防饥饿；同时移动多个调用时保留当前队列顺序。
+- **抢占与恢复**：保存生成进度，通过 GPU/CPU KV 传输恢复执行；批量打包采用 PyTorch CUDA 操作和锁页内存。
+- **多步调度与预备请求**：每个窗口冻结调度顺序，运行 N 个解码步；活动请求提前结束时，由已准备的 GPU 请求补位。
+- **程序感知路由**：输入不超过 2048 token 时分配给负载最小副本，更长输入保持程序的引擎亲和性。
+- **有状态客户端**：自动复用程序会话，标注调用和线程 ID，支持普通响应与流式响应。
 
-The real runtime implements online PLAS/ATLAS service inheritance, the shared
-process table, FIFO priority queues with quantum demotion and anti-starvation,
-preemption with KV transfers, scheduling windows with resident request reserves,
-and the paper's 2048-token load-balancing/affinity rule. Online ATLAS follows
-Algorithm 1: calls inherit the longest observed program service path; completion
-updates it with the maximum of the previous value and inherited service plus
-the call's measured execution time. It does not require a user-supplied DAG.
+已在小模型上验证真实生成、抢占恢复结果一致、预备请求补位、HTTP、路由、取消和会话清理。双副本测试是在同一张 GPU 上运行两个独立进程；多 GPU 张量并行尚未完成硬件验证。未复现论文的大规模实验和性能提升倍数。
 
-The default `--implementation paper` uses global-priority admission and an
-execution plan lasting N decode steps. vLLM's native prefill/decode/swap queue
-preferences do not choose the batch. Between boundaries, the executor advances
-the existing plan and fills vacancies from prepared GPU reserves; it does not
-run native batch selection again. Per-token tensor, output and KV bookkeeping
-still runs: multi-step scheduling does not mean token execution stops needing
-metadata updates. SGLang mixes admitted prefills and decodes and bypasses native
-prefill selection during decode-only continuation.
+## 安装
 
-`--implementation compat` explicitly restores the former backend-mediated
-scheduler. Both modes retain real inference. Default N=8 and reserve count=1
-enable both optimizations; these values, queue boundaries, quanta and starvation
-thresholds are configurable project choices because the paper does not publish
-all numerical settings. KV packing uses PyTorch CUDA operations and pinned host
-memory. No identical CUDA kernels or CPU overhead are claimed. SGLang support
-is an extension of the paper's vLLM-based design.
+真实后端需要 Linux 或 Ubuntu WSL、可用的 NVIDIA GPU，以及 Python 3.10。两个后端使用不同依赖环境，不要安装到同一个环境。
 
-Small-model tests have exercised both pinned backends, resumed-output equality,
-real host KV transfers, mid-window refill, routing, cancellation and HTTP
-streaming/session cleanup. Multi-GPU tensor parallelism remains unverified on
-hardware. Paper-scale datasets, reported speedups and exact implementation
-equivalence have not been reproduced or established.
+| 后端 | 固定版本 | 说明 |
+| --- | --- | --- |
+| vLLM | 0.6.1 | [支持范围与实现](integrations/vllm/README.md) |
+| SGLang | 0.4.9.post6 | [支持范围与实现](integrations/sglang/README.md) |
 
-### How to describe this implementation
-
-You can describe this project as: **"An independent implementation of the core
-Autellix methods, with real vLLM and SGLang integration and small-model functional
-validation."** Attribute the method to the paper and identify SGLang as an
-extension. This does not establish a complete or identical reproduction of the
-authors' system, its CUDA implementation, all configurations, or reported
-performance. `implementation="paper"` names the intended scheduling semantics;
-it is not a certification of equivalence. Use the pinned backends and supported
-configurations below for actual inference.
-
-## Real inference: Linux / Ubuntu WSL
-
-Use separate Python 3.10 environments: vLLM **0.6.1** and SGLang **0.4.9.post6**
-have different Torch dependencies. The integrations validate backend versions
-and modify the scheduler in their own processes, without editing site-packages.
+在仓库根目录执行，需预先安装 `uv`：
 
 ```bash
-# In Ubuntu, from this repository. uv must be installed.
 sudo apt-get update && sudo apt-get install -y build-essential python3-dev
 bash scripts/setup_backend.sh vllm
 source ~/autellix-envs/vllm/bin/activate
+```
 
+安装 SGLang 时将 `vllm` 换成 `sglang`。脚本使用 `requirements/` 中的完整依赖锁文件，并以可编辑方式安装本项目。`AUTELLIX_ENV_DIR` 可指定环境路径；环境内的安装元数据应保留。
+
+## 启动真实推理服务
+
+以下配置用于小模型功能验证。`--model` 可以是模型名称或本地模型目录，显存和上下文参数需按模型调整。聊天请求要求模型 tokenizer 提供 chat template。
+
+### vLLM
+
+```bash
 autellix-serve --backend vllm --model HuggingFaceTB/SmolLM2-135M-Instruct \
   --policy atlas --devices 0 --state-dir /tmp/autellix-server \
   --engine-args '{"max_model_len":512,"max_num_seqs":4,"gpu_memory_utilization":0.35,"swap_space":0.25}'
 ```
 
-For SGLang, install with `bash scripts/setup_backend.sh sglang`, activate that
-environment, and use:
+### SGLang
+
+在 SGLang 环境执行：
 
 ```bash
 autellix-serve --backend sglang --model HuggingFaceTB/SmolLM2-135M-Instruct \
@@ -85,21 +57,11 @@ autellix-serve --backend sglang --model HuggingFaceTB/SmolLM2-135M-Instruct \
   --engine-args '{"context_length":512,"max_running_requests":4,"mem_fraction_static":0.35}'
 ```
 
-The server provides `/v1/chat/completions` (including SSE streaming), `/v1/models`,
-`/sessions`, `/requests/{id}`, and `/health`. The Python client automatically
-creates and reuses a program session, including across threads, and annotates
-each call with a unique call ID and thread ID. Use it as a context manager to
-close the session on normal exit or an application exception; interpreter-exit
-cleanup is best effort. Raw HTTP calls without a session remain one-call programs.
-`GET /sessions` exposes shared arrival/completion timestamps, engine placement,
-and active-call waiting/service statistics. Explicit `client.session()` scopes
-remain available and automatically annotate calls within the scope.
-Closed clients reject calls even with an explicit session ID. After a process
-fork, create a new client; the child cannot reuse or close the parent's sessions.
-If session cleanup fails during an application exception, the application
-exception remains primary and the cleanup error is retained as its cause.
-The checkpoint must supply a chat template for chat requests. Raw prompts or
-token IDs are supported by the Python runtime.
+`--devices 0,1` 表示两个独立单 GPU 副本。vLLM 张量并行的配置和限制见其后端说明。共享 SQLite 状态应放在 Linux 本地文件系统，不要放在网络盘或 WSL 的 Windows 挂载路径。
+
+## 客户端
+
+真实推理使用 `autellix.runtime`。同一客户端的自动会话可供多个线程共享；上下文退出时结束会话，已接纳的调用完成或取消后释放程序状态。
 
 ```python
 from autellix.runtime import InferenceClient
@@ -112,10 +74,7 @@ with InferenceClient("http://127.0.0.1:8000") as client:
     print(answer["choices"][0]["message"]["content"])
 ```
 
-The client also supports streaming. Consume the iterator or close it when
-stopping early so the HTTP connection is released and the server can cancel
-unfinished generation. Server errors and a missing `[DONE]` terminator raise
-an exception instead of silently treating a partial response as complete.
+流式响应返回迭代器。提前停止时应关闭迭代器，让服务端能够取消未完成生成：
 
 ```python
 from contextlib import closing
@@ -130,101 +89,66 @@ with InferenceClient("http://127.0.0.1:8000") as client:
             print(chunk["choices"][0]["delta"].get("content", ""), end="", flush=True)
 ```
 
-For direct Python use, see `examples/real_inference.py`. `InferenceEngine.submit`
-returns a concurrent future completed only by the selected worker's actual
-result; cancellation and worker failures propagate through IPC. Create the
-engine under `if __name__ == "__main__"` when using multiprocessing.
+`client.session()` 可显式创建独立会话作用域；自定义程序 ID 支持中文和 `/`。fork 后需创建新客户端，已关闭的客户端不能继续发请求。流式错误或缺少 `[DONE]` 会抛出异常；清理失败不会掩盖已有的应用异常。解释器退出清理是尽力执行，建议使用上下文管理器。
 
-### Backend behavior
+绕过 HTTP 的真实 Python 示例见 [examples/real_inference.py](examples/real_inference.py)。`InferenceEngine.submit()` 返回由工作进程结果完成的 Future；创建引擎的代码需放在 `if __name__ == "__main__":` 中。
 
-- Online PLAS/ATLAS, MLFQ, and FCFS; measured model service in seconds, queue
-  demotion, FIFO ordering, and per-call anti-starvation.
-- Transactional program statistics shared between replica processes. Sessions
-  close after their admitted calls finish or are cancelled.
-- Real tokenizer-based short-request balancing and long-request engine affinity.
-- vLLM: global-priority batch construction, native block ownership, GPU/CPU KV
-  swap, batched CUDA packing, and multi-step plans (`--schedule-interval N`).
-- SGLang: synchronous packed GPU/CPU KV swap for MHA token pools (page size 1),
-  and resident radix-prefix reserves. `autellix_swap_space` in engine arguments
-  limits pinned host KV storage in GiB (default 1); requests retain their
-  generated tokens and restore computed prefixes on admission.
-- `--schedule-interval N --overprovision K` freezes policy order for N decode
-  steps and prepares up to K additional requests on the GPU. A completed active
-  request is immediately replaced by a prepared reserve; traces record `refill`.
-  Reserve preparation performs real prefill (and its first sampled token) or
-  swap-in. Decode capacity stays at the requested batch size; reserve preparation
-  can temporarily prefill up to batch-size + K requests. Memory pressure releases
-  reserves rather than blocking the active cohort indefinitely.
-- In default paper mode, vLLM reserves future KV slots when preparing a window
-  and supports mixed prefill/decode batches without native phase preference.
-  `--implementation compat --overprovision 0` on one GPU retains the old native
-  cached multi-step execution; with reserves, compat uses the former wrapper.
-- Use `--devices 0,1` for independent single-GPU replicas. vLLM tensor-parallel
-  replicas use `--device-groups '0,1;2,3'` and
-  `--engine-args '{"tensor_parallel_size":2,...}'`; worker hooks run on every
-  rank. The TP path has an opt-in two-GPU test and has not been hardware-validated
-  on the one-GPU development machine. SGLang remains one GPU per replica. PP and
-  speculation are outside the adapters' supported mode.
+| HTTP 接口 | 用途 |
+| --- | --- |
+| `POST /v1/chat/completions` | 普通或 SSE 流式聊天 |
+| `GET /v1/models` | 已加载模型 |
+| `POST /sessions`、`GET /sessions` | 创建会话、查看程序状态 |
+| `DELETE /sessions/{id}` | 结束会话 |
+| `DELETE /requests/{id}` | 取消活动请求 |
+| `GET /health` | 副本健康状态和负载 |
 
-### Validation
+原始 HTTP 请求若不携带 `session_id`，每个请求会成为独立程序，无法继承此前调用的服务历史。
+
+## 调度参数
+
+| 参数 | 真实运行默认值 |
+| --- | --- |
+| 策略 | `atlas`；另有 `plas`、`mlfq`、`fcfs` |
+| 实现模式 | `paper` |
+| 解码窗口 N | 8 |
+| 预备请求数 K | 1 |
+| 优先级区间边界（秒） | `0,.02,.04,.08,.16,.32,.64,inf` |
+| 各队列时间片（秒） | `.01,.02,.04,.08,.16,.32,.64` |
+| 防饥饿阈值 beta | 8 |
+
+`--schedule-interval`、`--overprovision`、`--implementation` 可在服务和真实工作负载命令中设置；其余策略参数通过 `PolicyConfig` 配置。这些数值是项目选择，不是论文公布的完整参数表。
+
+`paper` 表示按论文描述实现的调度语义，不是完全等价认证。`compat` 是可选的旧后端调度包装方式。窗口内仍需逐 token 更新执行元数据；预备请求需要真实 prefill（包括首个采样 token）或 KV 换入，并占用显存。
+
+## 验证
+
+不加载模型的测试：
 
 ```bash
-# CPU policy / IPC / protocol checks; GPU tests explicitly skip without opt-in.
 python -m unittest discover -s tests -v
-
-# Real generation, preemption, resumed-output equality, session inheritance.
-AUTELLIX_GPU_BACKEND=vllm AUTELLIX_TEST_MODEL=/path/to/model \
-  AUTELLIX_TEST_CUDA_SWAP=1 \
-  python -m unittest discover -s tests -p test_gpu_runtime.py -v
-
-# Repeat in the SGLang environment with AUTELLIX_GPU_BACKEND=sglang.
-# Paper multi-step validation: add AUTELLIX_TEST_STEPS=3.
-# For the former adapter, also set AUTELLIX_TEST_IMPLEMENTATION=compat.
-python cuda/batched_swap_benchmark.py --blocks 128 --layers 4
 ```
 
-`scripts/http_smoke.py` starts an actual local server and checks real generation,
-streaming, and session cleanup. Traces in `state_dir/replica-*.jsonl` contain
-admissions, batches, measured execution, promotions/demotions, and preemptions.
-Store the shared SQLite state on a local Linux filesystem, not a network drive.
+真实 GPU 测试，在对应后端环境执行：
 
-Use `AUTELLIX_TEST_REPLICAS=1` to additionally test two actual model processes
-and cancellation on one GPU with separate memory budgets. Use
-`AUTELLIX_TEST_RESERVE=1` to verify resident KV reuse. These are separate checks
-from the fake-worker IPC unit tests.
-Set both `AUTELLIX_TEST_STEPS=3` and `AUTELLIX_TEST_RESERVE=1` to assert actual
-mid-window refill, and `AUTELLIX_TEST_TP=1` for the optional two-GPU vLLM test.
+```bash
+AUTELLIX_GPU_BACKEND=vllm AUTELLIX_TEST_MODEL=/absolute/path/to/model \
+  AUTELLIX_TEST_STEPS=8 AUTELLIX_TEST_RESERVE=1 \
+  python -m unittest discover -s tests -p test_gpu_runtime.py -v
+```
 
-### Measured program workloads
+SGLang 将后端变量改为 `sglang`。可选项：`AUTELLIX_TEST_REPLICAS=1` 验证双进程路由和取消；`AUTELLIX_TEST_CUDA_SWAP=1` 验证实际 KV 传输；`AUTELLIX_TEST_TP=1` 启用需要两张 GPU 的 vLLM 张量并行测试；`AUTELLIX_TEST_IMPLEMENTATION=compat` 验证旧模式。
 
-`autellix.runtime.benchmark` executes real sequential/fork/join programs and
-records measured program latency, output throughput, per-call TTFT, and service
-statistics. Supply JSON calls with text prompts and parent IDs; the example
-workload is a functional smoke workload, not a paper dataset.
+完整的小模型验证入口会依次运行测试、真实 HTTP 流程和四策略 DAG 工作负载：
 
-For an optional arrival-rate sweep, add `--arrival-rates 1,2,4 --programs 100
---seed 42`. The same sampled program trace is reused for every policy. JSONL is
-also accepted. Multiple files after `--workload` create a mixed workload, sampled
-equally by dataset and then by program. Inputs must contain real text prompts;
-token-length-only simulation traces are rejected. `arrival_time` and `think_time`
-are seconds. Set a call's `append_parent_outputs` to false for recorded prompts
-that already include their original history.
+```bash
+bash scripts/validate_backend.sh vllm /absolute/path/to/model
+```
 
-Results include program response time, DAG critical-path response time divided
-by total generated tokens across all threads (mean/P95/P99), per-program values,
-arrival times, configuration, dependency versions, and a trace hash. Critical-path
-time is the longest dependency path's measured call latencies plus external
-`think_time`; measured call latency includes tokenization and queueing. Zero-output
-programs have null per-token latency rather than dividing by zero.
+SGLang 同样替换后端名称。可用 `AUTELLIX_PYTHON` 指定 Python 路径，`AUTELLIX_ENGINE_ARGS` 调整 HTTP 和 DAG 验证参数。生成结果写入 `outputs/validation/`，不纳入版本控制。KV 传输单独测量见 [cuda/README.md](cuda/README.md)。
 
-Native vLLM baselines are opt-in with `--policies vllm,vllm-opt,vllm-opt-multistep,mlfq,plas,atlas`.
-They retain the original scheduling order and original KV transfer implementation;
-Autellix observes their execution only to collect comparable metrics. In pinned
-vLLM 0.6.1, chunked prefill and native multi-step are mutually exclusive:
-`vllm-opt` enables prefix caching and chunked prefill, while
-`vllm-opt-multistep` enables prefix caching and native multi-step (8 steps by
-default, configurable with `--native-opt-steps`). These separate supported
-profiles are not advertised as the paper's combined optimized baseline.
+## 真实工作负载
+
+[examples/real_workload.json](examples/real_workload.json) 提供小型顺序和分支依赖示例，不是论文数据集：
 
 ```bash
 python -m autellix.runtime.benchmark --backend vllm \
@@ -234,234 +158,32 @@ python -m autellix.runtime.benchmark --backend vllm \
   --output outputs/real/results.json
 ```
 
-`requirements/*-py310-linux.txt` pin the complete separately tested runtime
-environments. The setup script uses these locks, not floating backend extras.
+工作负载使用含真实文本提示的 JSON/JSONL，不能用只有 token 长度的模拟数据替代。`parents` 描述调用依赖；`arrival_time` 和 `think_time` 单位为秒；已有完整历史的提示可设 `append_parent_outputs=false`。多个 `--workload` 文件可组成混合负载。
 
-For one-command GPU, HTTP, and four-policy DAG validation, activate the relevant
-backend environment and run `bash scripts/validate_backend.sh vllm /path/to/model`
-(or `sglang`). Use a small chat model fitting the 512-token, 35% GPU-memory smoke
-configuration. `AUTELLIX_TEST_STEPS=3`, `AUTELLIX_TEST_RESERVE=1`, and
-`AUTELLIX_TEST_REPLICAS=1` enable the additional GPU integration cases described
-above. `AUTELLIX_PYTHON` can select an environment without activating it.
+`--arrival-rates 1,2,4 --programs 100 --seed 42` 可选地生成泊松到达流，不是使用本项目的必要步骤。结果包含响应时间、输出吞吐、TTFT、程序关键路径 token 延迟、配置、依赖版本和输入哈希。零输出程序的 token 延迟为 null。vLLM 原生对照模式见后端说明。
 
-## Simulator quick start
+## 模拟器
 
-```powershell
-python -m unittest discover -s tests
+`autellix.core`、`autellix.frontend` 和 `autellix.cli` 是独立的 CPU 模拟功能，不能用于真实模型推理。旧的 `AutellixClient`、`AsyncMultiLLMEngine` 及根包导入路径保留兼容用途。
+
+```bash
 python -m autellix.cli compare --workload figure2 --policies fcfs,mlfq,plas
-python -m autellix.cli paper-preset --preset workload-analysis --dataset tests\fixtures\tiny_workload.jsonl --programs 2
+python -m autellix.cli paper-preset --preset workload-analysis --dataset tests/fixtures/tiny_workload.jsonl
 ```
 
-## Project Layout
+在线 `atlas` 对应算法 1，显式父节点版本 `atlas-dag` 对应公式 2。模拟窗口按模型 tick 而非真实解码步计数；执行、缓存命中率及交换开销都是成本模型。模拟器中的 `vllm` / `vllm-opt` 标签和 paper-style presets 不代表真实后端测量或论文实验复现。
 
-```text
-autellix/
-  core/          Scheduling simulator, models, execution costs, load balancing
-  frontend/      Stateful service, OpenAI-style client, async engine facade
-  experiments/   Baselines, workloads, dataset importers, paper-style presets
-  runtime/       Real inference coordinator, policies, HTTP API, KV transfers
-  *.py           Backward-compatible wrappers for old import paths
-cuda/            Real GPU batched swap benchmark
-integrations/    Pinned vLLM and SGLang internal scheduler integrations
-tests/           Unit tests and tiny dataset fixtures
-outputs/         Example generated experiment output
-```
+## 目录
 
-Preferred imports use the new subpackages:
+| 路径 | 内容 |
+| --- | --- |
+| `autellix/runtime/` | 真实推理协调、策略、客户端、HTTP 与 KV 传输 |
+| `integrations/` | 固定版本的 vLLM / SGLang 后端 |
+| `autellix/core/` | 调度模拟器和执行成本模型 |
+| `autellix/frontend/`、`autellix/experiments/` | 模拟客户端、数据导入与实验工具 |
+| `autellix/*.py` | CLI 和旧导入兼容接口 |
+| `scripts/`、`requirements/` | 安装、验证脚本和依赖锁文件 |
+| `examples/`、`tests/` | 真实推理示例、回归测试和小型输入 |
+| `cuda/` | 真实 KV 传输微基准 |
 
-```python
-from autellix.core import Simulator
-from autellix.frontend import AutellixClient
-from autellix.experiments import ExperimentRunner
-```
-
-Older imports such as `from autellix.simulator import Simulator` remain
-supported through compatibility wrappers.
-
-## Implemented Surface
-
-- Process table with service time, waiting time, engine assignment, active
-  calls, thread metadata, and arrival/completion timestamps.
-- Schedulers: `fcfs`, `round-robin`, `mlfq`, `plas`, `atlas`, and simulator-only
-  `srpt`.
-- Baselines: `vllm`, `vllm-opt`, `mlfq`, and `autellix`.
-- Autellix load balancer: short requests use least-used routing; long requests
-  are pinned to a program engine for locality.
-- Multi-step scheduling with overprovisioned prefetch slots.
-- Stateful frontend and OpenAI-style simulated chat API.
-- JSON/JSONL/CSV workload importers and paper-style experiment presets.
-
-## CLI
-
-Run the Figure 2 workload:
-
-```powershell
-python -m autellix.cli run --workload figure2 --policy plas --batch-size 2
-python -m autellix.cli compare --workload figure2 --policies fcfs,mlfq,plas
-```
-
-Run synthetic workload sweeps:
-
-```powershell
-python -m autellix.cli run --workload mixed --policy atlas --engines 4 --seed 0
-python -m autellix.cli sweep --workload mixed --policies vllm,vllm-opt,mlfq,autellix --arrival-rates 0.1,0.2,0.4
-python -m autellix.cli paper-suite --quick --output outputs/quick
-python -m autellix.cli plot --input outputs/quick/results.json --output outputs/quick/figures
-```
-
-Run paper-style presets:
-
-```powershell
-python -m autellix.cli paper-preset --preset workload-analysis --dataset tests\fixtures\tiny_workload.jsonl
-python -m autellix.cli paper-preset --preset timing-breakdown --workload sharegpt --programs 4
-python -m autellix.cli paper-preset --preset latency-throughput --output outputs/latency_throughput
-```
-
-Available presets are `workload-analysis`, `latency-throughput`,
-`load-balancer`, `offline-makespan`, and `timing-breakdown`.
-
-## Python API
-
-Core simulator:
-
-```python
-from autellix.core import Simulator
-from autellix.experiments import make_figure2_workload
-
-programs = make_figure2_workload()
-result = Simulator(programs, scheduler="plas", batch_size=2).run()
-print(result.summary())
-```
-
-Stateful frontend:
-
-```python
-from autellix.frontend import AutellixClient
-
-client = AutellixClient(scheduler="atlas", batch_size=2)
-with client.session("program-1", drain_on_exit=True) as session:
-    client.chat.completions.create(
-        model="simulated-model",
-        session_id=session.session_id,
-        messages=[{"role": "user", "content": "Start"}],
-        call_id="root",
-        thread_id="main",
-        framework_metadata={"framework": "langgraph"},
-    )
-
-print(client.service.last_result.process_table["program-1"].thread_metadata)
-```
-
-Async engine facade:
-
-```python
-from autellix.frontend import AsyncMultiLLMEngine
-
-engine = AsyncMultiLLMEngine(
-    scheduler="plas",
-    load_balancer="autellix",
-    num_engines=2,
-    batch_size=1,
-)
-
-future = engine.submit_call(
-    "program-1",
-    "call-1",
-    model_time=2,
-    prefill_tokens=4096,
-    decode_tokens=128,
-)
-
-engine.drain()
-print(future.done())
-print(future.result().metrics)
-```
-
-`AsyncMultiLLMEngine(process_mode=True)` starts a lightweight worker process and
-mirrors submit/step/drain commands through multiprocessing primitives. This is
-still a simulator scaffold, not real vLLM engine parallelism.
-
-## Datasets
-
-Use `load_programs_from_file()` for tiny JSON, JSONL, or CSV traces. Common
-fields are `program_id`, `call_id`, `parent_id`, `parents`, `prefill_tokens`,
-`decode_tokens`, `model_time`, `arrival_time`, and `thread_id`.
-
-```python
-from autellix.experiments import load_programs_from_file, workload_analysis
-
-programs = load_programs_from_file("tests/fixtures/tiny_workload.jsonl")
-print(workload_analysis(programs))
-```
-
-## Tunable Defaults
-
-The paper does not publish exact numeric values for queue boundaries, time
-quanta, or beta. For real inference, `autellix.runtime.PolicyConfig` uses seconds:
-boundaries `0,.02,.04,.08,.16,.32,.64,inf`, quanta
-`.01,.02,.04,.08,.16,.32,.64`, beta `8`, schedule interval `8`, one reserve,
-and `implementation="paper"` by default. Pass a custom `PolicyConfig` to
-`InferenceEngine` to tune these. The server and real benchmark expose
-`--implementation paper|compat`, `--schedule-interval` and `--overprovision`.
-
-The separate simulator uses:
-
-- priority boundaries: `0,2,4,8,16,32,64,inf`
-- queue quanta: `1,2,4,8,16,32,64`
-- anti-starvation beta: `8.0`
-- locality token threshold: `2048`
-- schedule interval: `1`
-- Autellix baseline overprovision: `1`
-
-Override them from the CLI:
-
-```powershell
-python -m autellix.cli run --policy plas --boundaries 0,4,16,inf --quanta 1,4,16 --beta 6
-```
-
-## Metrics
-
-`SimulationResult.summary()` and JSON output include:
-
-- `scheduler_policy` / `policy`
-- `load_balancer_policy` / `load_balancer`
-- `prefetched_calls`
-- `critical_path_response_time`
-- `critical_path_token_latency`
-- aggregate wait, execution, prefill, decode, swap, and scheduler time
-
-For fork/join DAG programs, token latency follows the paper footnote:
-critical-path response time divided by total generated tokens across all
-threads.
-
-## Tests
-
-```powershell
-python -m unittest discover -s tests
-```
-
-The test suite covers Figure 2 behavior, PLAS/ATLAS scheduling, queue demotion,
-anti-starvation, cache-aware execution, dynamic sessions, async engine futures,
-dataset importers, paper presets, CLI smoke checks, and backend adapter imports.
-Runtime regressions additionally cover process-table consistency,
-automatic client sessions, concurrent cancellation, admission-time duplicate
-request IDs, scheduling windows and measured DAG workload metrics. Opt-in GPU
-tests exercise the real integrations described above.
-
-## Simulation boundaries
-
-The simulation APIs and `autellix.cli` experiments still model token execution,
-cache hit rates, and engine workload. Their `vllm` / `vllm-opt` baseline labels
-refer to cost models, not real backend measurements. Use the runtime and GPU
-tests above for actual execution. Online `atlas` follows algorithm 1; the
-explicit-parent equation (2) variant is available as `atlas-dag`.
-
-The simulator routes by input token count, without using future output length.
-Scheduling windows start when work is available; quantum expiry and per-call
-anti-starvation are evaluated at window boundaries, preserving current queue
-FIFO order. Running calls compete with waiting calls at those boundaries, and
-prepared reserves can fill vacancies inside a window. Swap costs apply only
-when a resident call actually leaves the selected cohort. Window length is
-measured in simulated model ticks, whereas the real runtime counts decode
-steps. Simulated locality benefits require completed work on the target engine;
-assigning a new request there alone does not create a cache hit.
+本地模型、PDF、临时文件、缓存、安装元数据和生成输出不提交。保留仍被使用的模型与环境；测试和验证输出可以重新生成。

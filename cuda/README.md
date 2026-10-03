@@ -1,27 +1,22 @@
-# GPU KV swap benchmark
+# KV 传输微基准
 
-This measures the independently implemented KV transfer mechanism used by the
-Autellix reproduction attempt. It is not the authors' original CUDA kernel or a
-reproduction of the paper's reported speedups.
+测量本项目独立实现的 GPU/CPU KV 批量传输，不代表作者原始 CUDA kernel 或论文性能复现。安装与运行环境见 [主 README](../README.md)。
 
-The benchmark performs real GPU/CPU transfers, validates exact KV round-trip
-correctness with a nontrivial block mapping, synchronizes CUDA for timing, and
-reports median times after warm-up.
+## 运行
+
+在有 CUDA 的 vLLM 环境中执行：
 
 ```bash
 python cuda/batched_swap_benchmark.py --blocks 128 --layers 4 --iterations 10
 ```
 
-The default baseline is vLLM's actual compiled `swap_blocks` operation. Use
-`--baseline python` only when intentionally comparing against per-block Python
-copy calls; those timings include Python dispatch overhead.
+默认对照为 vLLM 编译后的 `swap_blocks`。`--baseline python` 改为逐 block 的 Python 复制，包含 Python 调用开销，不能当成同一个对照。
 
-The batched path is `autellix/runtime/swap.py`, also used by the real vLLM
-backend. It packs all layers' K/V blocks with PyTorch CUDA kernels, transfers
-one contiguous payload through pinned host memory, and scatters into the
-mapped destination blocks. No separate CUDA compiler is required for this
-path. It supports contiguous `[2, blocks, ...]` KV layouts and rejects unsafe
-shapes, mappings, and duplicate destinations.
+## 测量内容
 
-The benchmark raises an error without CUDA; there is no CPU simulation fallback.
-It does not assume the batched path is faster for every payload size or machine.
+- 执行真实 GPU/CPU 传输，使用非连续映射验证 KV 往返结果完全一致。
+- 预热后同步 CUDA 计时，报告中位数；不预设批量传输在所有负载下都更快。
+- 批量路径使用 `autellix/runtime/swap.py`：聚合各层 K/V 为连续载荷，经锁页内存一次传输后写入目标 block。
+- 支持连续的 `[2, blocks, ...]` KV 布局；不兼容的形状、越界映射和重复目标会被拒绝。
+
+此路径使用 PyTorch CUDA 操作，不需单独编译自定义 kernel。没有 CUDA 时直接报错，不回退到 CPU 模拟。后端生成正确性仍需运行主 README 中的真实推理测试，微基准不能替代这些测试。

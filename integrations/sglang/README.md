@@ -1,50 +1,32 @@
-# SGLang 0.4.9.post6 integration
+# SGLang 后端
 
-An independently implemented extension of the Autellix reproduction attempt to
-SGLang. The paper describes a vLLM-based implementation. See the
-[root README](../../README.md#reproduction-scope) for scope and validation limits.
+本项目在论文 vLLM 方案之外增加的独立适配，固定使用 **SGLang 0.4.9.post6**。安装、服务、客户端和验证入口见 [主 README](../../README.md)。
 
-`backend.py` starts the actual SGLang Engine. A spawn-safe scheduler process
-target installs `scheduler.py` hooks inside the GPU process before serving
-requests. Request IDs transport program/call identity; callers do not need to
-supply a dependency graph or predict model execution time.
+## 支持范围
 
-The adapter uses native token pools and radix cache ownership during retraction,
-keeps generated tokens, and requeues requests by online PLAS/ATLAS priority.
-`overprovision` retains a bounded number of computed GPU prefixes under cache
-locks; locks are released on readmission, memory pressure, cancellation, or idle.
-When a live reserve leaves the window or is released for memory pressure, its
-computed prefix is saved to CPU before unlocking, so later eviction does not
-silently turn resumption into recomputation. Failed backup replacement keeps the
-previous host copy and accounting intact.
+- 每个副本一张 GPU，文本生成，每次调用一个输出序列。
+- MHA KV token pool、radix 前缀缓存、page size 1。
+- 非重叠执行、不分块 prefill；允许多个独立副本由真实协调器管理。
+- 不支持 TP/PP/DP、推测解码、LoRA、HiCache 或关闭 radix 缓存。
 
-The supported mode is one GPU per replica, text generation with radix caching,
-page size 1, non-overlapped execution and unchunked prefill. Multiple independent
-replicas are coordinated by `autellix.runtime.InferenceEngine`. TP/PP/DP,
-speculation, LoRA and HiCache are rejected in this pinned implementation.
+`backend.py` 启动真实 Engine，`scheduler.py` 在生成进程内安装钩子，不修改已安装的 SGLang 文件。程序和调用信息随请求传递，用户无需提供执行时间估计或 DAG。
 
-Nonresident preempted requests now pack their computed KV into pinned CPU
-storage before releasing GPU slots. Readmission restores the prefix to the
-native radix cache, retaining output tokens. `autellix_swap_space` limits host
-storage in GiB (default 1); unsupported non-MHA layouts fail explicitly.
-Restoration locks an existing GPU prefix and allocates/transfers only its missing
-suffix, so shared prefixes do not need duplicate GPU capacity. Failed allocation
-or transfer releases the temporary lock and keeps the host copy for retry.
-Successfully restored prefixes stay pinned across the remaining restorations
-and native admission, so a later request cannot evict an earlier request's KV.
-These temporary pins are released after native admission acquires its own locks,
-or on failure; unadmitted requests retain their host copies for retry.
-Default `--implementation paper` selects the global cohort once per N decode
-steps, mixes its prefills and decodes, bypasses native prefill admission during
-decode-only continuation, and disables native length-based decode retraction.
-Under decode memory pressure it first releases reserves, then swaps out the
-lowest-priority suffix of the frozen plan, preserving generated tokens. It does
-not fail the whole batch merely because multiple active requests no longer fit.
-`--implementation compat` restores the previous native scheduling hooks. Default
-N=8 and one reserve are configurable project settings. Extra reserve prefills
-prepare GPU prefixes ahead of completion; `refill` records mid-window replacement.
-Native SGLang still updates execution metadata each iteration. Host copies are released
-after successful admission or cancellation; reserve locks are released on
-readmission, memory pressure, cancellation, or idle.
+## 调度
 
-See the root README for installation, server commands, and real GPU tests.
+默认 `paper` 模式在窗口边界按 PLAS/ATLAS 等策略选择请求集合，混合执行已接纳的 prefill 和 decode。纯解码窗口内跳过原生 prefill 接纳；显存压力下按窗口中的优先级选择抢占对象，不采用原生按长度排序的回退规则。
+
+N=8、K=1 是项目默认参数。预备请求的已计算前缀通过 radix 锁保留，活动请求结束后可补位。`--implementation compat` 保留旧的原生调度钩子路径。
+
+## KV 所有权与恢复
+
+抢占保留输出 token，将已计算 KV 打包到锁页 CPU 内存后释放 GPU 槽位。`--engine-args` 中的 `autellix_swap_space` 控制主机 KV 预算，单位 GiB，默认 1。预算不足会明确报错。
+
+恢复时锁住已有共享前缀，仅分配和传输缺失后缀。恢复成功的前缀会保持锁定到原生接纳取得自己的锁，避免后续恢复逐出前面的请求。接纳失败时释放临时锁，并保留 CPU 副本供重试。
+
+预备请求离开窗口或因显存压力被释放时，先保存 CPU 副本再解锁。备份失败保留原有 GPU 锁；替换主机备份失败也保留旧副本。成功接纳或取消后回收主机副本。
+
+显存不足时先释放预备请求，再按冻结的队列顺序换出低优先级后缀；若单个请求仍无法容纳则报错。实现继续依赖原生 token pool 和 radix cache 的所有权规则。
+
+## 验证
+
+主 README 的 GPU 测试覆盖真实生成、抢占恢复、程序服务继承和预备请求补位。`AUTELLIX_TEST_REPLICAS=1` 额外测试同一张 GPU 上两个独立模型进程的路由、取消及清理，不等同于多 GPU 验证。HTTP 验证包含客户端流式输出和会话释放。
