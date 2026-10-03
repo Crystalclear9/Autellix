@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from math import inf
 from typing import Iterable, Sequence
 
@@ -17,6 +17,11 @@ class Scheduler:
     queue_quanta: tuple[int, ...] = DEFAULT_QUEUE_QUANTA
     anti_starvation_beta: float = 8.0
     preemptive: bool = True
+    _counter: int = field(default=0, init=False, repr=False)
+
+    def _move_to_tail(self, call: CallState) -> None:
+        self._counter += 1
+        call.queue_order = self._counter
 
     def __post_init__(self) -> None:
         if len(self.priority_boundaries) != len(self.queue_quanta) + 1:
@@ -58,6 +63,7 @@ class Scheduler:
         call.queue_index = self.assign_queue_index(call.service_priority)
         call.max_queue_index = max(call.max_queue_index, call.queue_index)
         call.quantum_remaining = self.queue_quanta[call.queue_index]
+        self._move_to_tail(call)
         engine.queues[call.queue_index].append(call)
         entry.active_call_ids.add(call.call_id)
         entry.last_arrival = time
@@ -122,6 +128,7 @@ class Scheduler:
         call.queue_index = min(call.queue_index + 1, self.queue_count - 1)
         call.max_queue_index = max(call.max_queue_index, call.queue_index)
         call.quantum_remaining = self.queue_quanta[call.queue_index]
+        self._move_to_tail(call)
         engine.queues[call.queue_index].append(call)
 
     def tick_queued_wait(
@@ -129,18 +136,27 @@ class Scheduler:
         engine: EngineState,
         process_table: dict[str, ProcessEntry],
     ) -> set[str]:
-        promoted_programs: set[str] = set()
-        for queue_index, queue in enumerate(engine.queues):
-            for call in list(queue):
-                call.wait_time += 1
-                call.wait_time_window += 1
-                if self._should_promote(call, queue_index, process_table):
-                    self._promote_program(call.program_id, engine, process_table)
-                    promoted_programs.add(call.program_id)
-        for call in engine.prefetched:
+        for call in engine.iter_waiting():
             call.wait_time += 1
             call.wait_time_window += 1
-        return promoted_programs
+        return set()
+
+    def refresh(self, engine: EngineState, process_table: dict[str, ProcessEntry]) -> None:
+        """Algorithm 1: update each call independently at a scheduling boundary."""
+        for call in sorted(list(engine.iter_waiting()), key=lambda c: (c.queue_index, c.queue_order)):
+            if self.should_preempt(call):
+                engine.queues[call.queue_index].remove(call)
+                self.demote(call, engine)
+            if self._should_promote(call, call.queue_index, process_table):
+                engine.queues[call.queue_index].remove(call)
+                call.queue_index = 0
+                call.quantum_remaining = self.queue_quanta[0]
+                call.wait_time_window = call.run_time_window = 0
+                self._move_to_tail(call)
+                engine.queues[0].append(call)
+            meta = process_table[call.program_id].thread_metadata.get(call.call_id)
+            if meta is not None:
+                meta.queue_index = call.queue_index
 
     def _should_promote(
         self,
@@ -148,45 +164,12 @@ class Scheduler:
         queue_index: int,
         process_table: dict[str, ProcessEntry],
     ) -> bool:
-        if queue_index == 0:
+        if queue_index == 0 or not self.preemptive:
             return False
         entry = process_table[call.program_id]
         wait = entry.waiting_time + call.wait_time_window
         service = max(1.0, entry.service_time + call.run_time_window)
         return wait / service >= self.anti_starvation_beta
-
-    def _promote_program(
-        self,
-        program_id: str,
-        engine: EngineState,
-        process_table: dict[str, ProcessEntry],
-    ) -> None:
-        for queue_index, queue in enumerate(engine.queues):
-            if queue_index == 0:
-                continue
-            for queued in list(queue):
-                if queued.program_id != program_id:
-                    continue
-                try:
-                    queue.remove(queued)
-                except ValueError:
-                    continue
-                queued.queue_index = 0
-                queued.quantum_remaining = self.queue_quanta[0]
-                queued.wait_time_window = 0
-                queued.run_time_window = 0
-                engine.queues[0].append(queued)
-                meta = process_table[program_id].thread_metadata.get(queued.call_id)
-                if meta is not None:
-                    meta.queue_index = 0
-
-    def promote_program(
-        self,
-        program_id: str,
-        engine: EngineState,
-        process_table: dict[str, ProcessEntry],
-    ) -> None:
-        self._promote_program(program_id, engine, process_table)
 
     def complete_call(
         self,
@@ -199,6 +182,8 @@ class Scheduler:
         call.finish_time = time
         entry.active_call_ids.discard(call.call_id)
         entry.completed_call_ids.add(call.call_id)
+        if call.engine_id is not None:
+            entry.completed_engine_ids.add(call.engine_id)
         entry.waiting_time += call.wait_time
         entry.last_completion = time
         self.update_service_time(entry, call)
@@ -240,6 +225,9 @@ class MLFQScheduler(Scheduler):
 
     def priority_for_call(self, call: CallState, entry: ProcessEntry) -> float:
         return 0.0
+
+    def _should_promote(self, call, queue_index, process_table):
+        return queue_index > 0 and call.wait_time_window / max(1, call.run_time_window) >= self.anti_starvation_beta
 
     def update_service_time(self, entry: ProcessEntry, call: CallState) -> None:
         return
@@ -287,6 +275,7 @@ class RoundRobinScheduler(Scheduler):
         call.status = CallStatus.QUEUED
         call.queue_index = 0
         call.quantum_remaining = self.queue_quanta[0]
+        self._move_to_tail(call)
         engine.queues[0].append(call)
 
     def tick_queued_wait(

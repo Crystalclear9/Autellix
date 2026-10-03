@@ -10,7 +10,7 @@ from autellix.datasets import load_programs_from_file, workload_analysis
 from autellix.engine import AsyncMultiLLMEngine
 from autellix.experiments import ExperimentRunner, plot_records, write_records
 from autellix.load_balancer import LocalityAwareLoadBalancer
-from autellix.models import CallSpec, EngineState, ProcessEntry, ProgramSpec
+from autellix.models import CallSpec, CallState, EngineState, ProcessEntry, ProgramSpec
 from autellix.service import AutellixService
 from autellix.schedulers import make_scheduler
 from integrations.vllm import AutellixRequestMetadata, AutellixVLLMAdapter
@@ -54,13 +54,13 @@ class SchedulerTests(unittest.TestCase):
         order = [(row["program_id"], row["time"]) for row in result.gantt[:4]]
         self.assertEqual([program for program, _ in order], ["A", "B", "A", "B"])
 
-    def test_schedule_interval_delays_new_batch(self):
+    def test_empty_window_starts_next_batch_without_idle_delay(self):
         programs = [
             ProgramSpec("A", (CallSpec("a", "A", model_time=1),)),
             ProgramSpec("B", (CallSpec("b", "B", model_time=1),)),
         ]
         result = Simulator(programs, scheduler="fcfs", batch_size=1, schedule_interval=3).run()
-        self.assertEqual(result.calls[("B", "b")].start_time, 3)
+        self.assertEqual(result.calls[("B", "b")].start_time, 1)
 
     def test_overprovision_prefetch_fills_slots_between_schedule_ticks(self):
         programs = [
@@ -124,39 +124,25 @@ class SchedulerTests(unittest.TestCase):
         result = Simulator([long, short], scheduler=scheduler, batch_size=1).run()
         self.assertEqual(result.calls[("S", "s1")].queue_index, 0)
 
-    def test_program_level_anti_starvation_promotes_across_engines(self):
-        program = ProgramSpec(
-            "P",
-            (
-                CallSpec("root", "P", model_time=1),
-                CallSpec("left", "P", model_time=2, parents=("root",)),
-                CallSpec("right", "P", model_time=2, parents=("root",)),
-            ),
-        )
-        blocker_a = ProgramSpec(
-            "A",
-            (CallSpec("a", "A", model_time=10, release_delay=1),),
-        )
-        blocker_b = ProgramSpec(
-            "B",
-            (CallSpec("b", "B", model_time=10, release_delay=1),),
-        )
+    def test_anti_starvation_checks_each_call_without_cross_engine_promotion(self):
         scheduler = make_scheduler(
             "atlas",
             priority_boundaries=(0, 1, float("inf")),
             queue_quanta=(1, 100),
             anti_starvation_beta=1.0,
         )
-        result = Simulator(
-            [program, blocker_a, blocker_b],
-            scheduler=scheduler,
-            load_balancer="round-robin",
-            num_engines=2,
-            batch_size=1,
-        ).run()
-
-        self.assertEqual(result.calls[("P", "left")].queue_index, 0)
-        self.assertEqual(result.calls[("P", "right")].queue_index, 0)
+        table = {"P": ProcessEntry("P", arrival_time=0, service_time=2)}
+        engines = [EngineState(i, batch_size=1, queue_count=2) for i in range(2)]
+        calls = [CallState(CallSpec(str(i), "P", model_time=20)) for i in range(3)]
+        for call, engine in zip(calls, [engines[0], engines[0], engines[1]]):
+            scheduler.enqueue(call, engine, table, 0)
+        calls[0].wait_time_window = 4
+        calls[1].wait_time_window = calls[2].wait_time_window = 1
+        for engine in engines:
+            scheduler.refresh(engine, table)
+        self.assertEqual([c.queue_index for c in calls], [0, 1, 1])
+        self.assertEqual(calls[0].wait_time_window, 0)
+        self.assertEqual(calls[1].wait_time_window, 1)
 
     def test_fcfs_runs_without_preempting(self):
         program = ProgramSpec(

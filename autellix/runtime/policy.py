@@ -298,7 +298,9 @@ class RuntimeScheduler:
     def refresh(self):
         now = self.clock()
         totals = self.table.snapshot()
-        for call in self.calls.values():
+        # Requeue simultaneous demotions/promotions in current queue FIFO order,
+        # not dictionary insertion order (which remembers initial admission).
+        for call in sorted(self.calls.values(), key=lambda c: (c.queue, c.order)):
             self._wait_until(call, now)
             if self.config.policy == "fcfs":
                 continue

@@ -125,6 +125,7 @@ class CallState:
     finish_time: int | None = None
     engine_id: int | None = None
     queue_index: int = 0
+    queue_order: int = 0
     max_queue_index: int = 0
     quantum_remaining: int | float = inf
     service_priority: float = 0.0
@@ -213,6 +214,7 @@ class ProcessEntry:
     waiting_time: int = 0
     engine_id: int | None = None
     engine_ids: set[int] = field(default_factory=set)
+    completed_engine_ids: set[int] = field(default_factory=set)
     active_call_ids: set[str] = field(default_factory=set)
     completed_call_ids: set[str] = field(default_factory=set)
     thread_metadata: dict[str, ThreadMetadata] = field(default_factory=dict)

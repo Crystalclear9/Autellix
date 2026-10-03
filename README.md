@@ -426,3 +426,13 @@ cache hit rates, and engine workload. Their `vllm` / `vllm-opt` baseline labels
 refer to cost models, not real backend measurements. Use the runtime and GPU
 tests above for actual execution. Online `atlas` follows algorithm 1; the
 explicit-parent equation (2) variant is available as `atlas-dag`.
+
+The simulator routes by input token count, without using future output length.
+Scheduling windows start when work is available; quantum expiry and per-call
+anti-starvation are evaluated at window boundaries, preserving current queue
+FIFO order. Running calls compete with waiting calls at those boundaries, and
+prepared reserves can fill vacancies inside a window. Swap costs apply only
+when a resident call actually leaves the selected cohort. Window length is
+measured in simulated model ticks, whereas the real runtime counts decode
+steps. Simulated locality benefits require completed work on the target engine;
+assigning a new request there alone does not create a cache hit.

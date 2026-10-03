@@ -77,6 +77,7 @@ class Simulator:
             EngineState(i, batch_size=batch_size, queue_count=self.scheduler.queue_count)
             for i in range(num_engines)
         ]
+        self._window_remaining = {engine.engine_id: 0 for engine in self.engines}
         self.process_table: dict[str, ProcessEntry] = {}
         self.calls: dict[tuple[str, str], CallState] = {}
         self.program_by_id: dict[str, ProgramSpec] = {}
@@ -232,21 +233,43 @@ class Simulator:
     def _schedule(self, time: int) -> None:
         for engine in self.engines:
             self.scheduler.fill_from_prefetch(engine, time)
-            if time % self.schedule_interval != 0:
+            if self._window_remaining[engine.engine_id] > 0 and engine.running:
                 continue
+            # Reconsider running and queued calls together, in original FIFO
+            # order. Time-slice expiry cannot interrupt a frozen window.
+            resident = list(engine.running) + list(engine.prefetched)
+            waiting = list(engine.iter_waiting())
+            candidates = list(engine.running) + waiting
+            engine.running.clear()
+            engine.prefetched.clear()
+            for queue in engine.queues:
+                queue.clear()
+            for call in sorted(candidates, key=lambda c: (c.queue_index, c.queue_order)):
+                call.status = CallStatus.QUEUED
+                engine.queues[call.queue_index].append(call)
+            self.scheduler.refresh(engine, self.process_table)
             scheduled = self.scheduler.schedule(
                 engine,
                 time,
                 target_slots=engine.batch_size + self.overprovision,
             )
-            self.prefetched_calls += sum(1 for call in scheduled if call.status == CallStatus.PREFETCHED)
+            selected = {call.key for call in scheduled}
+            victims = [call for call in resident if call.key not in selected]
+            penalty = self.execution_model.preemption_penalty(len(victims)) if victims else 0
+            for call in victims:
+                call.swap_time += penalty
+                call.swap_remaining += penalty
+            resident_keys = {call.key for call in resident}
+            self.prefetched_calls += sum(1 for call in scheduled
+                                        if call.status == CallStatus.PREFETCHED and call.key not in resident_keys)
+            self._window_remaining[engine.engine_id] = self.schedule_interval
 
     def _execute_one_tick(self, time: int) -> None:
         for engine in self.engines:
             engine.total_slot_steps += engine.batch_size
             engine.busy_slot_steps += len(engine.running)
             finished: list[CallState] = []
-            exhausted: list[CallState] = []
+            executed = False
             for call in list(engine.running):
                 if call.swap_remaining:
                     call.swap_remaining -= 1
@@ -255,6 +278,7 @@ class Simulator:
                     call.scheduler_remaining -= 1
                     continue
                 call.remaining_time -= 1
+                executed = True
                 call.executed_time += 1
                 call.run_time_window += 1
                 self.scheduler.on_tick_executed(call)
@@ -271,30 +295,15 @@ class Simulator:
                 )
                 if call.remaining_time <= 0:
                     finished.append(call)
-                elif self.scheduler.should_preempt(call):
-                    exhausted.append(call)
 
             for call in finished:
                 if call in engine.running:
                     engine.running.remove(call)
                 self.scheduler.complete_call(call, self.process_table, time + 1)
 
-            promoted_programs = self.scheduler.tick_queued_wait(engine, self.process_table)
-            for program_id in promoted_programs:
-                for peer in self.engines:
-                    if peer is not engine:
-                        self.scheduler.promote_program(program_id, peer, self.process_table)
-
-            for call in exhausted:
-                if call.status == CallStatus.FINISHED:
-                    continue
-                if call in engine.running:
-                    engine.running.remove(call)
-                penalty = self.execution_model.preemption_penalty(len(exhausted))
-                if penalty:
-                    call.swap_time += penalty
-                    call.swap_remaining += penalty
-                self.scheduler.demote(call, engine)
+            self.scheduler.tick_queued_wait(engine, self.process_table)
+            if executed:
+                self._window_remaining[engine.engine_id] = max(0, self._window_remaining[engine.engine_id] - 1)
 
             self.scheduler.fill_from_prefetch(engine, time + 1)
 

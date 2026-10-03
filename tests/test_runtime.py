@@ -96,6 +96,22 @@ class RuntimePolicyTests(unittest.TestCase):
         self.ctl.finish("a")
         self.assertNotIn("p", self.table.snapshot())
 
+    def test_simultaneous_demotion_preserves_current_fifo_not_arrival_order(self):
+        config = PolicyConfig(boundaries=(0, 2, math.inf), quanta=(1, 1), beta=1e12)
+        ctl = RuntimeScheduler(self.table, config, clock=self.clock)
+        for rid in ("a", "b"):
+            ctl.admit(rid, "p")
+        def execute(rids):
+            ctl.begin(rids)
+            self.clock.now += 1
+            ctl.executed(rids, 1)
+            ctl.refresh()
+        execute(["a", "b"])
+        execute(["a"])
+        self.assertEqual(sorted(ctl.calls, key=ctl.key), ["b", "a"])
+        execute(["a", "b"])
+        self.assertEqual(sorted(ctl.calls, key=ctl.key), ["b", "a"])
+
     def test_swap_cost_changes_completion_time(self):
         programs = [ProgramSpec("p", (CallSpec("a", "p", 8),))]
         model = ExecutionModel(fixed_model_time=True)
@@ -103,8 +119,15 @@ class RuntimePolicyTests(unittest.TestCase):
         swapped = Simulator(programs, scheduler="round-robin", batch_size=1,
                             execution_model=replace(model, swap_penalty_per_preemption=10)).run()
         self.assertEqual(base.makespan, 8)
-        self.assertEqual(swapped.makespan, 78)
+        # No other request needs the GPU: quantum expiry alone must not swap.
+        self.assertEqual(swapped.makespan, 8)
         self.assertEqual(swapped.program_metrics["p"].execution_time, 8)
+        competing = programs + [ProgramSpec("q", (CallSpec("b", "q", 2),))]
+        base = Simulator(competing, scheduler="round-robin", batch_size=1, execution_model=model).run()
+        swapped = Simulator(competing, scheduler="round-robin", batch_size=1,
+                            execution_model=replace(model, swap_penalty_per_preemption=10)).run()
+        self.assertGreater(swapped.makespan, base.makespan)
+        self.assertGreater(swapped.program_metrics["p"].swap_time, 0)
 
     def test_simulator_online_atlas_and_explicit_dag_are_distinct(self):
         programs = [ProgramSpec("p", (CallSpec("a", "p", 8), CallSpec("b", "p", 1, submit_time=10)))]

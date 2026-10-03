@@ -41,7 +41,7 @@ class LocalityAwareLoadBalancer(LoadBalancer):
         process_table: dict[str, ProcessEntry],
     ) -> EngineState:
         entry = process_table[call.program_id]
-        if call.total_tokens <= self.token_threshold:
+        if call.prefill_tokens <= self.token_threshold:
             engine = self.least_used(engines)
         elif entry.engine_id is not None:
             engine = engines[entry.engine_id]

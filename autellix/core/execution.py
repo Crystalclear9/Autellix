@@ -61,7 +61,7 @@ class ExecutionModel:
             return 0.0
         common = min(call.spec.prefill_tokens, self.system_prompt_tokens)
         common_hit = common / call.spec.prefill_tokens
-        if entry.completed_call_ids and (entry.engine_id == engine_id or engine_id in entry.engine_ids):
+        if engine_id in entry.completed_engine_ids:
             return min(0.98, max(common_hit, self.locality_cache_bonus))
         return min(0.75, max(common_hit, self.remote_cache_bonus))
 
