@@ -23,6 +23,9 @@ Nonresident preempted requests now pack their computed KV into pinned CPU
 storage before releasing GPU slots. Readmission restores the prefix to the
 native radix cache, retaining output tokens. `autellix_swap_space` limits host
 storage in GiB (default 1); unsupported non-MHA layouts fail explicitly.
+Restoration locks an existing GPU prefix and allocates/transfers only its missing
+suffix, so shared prefixes do not need duplicate GPU capacity. Failed allocation
+or transfer releases the temporary lock and keeps the host copy for retry.
 Policy order is frozen for N decode steps. Extra reserve prefills prepare GPU
 prefixes ahead of completion; `refill` records mid-window replacement. Native
 SGLang still updates execution metadata each iteration. Host copies are released

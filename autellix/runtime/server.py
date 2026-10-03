@@ -71,6 +71,12 @@ def create_app(engine):
         messages = body.get("messages")
         if not isinstance(messages, list) or not messages:
             raise HTTPException(400, "messages must be a nonempty list")
+        for field in ("session_id", "request_id", "call_id", "thread_id"):
+            value = body.get(field)
+            if value is not None and (not isinstance(value, str) or not value.strip()):
+                raise HTTPException(400, f"{field} must be a nonempty string")
+        if body.get("metadata") is not None and not isinstance(body["metadata"], dict):
+            raise HTTPException(400, "metadata must be an object")
         automatic = not body.get("session_id")
         pid = engine.start_session() if automatic else body["session_id"]
         rid = body.get("request_id") or uuid.uuid4().hex

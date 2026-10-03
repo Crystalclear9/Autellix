@@ -50,6 +50,17 @@ class ProtocolEngine:
 
 @unittest.skipUnless(TestClient, "requires fastapi/httpx")
 class HTTPTests(unittest.TestCase):
+    def test_invalid_identity_is_rejected_without_creating_session(self):
+        from autellix.runtime.server import create_app
+        engine = ProtocolEngine()
+        with TestClient(create_app(engine)) as client:
+            for field in ("request_id", "session_id", "call_id", "thread_id"):
+                for value in ([], {}, 42, "", " "):
+                    response = client.post("/v1/chat/completions", json={
+                        "messages": [{"role": "user", "content": "hi"}], field: value})
+                    self.assertEqual(response.status_code, 400, response.text)
+                    self.assertEqual(engine.sessions, set())
+
     def test_duplicate_and_cancel_while_submission_is_pending(self):
         from autellix.runtime.server import create_app
         engine = ProtocolEngine()

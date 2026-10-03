@@ -35,22 +35,32 @@ class HostKV:
             return False
         tokens, host = self.saved[rid]
         matched = self.tree.match_prefix(tokens)
-        if len(matched.device_indices) == len(tokens):
+        prefix = matched.device_indices
+        prefix_len = len(prefix)
+        if prefix_len == len(tokens):
             return True
-        needed = len(tokens)
-        if self.allocator.available_size() < needed:
-            self.tree.evict(needed - self.allocator.available_size())
-        indices = self.allocator.alloc(needed)
-        if indices is None:
-            return False
+        # Protect the shared prefix while evicting other entries. Allocating a
+        # second copy of it can reject a request whose missing suffix fits.
+        node = matched.last_device_node
+        self.tree.inc_lock_ref(node)
         try:
-            payload = host.to(self.layers[0].device, non_blocking=True)
-            for layer, values in zip(self.layers, payload):
-                layer.index_copy_(0, indices.long(), values)
-            torch.cuda.current_stream(payload.device).synchronize()
-        except BaseException:
-            self.allocator.free(indices)
-            raise
-        prefix_len = self.tree.insert(tokens, indices.clone())
-        self.allocator.free(indices[:prefix_len])
-        return True
+            needed = len(tokens) - prefix_len
+            if self.allocator.available_size() < needed:
+                self.tree.evict(needed - self.allocator.available_size())
+            indices = self.allocator.alloc(needed)
+            if indices is None:
+                return False
+            try:
+                payload = host[:, prefix_len:].to(self.layers[0].device, non_blocking=True)
+                for layer, values in zip(self.layers, payload):
+                    layer.index_copy_(0, indices.long(), values)
+                torch.cuda.current_stream(payload.device).synchronize()
+                shared = self.tree.insert(tokens, torch.cat((prefix, indices)))
+            except BaseException:
+                self.allocator.free(indices)
+                raise
+            # Only newly allocated duplicate slots belong to this operation.
+            self.allocator.free(indices[:max(0, shared - prefix_len)])
+            return True
+        finally:
+            self.tree.dec_lock_ref(node)
