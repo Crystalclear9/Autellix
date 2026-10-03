@@ -1,5 +1,7 @@
 """HTTP protocol tests; engine stub isolates protocol from GPU inference."""
 import json
+import concurrent.futures
+import threading
 import unittest
 from types import SimpleNamespace
 from autellix.runtime.engine import InferenceFuture
@@ -48,6 +50,34 @@ class ProtocolEngine:
 
 @unittest.skipUnless(TestClient, "requires fastapi/httpx")
 class HTTPTests(unittest.TestCase):
+    def test_duplicate_and_cancel_while_submission_is_pending(self):
+        from autellix.runtime.server import create_app
+        engine = ProtocolEngine()
+        entered, release = threading.Event(), threading.Event()
+        pending = InferenceFuture()
+        def submit(pid, **kwargs):
+            entered.set()
+            if not release.wait(5):
+                raise TimeoutError("test admission was not released")
+            return pending
+        engine.submit = submit
+        body = dict(messages=[{"role": "user", "content": "hi"}],
+                    session_id="p", request_id="same-id")
+        with TestClient(create_app(engine)) as client:
+            client.post("/sessions", json={"program_id": "p"})
+            with concurrent.futures.ThreadPoolExecutor(1) as pool:
+                first = pool.submit(client.post, "/v1/chat/completions", json=body)
+                try:
+                    self.assertTrue(entered.wait(5))
+                    duplicate = client.post("/v1/chat/completions", json=body)
+                    self.assertEqual(duplicate.status_code, 409)
+                    self.assertEqual(client.delete("/requests/same-id").status_code, 200)
+                finally:
+                    release.set()
+                self.assertEqual(first.result(5).status_code, 499)
+            self.assertTrue(pending.cancelled())
+            self.assertEqual(client.delete("/requests/same-id").status_code, 404)
+
     def test_sessions_usage_and_errors(self):
         from autellix.runtime.server import create_app
         engine = ProtocolEngine()

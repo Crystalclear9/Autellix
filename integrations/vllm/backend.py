@@ -9,23 +9,23 @@ from .scheduler import attach_scheduler
 
 
 class VLLMBackend:
-    """Real, single-GPU vLLM 0.6.1 replica with internal Autellix scheduling.
-
-    Scale through independent replicas. Pipeline/tensor parallel execution is
-    rejected because timing and scheduler-state synchronization differ.
-    """
+    """Pinned single-GPU or tensor-parallel replica with internal scheduling."""
 
     def __init__(self, model: str, table_path: str, config: PolicyConfig | None = None,
                  trace: str | None = None, batched_swap: bool = True, **engine_args):
         if version("vllm") != "0.6.1":
             raise RuntimeError("this backend requires vllm==0.6.1")
         config = config or PolicyConfig()
-        for key in ("tensor_parallel_size", "pipeline_parallel_size"):
-            if engine_args.get(key, 1) != 1:
-                raise ValueError(f"{key} must be 1; Autellix manages replicas and scheduling intervals")
+        mode = engine_args.pop("autellix_mode", "autellix")
+        if mode not in {"autellix", "vllm", "vllm-opt", "vllm-opt-multistep"}:
+            raise ValueError("invalid autellix_mode")
+        native = mode != "autellix"
+        if engine_args.get("pipeline_parallel_size", 1) != 1:
+            raise ValueError("pipeline parallelism is not supported; use tensor parallelism")
+        tp = engine_args.get("tensor_parallel_size", 1)
         if "num_scheduler_steps" in engine_args and engine_args["num_scheduler_steps"] != config.schedule_interval:
             raise ValueError("num_scheduler_steps must match PolicyConfig.schedule_interval")
-        if engine_args.get("enable_chunked_prefill", False):
+        if engine_args.get("enable_chunked_prefill", False) and not native:
             raise ValueError("chunked prefill is not supported by this pinned integration")
         from vllm.engine.arg_utils import EngineArgs
         from vllm.engine.llm_engine import LLMEngine
@@ -34,15 +34,30 @@ class VLLMBackend:
         args = dict(enable_prefix_caching=True, enforce_eager=True,
                     disable_async_output_proc=True, use_v2_block_manager=True,
                     preemption_mode="swap", swap_space=1, max_num_seqs=8)
+        if native:
+            args.update(enable_prefix_caching=mode != "vllm",
+                        enable_chunked_prefill=mode == "vllm-opt")
         args.update(engine_args)
         args["disable_async_output_proc"] = True
-        args["num_scheduler_steps"] = config.schedule_interval
+        # Native cached multi-step metadata cannot accept replacements. Reserve
+        # mode uses our policy window plus native per-step tensor/block updates.
+        refill_mode = (config.overprovision > 0 or tp > 1) and not native
+        capacity = args["max_num_seqs"]
+        args["num_scheduler_steps"] = 1 if refill_mode else config.schedule_interval
+        if refill_mode:
+            args["max_num_seqs"] = capacity + config.overprovision
+        if tp > 1 and not native:
+            from .executor import AutellixMPExecutor
+            args["distributed_executor_backend"] = AutellixMPExecutor
         self.table = ProgramTable(table_path)
         self.controller = RuntimeScheduler(self.table, config, trace)
         self.engine = LLMEngine.from_engine_args(EngineArgs(model=model, **args))
-        self.scheduler = attach_scheduler(self.engine.scheduler[0], self.controller)
+        self.scheduler = attach_scheduler(self.engine.scheduler[0], self.controller, observe_only=native)
+        if refill_mode:
+            from autellix.runtime.window import SchedulingWindow
+            self.scheduler._autellix_window = SchedulingWindow(self.controller, capacity)
         worker = self.engine.model_executor.driver_worker
-        if batched_swap:
+        if batched_swap and not native:
             for cache in worker.cache_engine:
                 attach_cache_engine(cache)
         def transfer_out(blocks):
@@ -50,7 +65,7 @@ class VLLMBackend:
             worker.cache_engine[0].swap_out(mapping)
             torch.cuda.synchronize()
         self.scheduler._autellix_transfer_out = transfer_out
-        if config.schedule_interval > 1:
+        if args["num_scheduler_steps"] > 1:
             original_worker_execute = worker.execute_worker
             worker._autellix_transferred_input = None
             def execute_worker_once(_worker, worker_input):
@@ -75,6 +90,8 @@ class VLLMBackend:
             end.synchronize()
             if rids:
                 controller.executed(rids, start.elapsed_time(end) / 1000.)
+                if scheduler._autellix_window is not None:
+                    scheduler._autellix_window.executed(scheduler._autellix_is_prefill)
             return result
 
         runner.execute_model = MethodType(measured_execute, runner)
@@ -130,4 +147,7 @@ class VLLMBackend:
     def close(self):
         for rid in list(self.controller.calls):
             self.cancel(rid)
+        shutdown = getattr(self.engine.model_executor, "shutdown", None)
+        if shutdown is not None:
+            shutdown()
         self.table.close()

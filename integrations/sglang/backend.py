@@ -28,7 +28,10 @@ class SGLangBackend:
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)
         self.table = ProgramTable(table_path)
-        options = dict(table_path=table_path, config=asdict(config), trace=trace)
+        host_bytes = int(engine_args.pop("autellix_swap_space", 1) * 1024**3)
+        if host_bytes <= 0:
+            raise ValueError("autellix_swap_space must be positive GiB")
+        options = dict(table_path=table_path, config=asdict(config), trace=trace, host_bytes=host_bytes)
         target = entry.run_scheduler_process
         entry.run_scheduler_process = partial(run_scheduler_process, autellix_options=options)
         args = dict(disable_overlap_schedule=True, disable_cuda_graph=True,
@@ -36,6 +39,9 @@ class SGLangBackend:
                     schedule_policy="fcfs", attention_backend="triton")
         args.update(engine_args)
         args.update(disable_overlap_schedule=True, chunked_prefill_size=-1, page_size=1)
+        options["capacity"] = args["max_running_requests"]
+        if config.overprovision:
+            args["max_running_requests"] += config.overprovision
         try:
             self.engine = entry.Engine(model_path=model, **args)
         finally:

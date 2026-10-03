@@ -21,6 +21,29 @@ MODEL = os.environ.get("AUTELLIX_TEST_MODEL")
 
 @unittest.skipUnless(BACKEND and MODEL, "requires AUTELLIX_GPU_BACKEND and AUTELLIX_TEST_MODEL")
 class RealInferenceTests(unittest.TestCase):
+    @unittest.skipUnless(BACKEND == "vllm" and os.environ.get("AUTELLIX_TEST_TP"), "requires vllm and AUTELLIX_TEST_TP=1 with two GPUs")
+    def test_tensor_parallel_generation_and_program_accounting(self):
+        import torch
+        self.assertGreaterEqual(torch.cuda.device_count(), 2)
+        args = dict(tensor_parallel_size=2, max_model_len=512, max_num_seqs=1,
+                    gpu_memory_utilization=.35, swap_space=.25, dtype="half")
+        with InferenceEngine([ReplicaConfig("vllm", MODEL, device="0,1", engine_args=args)],
+                             policy=PolicyConfig(schedule_interval=3, overprovision=1)) as engine:
+            pid = engine.start_session()
+            tokens = engine.tokenize(prompt="The capital of France is")
+            sampling = dict(temperature=0, max_tokens=24, ignore_eos=True)
+            a = engine.submit(pid, input_ids=tokens, sampling=sampling)
+            other = engine.start_session()
+            b = engine.submit(other, input_ids=tokens, sampling=dict(temperature=0, max_tokens=8))
+            result, _ = a.result(180), b.result(180)
+            reference = engine.submit(pid, input_ids=tokens, sampling=sampling).result(180)
+            self.assertEqual(result["token_ids"], reference["token_ids"])
+            self.assertGreater(result["metrics"]["executed"], 0)
+            engine.end_session(pid)
+            engine.end_session(other)
+            engine.wait_idle(30)
+            self.assertEqual(engine.table.describe(), {})
+
     def test_real_generation_preemption_and_session_inheritance(self):
         if BACKEND == "vllm":
             args = dict(max_model_len=512, max_num_seqs=1, gpu_memory_utilization=.35,
@@ -55,11 +78,18 @@ class RealInferenceTests(unittest.TestCase):
                 self.assertGreater(counts["demote"], 0)
                 if policy.overprovision and BACKEND == "vllm":
                     self.assertGreater(counts["reserve"], 0)
+                    if policy.schedule_interval > 1:
+                        self.assertGreater(counts["refill"], 0)
                 else:
                     self.assertGreater(counts["swap_out" if BACKEND == "vllm" else "retract"], 0)
                 if policy.overprovision and BACKEND == "sglang":
                     self.assertGreater(counts["reserve"], 0)
                     self.assertGreater(counts["resume_cached"], 0)
+                    if policy.schedule_interval > 1:
+                        self.assertGreater(counts["refill"], 0)
+                if BACKEND == "sglang" and not policy.overprovision:
+                    self.assertGreater(counts["swap_out"], 0)
+                    self.assertGreater(counts["swap_in"], 0)
                 # Compare interrupted greedy generation against uninterrupted
                 # generation in the SAME loaded engine and prompt, not a mock.
                 reference_pid = engine.start_session("reference")

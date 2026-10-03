@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "autellix"
 version = "0.2.0"
-description = "Program-aware scheduling for real LLM engines and simulations"
+description = "Independent Autellix method reproduction with real LLM backends and simulations"
 requires-python = ">=3.10"
 dependencies = []
 

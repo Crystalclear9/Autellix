@@ -50,7 +50,7 @@ class PolicyConfig:
 class ProgramTable:
     """Transactional program statistics shared by engine processes on one host.
 
-    SQLite is used only at arrival/completion and policy refresh boundaries.
+    SQLite records arrival/completion, policy refreshes and batch activity.
     Store this database on a local Linux filesystem, not an NFS/WSL mount.
     Session IDs are unique: callers must explicitly open and close sessions.
     """
@@ -70,7 +70,81 @@ class ProgramTable:
           rid TEXT PRIMARY KEY, pid TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS results (rid TEXT PRIMARY KEY, metrics TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS contexts (rid TEXT PRIMARY KEY, context TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS activity (
+          rid TEXT PRIMARY KEY, pid TEXT NOT NULL, engine_id INTEGER,
+          thread_id TEXT, call_id TEXT, arrived REAL NOT NULL,
+          waited REAL NOT NULL DEFAULT 0, executed REAL NOT NULL DEFAULT 0,
+          state TEXT NOT NULL DEFAULT 'queued');
         """)
+        # Migrate existing databases without discarding program statistics.
+        columns = {r[1] for r in self.db.execute("PRAGMA table_info(programs)")}
+        for name in ("last_arrival", "last_completion"):
+            if name not in columns:
+                try:
+                    self.db.execute(f"ALTER TABLE programs ADD COLUMN {name} REAL")
+                except sqlite3.OperationalError:
+                    if name not in {r[1] for r in self.db.execute("PRAGMA table_info(programs)")}:
+                        raise
+
+    @serialized
+    def record_submission(self, rid, pid, context):
+        now = time.time()
+        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            self.db.execute("INSERT INTO activity(rid,pid,engine_id,thread_id,call_id,arrived) VALUES (?,?,?,?,?,?)",
+                            (rid, pid, context.get("engine_id"), context.get("thread_id"), context.get("call_id"), now))
+            self.db.execute("UPDATE programs SET last_arrival=? WHERE pid=?", (now, pid))
+            self.db.execute("COMMIT")
+        except BaseException:
+            self.db.execute("ROLLBACK")
+            raise
+
+    @serialized
+    def update_activity(self, rid, waited, executed, state):
+        self.db.execute("UPDATE activity SET waited=?,executed=?,state=? WHERE rid=?",
+                        (waited, executed, state, rid))
+
+    @serialized
+    def update_activities(self, rows):
+        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            self.db.executemany("UPDATE activity SET waited=?,executed=?,state=? WHERE rid=?", rows)
+            self.db.execute("COMMIT")
+        except BaseException:
+            self.db.execute("ROLLBACK")
+            raise
+
+    @serialized
+    def complete_activity(self, rid):
+        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            self.db.execute("UPDATE programs SET last_completion=? WHERE pid=(SELECT pid FROM activity WHERE rid=?)",
+                            (time.time(), rid))
+            self.db.execute("DELETE FROM activity WHERE rid=?", (rid,))
+            self.db.execute("COMMIT")
+        except BaseException:
+            self.db.execute("ROLLBACK")
+            raise
+
+    @serialized
+    def describe(self):
+        """Consistent cross-process program, placement, and active-thread snapshot."""
+        self.db.execute("BEGIN")
+        try:
+            programs = {r[0]: dict(service=r[1], wait=r[2], active=r[3], closing=bool(r[4]),
+                                   last_arrival=r[5], last_completion=r[6], calls=[], engine_ids=[])
+                        for r in self.db.execute("SELECT pid,service,wait,active,closing,last_arrival,last_completion FROM programs")}
+            names = ("request_id", "program_id", "engine_id", "thread_id", "call_id", "arrived", "waited", "executed", "state")
+            for row in self.db.execute("SELECT rid,pid,engine_id,thread_id,call_id,arrived,waited,executed,state FROM activity"):
+                if row[1] in programs:
+                    programs[row[1]]["calls"].append(dict(zip(names, row)))
+            for program in programs.values():
+                program["engine_ids"] = sorted({c["engine_id"] for c in program["calls"] if c["engine_id"] is not None})
+            self.db.execute("COMMIT")
+            return programs
+        except BaseException:
+            self.db.execute("ROLLBACK")
+            raise
 
     @serialized
     def open(self, pid: str):
@@ -206,6 +280,11 @@ class RuntimeScheduler:
                                       self.config.quanta[q], self.clock(), metadata=dict(metadata or {}))
         self.emit("admit", rid=rid, pid=pid, inherited=initial, queue=q, metadata=metadata or {})
 
+    def _publish(self, calls):
+        self.table.update_activities([
+            (c.waited, c.executed, "running" if c.scheduled else "waiting", c.metadata.get("request_id", c.rid))
+            for c in calls])
+
     def _wait_until(self, call, now):
         delta = max(0., now - call.last_update)
         if not call.scheduled:
@@ -236,6 +315,7 @@ class RuntimeScheduler:
                 self.counter += 1
                 call.order = self.counter
                 self.emit("promote", rid=call.rid, queue=0)
+        self._publish(self.calls.values())
 
     def key(self, rid):
         call = self.calls[rid]
@@ -247,6 +327,7 @@ class RuntimeScheduler:
         for call in self.calls.values():
             self._wait_until(call, now)
             call.scheduled = call.rid in selected
+        self._publish(self.calls.values())
         self.emit("batch", requests=list(rids))
 
     def executed(self, rids, seconds: float):
@@ -260,6 +341,7 @@ class RuntimeScheduler:
             call.quantum -= seconds
             call.scheduled = False
             call.last_update = now
+        self._publish(self.calls[rid] for rid in rids)
         self.emit("execute", requests=list(rids), seconds=seconds)
 
     def finish(self, rid: str, reason="finished") -> dict:

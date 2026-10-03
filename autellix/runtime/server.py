@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import concurrent.futures
 import json
 import time
 import uuid
@@ -46,6 +47,10 @@ def create_app(engine):
         except Exception as exc:
             raise HTTPException(400, str(exc)) from exc
 
+    @app.get("/sessions")
+    async def describe_sessions():
+        return await asyncio.to_thread(engine.table.describe)
+
     @app.delete("/sessions/{pid}")
     async def end(pid: str):
         engine.end_session(pid)
@@ -74,12 +79,21 @@ def create_app(engine):
                 engine.end_session(pid)
             raise HTTPException(409, "request ID already active")
         sampling = {k: body[k] for k in ("temperature", "top_p", "top_k", "max_tokens", "stop", "n") if k in body}
+        # Reserve the ID before yielding to the submission thread. Cancellation
+        # can arrive while tokenization/admission is still in progress.
+        reservation = concurrent.futures.Future()
+        requests[rid] = reservation
         future = None
+        submission = None
         streaming = False
         try:
-            future = await asyncio.to_thread(engine.submit, pid, messages=messages,
+            submission = asyncio.create_task(asyncio.to_thread(engine.submit, pid, messages=messages,
                                              sampling=sampling, call_id=body.get("call_id"),
-                                             thread_id=body.get("thread_id"), metadata=body.get("metadata"))
+                                             thread_id=body.get("thread_id"), metadata=body.get("metadata")))
+            future = await asyncio.shield(submission)
+            if reservation.cancelled():
+                future.cancel()
+                raise HTTPException(499, "request cancelled during admission")
             requests[rid] = future
             if body.get("stream"):
                 from fastapi.responses import StreamingResponse
@@ -135,6 +149,8 @@ def create_app(engine):
                     future.cancel()
                     raise HTTPException(499, "client disconnected")
                 await asyncio.wait({wrapped}, timeout=.1)
+            if wrapped.cancelled():
+                raise HTTPException(499, "request cancelled")
             result = await wrapped
             completion_tokens = result.get("completion_tokens", len(result["token_ids"]))
             finish_reason = result["finish_reason"]
@@ -154,6 +170,15 @@ def create_app(engine):
         except asyncio.CancelledError:
             if future:
                 future.cancel()
+            elif submission is not None:
+                # Cancelling an await cannot stop an already-running thread.
+                # Retire its eventual result so no orphan GPU call survives.
+                def retire(task):
+                    try:
+                        task.result().cancel()
+                    except (Exception, asyncio.CancelledError):
+                        pass
+                submission.add_done_callback(retire)
             raise
         except (ValueError, KeyError) as exc:
             raise HTTPException(400, str(exc)) from exc
@@ -173,6 +198,7 @@ def main(argv=None):
     parser.add_argument("--backend", choices=("vllm", "sglang"), default="vllm")
     parser.add_argument("--model", required=True)
     parser.add_argument("--devices", default="0", help="comma separated GPU IDs, one replica per entry")
+    parser.add_argument("--device-groups", help="semicolon-separated TP replica groups, e.g. 0,1;2,3")
     parser.add_argument("--policy", choices=("fcfs", "mlfq", "plas", "atlas"), default="atlas")
     parser.add_argument("--engine-args", default="{}", help="JSON arguments for the pinned backend")
     parser.add_argument("--state-dir")
@@ -181,8 +207,9 @@ def main(argv=None):
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
     args = parser.parse_args(argv)
+    groups = args.device_groups.split(";") if args.device_groups else args.devices.split(",")
     replicas = [ReplicaConfig(args.backend, args.model, d.strip(), json.loads(args.engine_args))
-                for d in args.devices.split(",")]
+                for d in groups]
     engine = InferenceEngine(replicas, state_dir=args.state_dir,
                              policy=PolicyConfig(policy=args.policy, schedule_interval=args.schedule_interval,
                                                  overprovision=args.overprovision))

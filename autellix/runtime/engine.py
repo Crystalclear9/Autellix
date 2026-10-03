@@ -47,6 +47,12 @@ class ReplicaConfig:
     def __post_init__(self):
         if self.backend not in {"vllm", "sglang"}:
             raise ValueError("backend must be vllm or sglang")
+        devices = [d.strip() for d in self.device.split(",")]
+        tp = self.engine_args.get("tensor_parallel_size", 1)
+        if not all(devices) or len(set(devices)) != len(devices):
+            raise ValueError("replica GPU IDs must be nonempty and unique")
+        if self.backend == "vllm" and len(devices) != tp:
+            raise ValueError("provide exactly tensor_parallel_size GPUs in each replica device group")
 
 
 def _worker(index, replica, policy, table_path, trace, commands, events):
@@ -220,9 +226,11 @@ class InferenceEngine:
                 else:
                     session["engine"] = index
             rid = uuid.uuid4().hex
-            context = dict(call_id=call_id, thread_id=thread_id, metadata=metadata or {})
+            context = dict(call_id=call_id, thread_id=thread_id or str(threading.get_ident()),
+                           request_id=rid, engine_id=index, metadata=metadata or {})
             json.dumps(context)  # validate before admission or updating load
             self.table.set_context(rid, context)
+            self.table.record_submission(rid, pid, context)
             future = InferenceFuture()
             self.pending[rid] = (future, pid, index, call_id)
             session["calls"].add(call_id)
@@ -260,20 +268,27 @@ class InferenceEngine:
             if self.replicas[index].backend == "sglang":
                 from integrations.sglang.scheduler import encode_request
                 self.table.finish(pid, encode_request(pid, rid), 0, 0, 0, self.policy.policy)
-        if not future.done():
-            if event == "result":
-                payload.update(program_id=pid, call_id=call_id, engine_id=index)
-                future.update(payload)
-                payload["latency_seconds"] = time.monotonic() - future.submitted_at
-                payload["ttft_seconds"] = (future.first_token_at - future.submitted_at
-                                           if future.first_token_at is not None else None)
-                future.set_result(payload)
-            elif event == "cancelled":
-                future.cancel()
-            else:
-                future.set_exception(RuntimeError(str(payload)))
-        self._cleanup_session(pid)
-        self.idle.notify_all()
+        try:
+            if not future.done():
+                if event == "result":
+                    payload.update(program_id=pid, call_id=call_id, engine_id=index)
+                    future.update(payload)
+                    payload["latency_seconds"] = time.monotonic() - future.submitted_at
+                    payload["ttft_seconds"] = (future.first_token_at - future.submitted_at
+                                               if future.first_token_at is not None else None)
+                    future.set_result(payload)
+                elif event == "cancelled":
+                    future.cancel()
+                else:
+                    future.set_exception(RuntimeError(str(payload)))
+        except concurrent.futures.InvalidStateError:
+            # cancel() takes Future's lock, not the coordinator lock.
+            if not future.cancelled():
+                raise
+        finally:
+            self.table.complete_activity(rid)
+            self._cleanup_session(pid)
+            self.idle.notify_all()
 
     def wait_idle(self, timeout=600):
         """Wait for all results/cancellation acknowledgements and session cleanup."""

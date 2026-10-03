@@ -1,5 +1,9 @@
 # GPU KV swap benchmark
 
+This measures the independently implemented KV transfer mechanism used by the
+Autellix reproduction attempt. It is not the authors' original CUDA kernel or a
+reproduction of the paper's reported speedups.
+
 The benchmark performs real GPU/CPU transfers, validates exact KV round-trip
 correctness with a nontrivial block mapping, synchronizes CUDA for timing, and
 reports median times after warm-up.

@@ -2,8 +2,9 @@
 from collections import deque
 
 
-def attach_scheduler(native, controller):
+def attach_scheduler(native, controller, observe_only=False):
     from vllm.core.scheduler import Scheduler, SchedulerOutputs
+    from vllm.core.interfaces import AllocStatus
 
     if type(native) is not Scheduler:
         raise TypeError("expected the unmodified vLLM 0.6.1 scheduler")
@@ -11,30 +12,34 @@ def attach_scheduler(native, controller):
     class ProgramAwareScheduler(Scheduler):
         def _schedule(self):
             ctl = self.autellix
+            if observe_only:
+                outputs = super()._schedule()
+                self._autellix_execution = [g.seq_group.request_id for g in outputs.scheduled_seq_groups]
+                ctl.begin(self._autellix_execution)
+                return outputs
             self._autellix_step += 1
             available = list(self.running) + list(self.waiting) + list(self.swapped)
             for group in available:
                 if group.request_id not in ctl.calls:
                     raise RuntimeError("request entered vLLM without Autellix metadata")
-            # The native engine caches this schedule for num_scheduler_steps.
-            # Each invocation here is already a multi-step policy boundary.
-            ctl.refresh()
-            ordered = sorted(available, key=lambda g: ctl.key(g.request_id))
-            selected = []
-            slots = 0
-            for group in ordered:
-                count = group.get_max_num_running_seqs()
-                if slots + count > self.scheduler_config.max_num_seqs:
-                    break
-                selected.append(group.request_id)
-                slots += count
-            chosen = set(selected)
-            reserve = []
-            if not self._autellix_evict_reserve:
-                reserve = [g.request_id for g in ordered if g in self.running and
-                           g.request_id not in chosen][:ctl.config.overprovision]
-            self._autellix_evict_reserve = False
-            keep_resident = chosen | set(reserve)
+            if self._autellix_window is None:
+                ctl.refresh()
+                ordered = sorted(available, key=lambda g: ctl.key(g.request_id))
+                chosen = set()
+                slots = 0
+                for group in ordered:
+                    count = group.get_max_num_running_seqs()
+                    if slots + count > self.scheduler_config.max_num_seqs:
+                        break
+                    chosen.add(group.request_id)
+                    slots += count
+                reserve = []
+                keep_resident = chosen
+            else:
+                chosen, resident = self._autellix_window.select(
+                    [g.request_id for g in available], [g.request_id for g in self.running])
+                reserve = list(resident)
+                keep_resident = chosen | resident
             for rid in reserve:
                 if rid not in self._autellix_resident_reserve:
                     ctl.emit("reserve", rid=rid)
@@ -68,6 +73,25 @@ def attach_scheduler(native, controller):
                     ignored_seq_groups=[], num_lookahead_slots=0,
                     running_queue_size=len(self.running), preempted=0)
 
+            if self._autellix_window is not None:
+                incoming = []
+                for group in list(self.swapped):
+                    if group.request_id in self._autellix_window.reserve:
+                        chosen.discard(group.request_id)
+                        if self.block_manager.can_swap_in(group, 0) == AllocStatus.OK:
+                            self._swap_in(group, incoming)
+                            self.swapped.remove(group)
+                            self.running.append(group)
+                            ctl.emit("reserve", rid=group.request_id)
+                if incoming:
+                    self._autellix_execution = []
+                    ctl.begin([])
+                    return SchedulerOutputs(
+                        scheduled_seq_groups=[], num_prefill_groups=0,
+                        num_batched_tokens=0, blocks_to_swap_in=incoming,
+                        blocks_to_swap_out=[], blocks_to_copy=[],
+                        ignored_seq_groups=[], num_lookahead_slots=0,
+                        running_queue_size=len(self.running), preempted=0)
             held = {}
             for name in ("running", "waiting", "swapped"):
                 queue = getattr(self, name)
@@ -81,9 +105,10 @@ def attach_scheduler(native, controller):
                 for name, groups in held.items():
                     getattr(self, name).extend(groups)
             self._autellix_execution = [g.seq_group.request_id for g in outputs.scheduled_seq_groups]
+            self._autellix_is_prefill = outputs.num_prefill_groups > 0
             ctl.begin(self._autellix_execution)
             if not self._autellix_execution and reserve:
-                self._autellix_evict_reserve = True
+                self._autellix_window.drop_reserve()
             for group in outputs.scheduled_seq_groups:
                 if group.seq_group.request_id in self._autellix_was_swapped:
                     ctl.emit("resume", rid=group.seq_group.request_id)
@@ -96,6 +121,7 @@ def attach_scheduler(native, controller):
     native._autellix_selected = set()
     native._autellix_execution = []
     native._autellix_was_swapped = set()
-    native._autellix_evict_reserve = False
     native._autellix_resident_reserve = set()
+    native._autellix_window = None
+    native._autellix_is_prefill = False
     return native

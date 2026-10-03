@@ -1,12 +1,42 @@
 # Autellix
 
-Program-aware LLM inference based on "Autellix: An Efficient Serving Engine for
-LLM Agents as General Programs" (`2502.13965v1.pdf`).
+An **unofficial, independent reproduction attempt** of
+["Autellix: An Efficient Serving Engine for LLM Agents as General Programs"
+(arXiv:2502.13965v1)](https://arxiv.org/abs/2502.13965v1).
+This is not the authors' implementation and is not affiliated with the paper's
+authors. The paper is the method reference, not a source of executable code.
 
 The repository contains **real GPU inference backends** and a separate CPU
 simulator. Use `autellix.runtime` for real inference. The original
 `AutellixClient`, `AsyncMultiLLMEngine`, and simulation CLI remain simulation
 APIs for backward compatibility.
+
+The goal is an independent implementation of the paper's methods. Correctness
+checks use a small local model; reproducing the paper's large-model/A100
+performance figures is not a requirement for using or validating this project.
+
+### Reproduction scope
+
+The real runtime implements online PLAS/ATLAS service inheritance, the shared
+process table, FIFO priority queues with quantum demotion and anti-starvation,
+preemption with KV transfers, scheduling windows with resident request reserves,
+and the paper's 2048-token load-balancing/affinity rule. Online ATLAS follows
+Algorithm 1: calls inherit the longest observed program service path; completion
+updates it with the maximum of the previous value and inherited service plus
+the call's measured execution time. It does not require a user-supplied DAG.
+
+Queue boundaries, quanta and starvation thresholds are configurable choices
+because the paper does not provide all numerical settings. KV packing uses
+PyTorch CUDA operations and pinned host memory. Reserve-enabled execution uses
+native per-step engine metadata within a fixed policy window; this is an
+implementation choice, not a claim of matching the authors' CUDA kernels or
+CPU overhead. SGLang support is an extension of the paper's vLLM-based design.
+
+Small-model tests have exercised both pinned backends, resumed-output equality,
+real host KV transfers, mid-window refill, routing, cancellation and HTTP
+streaming/session cleanup. Multi-GPU tensor parallelism remains unverified on
+hardware. Paper-scale datasets, reported speedups and exact implementation
+equivalence have not been reproduced or established.
 
 ## Real inference: Linux / Ubuntu WSL
 
@@ -35,19 +65,24 @@ autellix-serve --backend sglang --model HuggingFaceTB/SmolLM2-135M-Instruct \
 ```
 
 The server provides `/v1/chat/completions` (including SSE streaming), `/v1/models`,
-`/sessions`, `/requests/{id}`, and `/health`. Explicit sessions carry program
-history between calls; calls without a session use a temporary one-call program.
+`/sessions`, `/requests/{id}`, and `/health`. The Python client automatically
+creates and reuses a program session, including across threads, and annotates
+each call with a unique call ID and thread ID. Use it as a context manager to
+close the session on normal exit or an application exception; interpreter-exit
+cleanup is best effort. Raw HTTP calls without a session remain one-call programs.
+`GET /sessions` exposes shared arrival/completion timestamps, engine placement,
+and active-call waiting/service statistics. Explicit `client.session()` scopes
+remain available and automatically annotate calls within the scope.
 The checkpoint must supply a chat template for chat requests. Raw prompts or
 token IDs are supported by the Python runtime.
 
 ```python
 from autellix.runtime import InferenceClient
 
-client = InferenceClient("http://127.0.0.1:8000")
-with client.session() as sid:
+with InferenceClient("http://127.0.0.1:8000") as client:
     answer = client.chat(
         [{"role": "user", "content": "What is the capital of France?"}],
-        session_id=sid, temperature=0, max_tokens=32,
+        temperature=0, max_tokens=32,
     )
     print(answer["choices"][0]["message"]["content"])
 ```
@@ -66,18 +101,26 @@ engine under `if __name__ == "__main__"` when using multiprocessing.
 - Real tokenizer-based short-request balancing and long-request engine affinity.
 - vLLM: native block allocation, GPU/CPU KV swap, batched CUDA packing and pinned
   host transfers, and native multi-step execution (`--schedule-interval N`).
-- SGLang: scheduler-process hooks, native cache retraction/recomputation, and
-  optional resident radix-prefix reserves (`--overprovision K`).
-- vLLM `--overprovision K` retains up to K displaced requests' allocated GPU KV
-  between scheduling decisions, subject to memory availability.
-- Each replica uses one GPU; use `--devices 0,1` for multiple replicas. Sharing a
-  GPU is possible with explicit per-replica memory budgets. TP/PP, speculative
-  decoding, and chunked prefill are outside the pinned adapters' supported mode.
-
-SGLang policy refresh every N steps and vLLM native multi-step execution are
-different mechanisms. Resident reserves reuse KV; they do not promise arbitrary
-mid-window insertion into vLLM's cached CUDA batch. These implementations do not
-claim the paper's A100 throughput numbers or an exact performance reproduction.
+- SGLang: synchronous packed GPU/CPU KV swap for MHA token pools (page size 1),
+  and resident radix-prefix reserves. `autellix_swap_space` in engine arguments
+  limits pinned host KV storage in GiB (default 1); requests retain their
+  generated tokens and restore computed prefixes on admission.
+- `--schedule-interval N --overprovision K` freezes policy order for N decode
+  steps and prepares up to K additional requests on the GPU. A completed active
+  request is immediately replaced by a prepared reserve; traces record `refill`.
+  Reserve preparation performs real prefill (and its first sampled token) or
+  swap-in. Decode capacity stays at the requested batch size; reserve preparation
+  can temporarily prefill up to batch-size + K requests. Memory pressure releases
+  reserves rather than blocking the active cohort indefinitely.
+- In reserve mode, vLLM uses native per-step metadata/block updates with the
+  Autellix policy window; it does not mutate vLLM's frozen multi-step tensors.
+  Without reserves, single-GPU vLLM retains native cached multi-step execution.
+- Use `--devices 0,1` for independent single-GPU replicas. vLLM tensor-parallel
+  replicas use `--device-groups '0,1;2,3'` and
+  `--engine-args '{"tensor_parallel_size":2,...}'`; worker hooks run on every
+  rank. The TP path has an opt-in two-GPU test and has not been hardware-validated
+  on the one-GPU development machine. SGLang remains one GPU per replica. PP and
+  speculation are outside the adapters' supported mode.
 
 ### Validation
 
@@ -104,6 +147,8 @@ Use `AUTELLIX_TEST_REPLICAS=1` to additionally test two actual model processes
 and cancellation on one GPU with separate memory budgets. Use
 `AUTELLIX_TEST_RESERVE=1` to verify resident KV reuse. These are separate checks
 from the fake-worker IPC unit tests.
+Set both `AUTELLIX_TEST_STEPS=3` and `AUTELLIX_TEST_RESERVE=1` to assert actual
+mid-window refill, and `AUTELLIX_TEST_TP=1` for the optional two-GPU vLLM test.
 
 ### Measured program workloads
 
@@ -111,6 +156,30 @@ from the fake-worker IPC unit tests.
 records measured program latency, output throughput, per-call TTFT, and service
 statistics. Supply JSON calls with text prompts and parent IDs; the example
 workload is a functional smoke workload, not a paper dataset.
+
+For an optional arrival-rate sweep, add `--arrival-rates 1,2,4 --programs 100
+--seed 42`. The same sampled program trace is reused for every policy. JSONL is
+also accepted. Multiple files after `--workload` create a mixed workload, sampled
+equally by dataset and then by program. Inputs must contain real text prompts;
+token-length-only simulation traces are rejected. `arrival_time` and `think_time`
+are seconds. Set a call's `append_parent_outputs` to false for recorded prompts
+that already include their original history.
+
+Results include program response time, DAG critical-path response time divided
+by total generated tokens across all threads (mean/P95/P99), per-program values,
+arrival times, configuration, dependency versions, and a trace hash. Critical-path
+time is the longest dependency path's measured call latencies plus external
+`think_time`; measured call latency includes tokenization and queueing. Zero-output
+programs have null per-token latency rather than dividing by zero.
+
+Native vLLM baselines are opt-in with `--policies vllm,vllm-opt,vllm-opt-multistep,mlfq,plas,atlas`.
+They retain the original scheduling order and original KV transfer implementation;
+Autellix observes their execution only to collect comparable metrics. In pinned
+vLLM 0.6.1, chunked prefill and native multi-step are mutually exclusive:
+`vllm-opt` enables prefix caching and chunked prefill, while
+`vllm-opt-multistep` enables prefix caching and native multi-step (8 steps by
+default, configurable with `--native-opt-steps`). These separate supported
+profiles are not advertised as the paper's combined optimized baseline.
 
 ```bash
 python -m autellix.runtime.benchmark --backend vllm \
@@ -283,7 +352,12 @@ print(workload_analysis(programs))
 ## Tunable Defaults
 
 The paper does not publish exact numeric values for queue boundaries, time
-quanta, or beta. This simulator uses:
+quanta, or beta. For real inference, `autellix.runtime.PolicyConfig` uses seconds:
+boundaries `0,.02,.04,.08,.16,.32,.64,inf`, quanta
+`.01,.02,.04,.08,.16,.32,.64`, beta `8`, schedule interval `1`, and no reserves
+by default. Pass a custom `PolicyConfig` to `InferenceEngine` to tune these.
+
+The separate simulator uses:
 
 - priority boundaries: `0,2,4,8,16,32,64,inf`
 - queue quanta: `1,2,4,8,16,32,64`
@@ -321,8 +395,11 @@ python -m unittest discover -s tests
 
 The test suite covers Figure 2 behavior, PLAS/ATLAS scheduling, queue demotion,
 anti-starvation, cache-aware execution, dynamic sessions, async engine futures,
-dataset importers, paper presets, CLI smoke checks, and optional vLLM scaffold
-imports.
+dataset importers, paper presets, CLI smoke checks, and backend adapter imports.
+Runtime regressions additionally cover process-table consistency,
+automatic client sessions, concurrent cancellation, admission-time duplicate
+request IDs, scheduling windows and measured DAG workload metrics. Opt-in GPU
+tests exercise the real integrations described above.
 
 ## Simulation boundaries
 
