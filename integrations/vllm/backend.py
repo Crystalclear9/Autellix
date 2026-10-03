@@ -117,6 +117,9 @@ class VLLMBackend:
         tokens = prompt if isinstance(prompt, list) else self.tokenize(prompt)
         if len(tokens) >= self.engine.model_config.max_model_len:
             raise ValueError("prompt leaves no room for generation within max_model_len")
+        if (self.scheduler._autellix_paper is not None and
+                len(tokens) > self.scheduler.scheduler_config.max_num_batched_tokens):
+            raise ValueError("prompt exceeds the paper-mode whole-prefill token budget; increase max_num_batched_tokens")
         if any(t < 0 or t >= self.engine.model_config.hf_config.vocab_size for t in tokens):
             raise ValueError("input token ID outside model vocabulary")
         self.controller.admit(rid, pid, metadata=self.table.take_context(rid))

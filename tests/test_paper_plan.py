@@ -105,6 +105,33 @@ class PaperPlanTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             PolicyConfig(implementation="silently-fallback")
 
+    def test_resident_reserve_does_not_consume_decode_token_budget(self):
+        self.priority.update(a=0, reserve=1)
+        self.s.scheduler_config.max_num_batched_tokens = 1
+        self.s.running.extend([Group("a"), Group("reserve")])
+        plan = PaperPlan(self.s, self.ctl, 1)
+        plan.prepared.update(["a", "reserve"])
+        out = plan.next_step()  # New window re-reserves future KV slots.
+        self.assertEqual(plan.window.cohort, ["a", "reserve"])
+        self.assertEqual(out.num_batched_tokens, 1)
+        self.assertEqual([g.seq_group.request_id for g in out.scheduled_seq_groups], ["a"])
+
+    def test_oversized_prefill_rejected_before_program_admission(self):
+        from integrations.vllm.backend import VLLMBackend
+        from unittest.mock import Mock
+        backend = VLLMBackend.__new__(VLLMBackend)
+        backend.scheduler = NS(_autellix_paper=object(), scheduler_config=NS(max_num_batched_tokens=4))
+        backend.engine = NS(model_config=NS(max_model_len=16, hf_config=NS(vocab_size=100)), add_request=Mock())
+        backend.controller, backend.table = Mock(), Mock()
+        with patch.dict("sys.modules", {"vllm": NS(SamplingParams=Mock())}):
+            with self.assertRaisesRegex(ValueError, "whole-prefill token budget"):
+                backend.add("r", "p", [1] * 5, {})
+            backend.controller.admit.assert_not_called()
+            backend.engine.add_request.assert_not_called()
+            backend.add("next", "p", [1] * 4, {})
+            backend.controller.admit.assert_called_once()
+            backend.engine.add_request.assert_called_once()
+
     def test_swapped_reserve_restores_without_decoding_until_refill(self):
         self.priority.update(a=0, reserve=1)
         a, reserve = Group("a"), Group("reserve")

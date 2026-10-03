@@ -85,7 +85,8 @@ class PaperPlan:
             if rid not in chosen and rid in self.reserved_slots:
                 continue
             prefill = group.is_prefill()
-            count = group.get_seqs()[0].data.get_num_uncomputed_tokens() if prefill else 1
+            executes = rid not in resident and not (rid in window.reserve and not prefill)
+            count = (group.get_seqs()[0].data.get_num_uncomputed_tokens() if prefill else 1) if executes else 0
             if tokens + count > s.scheduler_config.max_num_batched_tokens:
                 if groups:
                     window.retain_prefix(window.cohort.index(rid))

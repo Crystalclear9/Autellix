@@ -22,7 +22,9 @@ custom multiprocessing executor to install transfer hooks on every rank; the
 two-GPU test is opt-in and requires hardware not present on the development host.
 PP is rejected. Paper mode enables mixed-phase attention support but performs
 whole-call prefill admission within the configured token budget. A prompt that
-cannot fit must use a larger budget. Future decode slots are reserved at window
+cannot fit is rejected before admission without stopping the replica; use a
+larger budget for such prompts. Resident reserves consume KV capacity but no
+decode token budget until they replace an active request. Future decode slots are reserved at window
 preparation. Token metadata continues to advance once per execution step.
 
 Use `--implementation compat` to select the former scheduler wrapper. In that

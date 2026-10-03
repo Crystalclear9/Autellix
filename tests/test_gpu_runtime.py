@@ -21,6 +21,24 @@ MODEL = os.environ.get("AUTELLIX_TEST_MODEL")
 
 @unittest.skipUnless(BACKEND and MODEL, "requires AUTELLIX_GPU_BACKEND and AUTELLIX_TEST_MODEL")
 class RealInferenceTests(unittest.TestCase):
+    @unittest.skipUnless(BACKEND == "vllm", "requires vllm")
+    def test_oversized_prefill_does_not_kill_replica(self):
+        args = dict(max_model_len=512, max_num_batched_tokens=32, max_num_seqs=1,
+                    gpu_memory_utilization=.35, swap_space=.25, dtype="half")
+        with InferenceEngine([ReplicaConfig("vllm", MODEL, engine_args=args)]) as engine:
+            bad_pid, good_pid = engine.start_session(), engine.start_session()
+            bad = engine.submit(bad_pid, input_ids=[1] * 64, sampling=dict(max_tokens=8))
+            good = engine.submit(good_pid, input_ids=[1] * 8,
+                                 sampling=dict(temperature=0, max_tokens=8, ignore_eos=True))
+            with self.assertRaisesRegex(RuntimeError, "whole-prefill token budget"):
+                bad.result(180)
+            self.assertEqual(len(good.result(180)["token_ids"]), 8)
+            self.assertEqual(engine.failed, {})
+            engine.end_session(bad_pid)
+            engine.end_session(good_pid)
+            engine.wait_idle(30)
+            self.assertEqual(engine.table.describe(), {})
+
     @unittest.skipUnless(BACKEND == "vllm" and os.environ.get("AUTELLIX_TEST_TP"), "requires vllm and AUTELLIX_TEST_TP=1 with two GPUs")
     def test_tensor_parallel_generation_and_program_accounting(self):
         import torch
