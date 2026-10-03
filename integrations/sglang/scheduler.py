@@ -84,6 +84,16 @@ def install(cls, options):
         return original_add(self, req)
 
     def prefill(self):
+        restored_nodes = []
+        try:
+            return prefill_plan(self, restored_nodes)
+        finally:
+            # Native admission has acquired its own locks for accepted requests.
+            # Others retain their host backup and must remain evictable on retry.
+            for node in reversed(restored_nodes):
+                self.tree_cache.dec_lock_ref(node)
+
+    def prefill_plan(self, restored_nodes):
         ctl = self.autellix
         # Decode results retire requests before native update_running_batch
         # filters its tensors. We inspect this batch earlier, so apply the
@@ -183,6 +193,15 @@ def install(cls, options):
                         self._autellix_window.drop_reserve()
                     restored = self._autellix_host.restore(req.rid)
                 if restored:
+                    # A later restoration can evict radix entries before native
+                    # admission runs. Protect every restored higher-priority
+                    # prefix until that admission has taken ownership.
+                    tokens, _ = self._autellix_host.saved[req.rid]
+                    matched = self.tree_cache.match_prefix(tokens)
+                    if len(matched.device_indices) != len(tokens):
+                        raise RuntimeError("restored KV prefix is incomplete before admission")
+                    self.tree_cache.inc_lock_ref(matched.last_device_node)
+                    restored_nodes.append(matched.last_device_node)
                     ctl.emit("swap_in", rid=req.rid)
                 else:
                     if not self.running_batch.reqs and ready_index == 0:

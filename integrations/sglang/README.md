@@ -30,6 +30,10 @@ storage in GiB (default 1); unsupported non-MHA layouts fail explicitly.
 Restoration locks an existing GPU prefix and allocates/transfers only its missing
 suffix, so shared prefixes do not need duplicate GPU capacity. Failed allocation
 or transfer releases the temporary lock and keeps the host copy for retry.
+Successfully restored prefixes stay pinned across the remaining restorations
+and native admission, so a later request cannot evict an earlier request's KV.
+These temporary pins are released after native admission acquires its own locks,
+or on failure; unadmitted requests retain their host copies for retry.
 Default `--implementation paper` selects the global cohort once per N decode
 steps, mixes its prefills and decodes, bypasses native prefill admission during
 decode-only continuation, and disables native length-based decode retraction.
