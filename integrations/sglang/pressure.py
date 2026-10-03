@@ -2,12 +2,11 @@
 
 
 def make_decode_room(scheduler, batch):
+    from .reserve import release_reserves
     if batch.check_decode_mem(scheduler.decode_mem_cache_buf_multiplier):
         return
     ctl, window = scheduler.autellix, scheduler._autellix_window
-    for node in scheduler._autellix_reserve.values():
-        scheduler.tree_cache.dec_lock_ref(node)
-    scheduler._autellix_reserve.clear()
+    release_reserves(scheduler)
     if window is not None:
         window.drop_reserve()
     while not batch.check_decode_mem(scheduler.decode_mem_cache_buf_multiplier):

@@ -9,6 +9,44 @@ from integrations.sglang.scheduler import encode_request, install
 
 
 class CompletedDecodeTests(unittest.TestCase):
+    def test_reserve_pin_survives_until_native_admission(self):
+        events = []
+        with tempfile.TemporaryDirectory() as directory:
+            class Native:
+                def __init__(self):
+                    self.policy = SimpleNamespace()
+                    self.server_args = SimpleNamespace(max_running_requests=1)
+                    self.waiting_queue = []
+                _add_request_to_queue = Mock()
+                _extend_requests_to_queue = Mock()
+                run_batch = Mock()
+                process_batch_result = Mock()
+                abort_request = Mock()
+                check_memory = Mock()
+                def get_new_batch_prefill(self):
+                    if "r" not in self._autellix_reserve:
+                        raise AssertionError("reserve became evictable before native admission")
+                    events.append("native_lock")
+                    result = SimpleNamespace(reqs=list(self.waiting_queue))
+                    self.waiting_queue = []
+                    return result
+            with patch.dict("sys.modules", {"torch": Mock()}):
+                install(Native, {"table_path": str(Path(directory, "state.sqlite")),
+                                 "config": {}, "capacity": 1})
+            scheduler = Native()
+            try:
+                scheduler.autellix.table.open("p")
+                scheduler.autellix.admit("r", "p")
+                scheduler.running_batch = SimpleNamespace(reqs=[], filter_batch=lambda: None)
+                scheduler.waiting_queue = [SimpleNamespace(rid="r")]
+                scheduler._autellix_reserve["r"] = "node"
+                scheduler.tree_cache = SimpleNamespace(dec_lock_ref=lambda _: events.append("release_reserve_lock"))
+                scheduler.get_new_batch_prefill()
+                self.assertEqual(events, ["native_lock", "release_reserve_lock"])
+                self.assertEqual(scheduler._autellix_reserve, {})
+            finally:
+                scheduler.autellix.table.close()
+
     def test_failed_restore_stops_admission_after_successful_prefix(self):
         for running in (False, True):
             with self.subTest(running=running), tempfile.TemporaryDirectory() as directory:
@@ -109,7 +147,7 @@ class CompletedDecodeTests(unittest.TestCase):
                         if self.running_batch.batch_is_full:
                             return None
                         self.policy.calc_priority(self.waiting_queue)
-                        return len(self.running_batch.reqs)
+                        return SimpleNamespace(reqs=list(self.running_batch.reqs))
 
                 with patch.dict("sys.modules", {"torch": Mock()}):
                     install(NativeScheduler, {
@@ -134,7 +172,7 @@ class CompletedDecodeTests(unittest.TestCase):
                     scheduler.running_batch = batch
                     scheduler.waiting_queue = reqs[2:]
                     scheduler._autellix_steps = step
-                    self.assertEqual(scheduler.get_new_batch_prefill(), 1)
+                    self.assertEqual(len(scheduler.get_new_batch_prefill().reqs), 1)
                     self.assertEqual(batch.reqs, reqs[1:2])
                     self.assertFalse(batch.batch_is_full)
                 finally:

@@ -13,6 +13,22 @@ from integrations.sglang.swap import HostKV
 
 @unittest.skipUnless(torch, "requires torch (available in both backend environments)")
 class HostSwapTests(unittest.TestCase):
+    def test_failed_replacement_preserves_existing_host_backup(self):
+        swap, _ = self.make_swap()
+        old = swap.saved["r"]
+        swap.used_bytes = old[1].numel() * old[1].element_size()
+        original_size = swap.used_bytes
+        swap.limit_bytes = original_size
+        with self.assertRaisesRegex(RuntimeError, "budget exhausted"):
+            swap.save("r", list(range(9)), torch.arange(9))
+        self.assertIs(swap.saved["r"], old)
+        self.assertEqual(swap.used_bytes, original_size)
+        with patch("torch.stack", side_effect=RuntimeError("packing failed")):
+            with self.assertRaisesRegex(RuntimeError, "packing failed"):
+                swap.save("r", list(range(8)), torch.arange(8))
+        self.assertIs(swap.saved["r"], old)
+        self.assertEqual(swap.used_bytes, original_size)
+
     def make_swap(self, fail_alloc=False):
         layer = torch.zeros((8, 1))
         prefix = torch.arange(6)

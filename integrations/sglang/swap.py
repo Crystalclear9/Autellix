@@ -17,16 +17,17 @@ class HostKV:
 
     def save(self, rid, tokens, indices):
         import torch
-        self.discard(rid)
+        old = self.saved.get(rid)
+        old_size = old[1].numel() * old[1].element_size() if old else 0
         size = sum(layer[0].numel() * layer.element_size() for layer in self.layers) * len(indices)
-        if self.used_bytes + size > self.limit_bytes:
+        if self.used_bytes - old_size + size > self.limit_bytes:
             raise RuntimeError("Autellix SGLang host KV budget exhausted; increase autellix_swap_space")
         packed = torch.stack([layer.index_select(0, indices.long()) for layer in self.layers])
         host = torch.empty(packed.shape, dtype=packed.dtype, device="cpu", pin_memory=True)
         host.copy_(packed, non_blocking=True)
         torch.cuda.current_stream(packed.device).synchronize()
         self.saved[rid] = (list(tokens), host)
-        self.used_bytes += size
+        self.used_bytes += size - old_size
 
     def restore(self, rid):
         """Restore into radix cache; retain the host copy until native admission."""

@@ -23,7 +23,9 @@ class DecodePressureTests(unittest.TestCase):
         window.retain_prefix = lambda count: setattr(window, "cohort", window.cohort[:count])
         scheduler = NS(autellix=NS(emit=Mock()), _autellix_window=window,
                        _autellix_reserve={"reserve": "reserve-cache"},
-                       tree_cache=NS(dec_lock_ref=Mock()), _autellix_host=NS(save=Mock()),
+                       tree_cache=NS(dec_lock_ref=Mock(), match_prefix=lambda _: NS(device_indices=[1])),
+                       waiting_queue=[NS(rid="reserve", _autellix_reserved_tokens=[1])],
+                       _autellix_host=NS(save=Mock()),
                        decode_mem_cache_buf_multiplier=1, _extend_requests_to_queue=Mock())
         make_decode_room(scheduler, batch)
         self.assertEqual(batch.reqs, [high])

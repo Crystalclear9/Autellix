@@ -13,6 +13,10 @@ The adapter uses native token pools and radix cache ownership during retraction,
 keeps generated tokens, and requeues requests by online PLAS/ATLAS priority.
 `overprovision` retains a bounded number of computed GPU prefixes under cache
 locks; locks are released on readmission, memory pressure, cancellation, or idle.
+When a live reserve leaves the window or is released for memory pressure, its
+computed prefix is saved to CPU before unlocking, so later eviction does not
+silently turn resumption into recomputation. Failed backup replacement keeps the
+previous host copy and accounting intact.
 
 The supported mode is one GPU per replica, text generation with radix caching,
 page size 1, non-overlapped execution and unchunked prefill. Multiple independent

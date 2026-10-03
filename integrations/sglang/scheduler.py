@@ -23,6 +23,7 @@ def run_scheduler_process(*args, autellix_options, **kwargs):
 
 
 def install(cls, options):
+    from .reserve import release_reserves
     from autellix.runtime.policy import PolicyConfig, ProgramTable, RuntimeScheduler
     import torch
 
@@ -101,7 +102,7 @@ def install(cls, options):
                 [r.rid for r in batch.reqs] + list(self._autellix_reserve))
             for rid in list(self._autellix_reserve):
                 if rid not in self._autellix_window.cohort:
-                    self.tree_cache.dec_lock_ref(self._autellix_reserve.pop(rid))
+                    release_reserves(self, [rid])
             if (self._autellix_paper and old_remaining > 0 and
                     selected == {r.rid for r in batch.reqs}):
                 ctl.emit("continue_plan", requests=[r.rid for r in batch.reqs])
@@ -137,6 +138,7 @@ def install(cls, options):
                         # only the request slot is released. Unlike recompute,
                         # admission can reuse all previously computed tokens.
                         req.fill_ids = (req.origin_input_ids + req.output_ids)[:lengths[i]]
+                        req._autellix_reserved_tokens = list(req.fill_ids)
                         batch.tree_cache.cache_unfinished_req(req)
                         self._autellix_reserve[req.rid] = req.last_node
                         batch.req_to_token_pool.free(req.req_pool_idx)
@@ -174,9 +176,9 @@ def install(cls, options):
             if self._autellix_host is not None and req.rid in self._autellix_host.saved:
                 restored = self._autellix_host.restore(req.rid)
                 if not restored and self._autellix_reserve:
-                    for node in self._autellix_reserve.values():
-                        self.tree_cache.dec_lock_ref(node)
-                    self._autellix_reserve.clear()
+                    inactive = (self._autellix_window.reserve & self._autellix_reserve.keys()
+                                if self._autellix_window is not None else self._autellix_reserve.keys())
+                    release_reserves(self, inactive)
                     if self._autellix_window is not None:
                         self._autellix_window.drop_reserve()
                     restored = self._autellix_host.restore(req.rid)
@@ -189,10 +191,8 @@ def install(cls, options):
                     # restoration. A successfully prepared prefix can still run.
                     blocked.update(r.rid for r in ready[ready_index:])
                     break
-            node = self._autellix_reserve.pop(req.rid, None)
-            if node is not None:
-                self.tree_cache.dec_lock_ref(node)
-                ctl.emit("resume_cached", rid=req.rid)
+            # Keep a promoted reserve pinned until native admission acquires
+            # its own prefix lock; restoring another request must not evict it.
         held = [r for r in self.waiting_queue if (selected is not None and r.rid not in selected) or r.rid in blocked]
         self.waiting_queue = [r for r in self.waiting_queue if r not in held]
         def hold_released_reserves():
@@ -206,9 +206,13 @@ def install(cls, options):
                 self.running_batch.batch_is_full = False
             result = original_prefill(self)
             if result is None and slots and self.waiting_queue and self._autellix_reserve:
-                for node in self._autellix_reserve.values():
-                    self.tree_cache.dec_lock_ref(node)
-                self._autellix_reserve.clear()
+                # Held reserves are temporarily outside waiting_queue here.
+                current_waiting = self.waiting_queue
+                self.waiting_queue = current_waiting + held
+                try:
+                    release_reserves(self)
+                finally:
+                    self.waiting_queue = current_waiting
                 if self._autellix_window is not None:
                     self._autellix_window.drop_reserve()
                 hold_released_reserves()
@@ -227,9 +231,14 @@ def install(cls, options):
                         raise RuntimeError("highest-priority request cannot fit the configured token/KV budget")
                     self._autellix_window.retain_prefix(i)
                     break
-        if result is not None and self._autellix_host is not None:
+        if result is not None:
             for req in result.reqs:
-                self._autellix_host.discard(req.rid)
+                node = self._autellix_reserve.pop(req.rid, None)
+                if node is not None:
+                    self.tree_cache.dec_lock_ref(node)
+                    ctl.emit("resume_cached", rid=req.rid)
+                if self._autellix_host is not None:
+                    self._autellix_host.discard(req.rid)
         return result
 
     def run(self, batch):
