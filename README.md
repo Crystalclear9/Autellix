@@ -83,6 +83,10 @@ cleanup is best effort. Raw HTTP calls without a session remain one-call program
 `GET /sessions` exposes shared arrival/completion timestamps, engine placement,
 and active-call waiting/service statistics. Explicit `client.session()` scopes
 remain available and automatically annotate calls within the scope.
+Closed clients reject calls even with an explicit session ID. After a process
+fork, create a new client; the child cannot reuse or close the parent's sessions.
+If session cleanup fails during an application exception, the application
+exception remains primary and the cleanup error is retained as its cause.
 The checkpoint must supply a chat template for chat requests. Raw prompts or
 token IDs are supported by the Python runtime.
 

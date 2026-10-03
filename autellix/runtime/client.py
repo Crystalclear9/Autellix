@@ -22,17 +22,23 @@ class InferenceClient:
         self._owner = os.getpid()
         atexit.register(self._exit_cleanup)
 
+    def _check_open(self):
+        if os.getpid() != self._owner:
+            raise RuntimeError("create a new InferenceClient after forking")
+        if self._closed:
+            raise RuntimeError("client is closed")
+
     def _automatic_session(self):
+        self._check_open()  # Check ownership before touching an inherited lock.
         with self._lock:
-            if os.getpid() != self._owner:
-                raise RuntimeError("create a new InferenceClient after forking")
-            if self._closed:
-                raise RuntimeError("client is closed")
+            self._check_open()
             if self._sid is None:
                 self._sid = self._request("POST", "/sessions", {"program_id": self.program_id})["session_id"]
             return self._sid
 
     def close(self):
+        if os.getpid() != self._owner:
+            return
         with self._lock:
             if self._closed or os.getpid() != self._owner:
                 return
@@ -52,8 +58,13 @@ class InferenceClient:
         self._automatic_session()
         return self
 
-    def __exit__(self, *_):
-        self.close()
+    def __exit__(self, exc_type, exc, traceback):
+        try:
+            self.close()
+        except Exception as cleanup_error:
+            if exc is None:
+                raise
+            raise exc.with_traceback(traceback) from cleanup_error
 
     def _request(self, method, path, body=None):
         data = None if body is None else json.dumps(body).encode()
@@ -64,15 +75,30 @@ class InferenceClient:
 
     @contextmanager
     def session(self, program_id=None):
-        sid = self._request("POST", "/sessions", {"program_id": program_id})["session_id"]
+        self._check_open()
+        with self._lock:
+            self._check_open()
+            sid = self._request("POST", "/sessions", {"program_id": program_id})["session_id"]
         token = self._session.set(sid)
+        error = None
         try:
             yield sid
+        except BaseException as exc:
+            error = exc
+            raise
         finally:
             self._session.reset(token)
-            self._request("DELETE", "/sessions/" + quote(sid, safe=""))
+            # A forked child must never end the parent's program.
+            if os.getpid() == self._owner:
+                try:
+                    self._request("DELETE", "/sessions/" + quote(sid, safe=""))
+                except Exception as cleanup_error:
+                    if error is None:
+                        raise
+                    raise error from cleanup_error
 
     def chat(self, messages, *, session_id=None, **options):
+        self._check_open()
         session_id = session_id or self._session.get() or self._automatic_session()
         options.setdefault("thread_id", str(threading.get_ident()))
         options.setdefault("call_id", uuid.uuid4().hex)
