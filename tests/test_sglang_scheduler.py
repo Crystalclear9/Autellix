@@ -9,6 +9,50 @@ from integrations.sglang.scheduler import encode_request, install
 
 
 class CompletedDecodeTests(unittest.TestCase):
+    def test_failed_restore_stops_admission_after_successful_prefix(self):
+        for running in (False, True):
+            with self.subTest(running=running), tempfile.TemporaryDirectory() as directory:
+                admitted = []
+                class Native:
+                    def __init__(self):
+                        self.policy = SimpleNamespace()
+                        self.server_args = SimpleNamespace(max_running_requests=3)
+                        self.waiting_queue = []
+                    _add_request_to_queue = Mock()
+                    _extend_requests_to_queue = Mock()
+                    run_batch = Mock()
+                    process_batch_result = Mock()
+                    abort_request = Mock()
+                    check_memory = Mock()
+                    def get_new_batch_prefill(self):
+                        admitted.extend(r.rid for r in self.waiting_queue)
+                        result = SimpleNamespace(reqs=list(self.waiting_queue)) if self.waiting_queue else None
+                        self.waiting_queue = []
+                        return result
+                with patch.dict("sys.modules", {"torch": Mock()}):
+                    install(Native, {"table_path": str(Path(directory, "state.sqlite")),
+                                     "config": {"overprovision": 0}, "capacity": 3})
+                scheduler = Native()
+                ctl = scheduler.autellix
+                try:
+                    ctl.table.open("p")
+                    for rid in ("higher", "a", "b"):
+                        ctl.admit(rid, "p")
+                    scheduler.running_batch = SimpleNamespace(
+                        reqs=[SimpleNamespace(rid="higher")] if running else [],
+                        filter_batch=lambda: None, batch_is_full=False,
+                        seq_lens=SimpleNamespace(cpu=lambda: SimpleNamespace(tolist=lambda: [5])))
+                    scheduler.waiting_queue = [SimpleNamespace(rid="a"), SimpleNamespace(rid="b")]
+                    scheduler._autellix_host = SimpleNamespace(
+                        saved={"a": True, "b": True}, discard=lambda _: None,
+                        restore=lambda rid: rid == "a" and not running)
+                    scheduler.get_new_batch_prefill()
+                    self.assertEqual(admitted, [] if running else ["a"])
+                    self.assertEqual([r.rid for r in scheduler.waiting_queue], ["a", "b"] if running else ["b"])
+                    self.assertEqual(scheduler._autellix_window.cohort, ["higher"] if running else ["a"])
+                finally:
+                    ctl.table.close()
+
     def test_prepared_window_bypasses_native_prefill_admission(self):
         with tempfile.TemporaryDirectory() as directory:
             class Native:

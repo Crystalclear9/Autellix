@@ -126,6 +126,8 @@ class PaperPlan:
                 s.swapped.remove(group)
                 s.running.append(group)
                 ctl.emit("resume", rid=rid)
+                if not prefill:
+                    self.prepared.add(rid)
             # Reserve future KV capacity once per window. Subsequent append
             # calls commit actual token IDs / prefix-cache bookkeeping only.
             if not s.block_manager.can_append_slots(group, lookahead):
@@ -144,7 +146,7 @@ class PaperPlan:
                 copies.extend(s.block_manager.append_slots(seq, lookahead))
             self.reserved_slots.add(rid)
             group.init_multi_step(num_scheduler_steps=1)
-            if rid in resident:
+            if rid in resident or (rid in window.reserve and not prefill):
                 continue
             groups.append(ScheduledSequenceGroup(seq_group=group, token_chunk_size=count))
             tokens += count

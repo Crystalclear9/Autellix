@@ -105,6 +105,23 @@ class PaperPlanTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             PolicyConfig(implementation="silently-fallback")
 
+    def test_swapped_reserve_restores_without_decoding_until_refill(self):
+        self.priority.update(a=0, reserve=1)
+        a, reserve = Group("a"), Group("reserve")
+        self.s.running.append(a)
+        self.s.swapped.append(reserve)
+        plan = PaperPlan(self.s, self.ctl, 1)
+        out = plan.next_step()
+        self.assertTrue(out.blocks_to_swap_in)
+        self.assertEqual([g.seq_group.request_id for g in out.scheduled_seq_groups], ["a"])
+        self.assertIn("reserve", plan.prepared)
+        plan.window.executed()
+        out = plan.next_step()
+        self.assertEqual([g.seq_group.request_id for g in out.scheduled_seq_groups], ["a"])
+        self.s.running.remove(a)
+        out = plan.next_step()
+        self.assertEqual([g.seq_group.request_id for g in out.scheduled_seq_groups], ["reserve"])
+
     def test_first_nonfitting_request_ends_window_admission(self):
         self.ctl.config = PolicyConfig(schedule_interval=3, overprovision=0)
         self.priority.update(a=0, b=1)

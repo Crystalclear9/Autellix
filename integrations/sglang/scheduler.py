@@ -166,7 +166,11 @@ def install(cls, options):
             # Decode continuation: no native prefill admission / priority pass.
             return None
         blocked = set()
-        for req in ready:
+        for ready_index, req in enumerate(ready):
+            if (self._autellix_paper and self._autellix_window is not None
+                    and req.rid not in self._autellix_window.cohort):
+                blocked.add(req.rid)
+                continue
             if self._autellix_host is not None and req.rid in self._autellix_host.saved:
                 restored = self._autellix_host.restore(req.rid)
                 if not restored and self._autellix_reserve:
@@ -179,16 +183,25 @@ def install(cls, options):
                 if restored:
                     ctl.emit("swap_in", rid=req.rid)
                 else:
-                    if not self.running_batch.reqs:
+                    if not self.running_batch.reqs and ready_index == 0:
                         raise RuntimeError("insufficient GPU KV capacity to restore one request")
-                    blocked.add(req.rid)
+                    # Do not admit a lower-priority request past a failed
+                    # restoration. A successfully prepared prefix can still run.
+                    blocked.update(r.rid for r in ready[ready_index:])
+                    break
             node = self._autellix_reserve.pop(req.rid, None)
             if node is not None:
                 self.tree_cache.dec_lock_ref(node)
                 ctl.emit("resume_cached", rid=req.rid)
         held = [r for r in self.waiting_queue if (selected is not None and r.rid not in selected) or r.rid in blocked]
         self.waiting_queue = [r for r in self.waiting_queue if r not in held]
+        def hold_released_reserves():
+            if self._autellix_paper and self._autellix_window is not None:
+                released = [r for r in self.waiting_queue if r.rid not in self._autellix_window.cohort]
+                held.extend(released)
+                self.waiting_queue = [r for r in self.waiting_queue if r not in released]
         try:
+            hold_released_reserves()
             if self._autellix_paper and ready:
                 self.running_batch.batch_is_full = False
             result = original_prefill(self)
@@ -198,6 +211,7 @@ def install(cls, options):
                 self._autellix_reserve.clear()
                 if self._autellix_window is not None:
                     self._autellix_window.drop_reserve()
+                hold_released_reserves()
                 self.running_batch.batch_is_full = False
                 result = original_prefill(self)
         finally:
@@ -245,8 +259,8 @@ def install(cls, options):
             return batch
         # Advance the admitted plan; never use native length-based retraction
         # to replace paper priorities in the middle of a scheduling window.
-        if not batch.check_decode_mem(self.decode_mem_cache_buf_multiplier):
-            raise RuntimeError("paper plan exhausted decode KV capacity; reduce batch size or scheduling interval")
+        from .pressure import make_decode_room
+        make_decode_room(self, batch)
         batch.prepare_for_decode()
         return batch
 

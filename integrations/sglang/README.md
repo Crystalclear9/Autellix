@@ -29,6 +29,9 @@ or transfer releases the temporary lock and keeps the host copy for retry.
 Default `--implementation paper` selects the global cohort once per N decode
 steps, mixes its prefills and decodes, bypasses native prefill admission during
 decode-only continuation, and disables native length-based decode retraction.
+Under decode memory pressure it first releases reserves, then swaps out the
+lowest-priority suffix of the frozen plan, preserving generated tokens. It does
+not fail the whole batch merely because multiple active requests no longer fit.
 `--implementation compat` restores the previous native scheduling hooks. Default
 N=8 and one reserve are configurable project settings. Extra reserve prefills
 prepare GPU prefixes ahead of completion; `refill` records mid-window replacement.
