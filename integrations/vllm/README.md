@@ -1,6 +1,6 @@
 # vLLM 后端
 
-本项目独立实现的 Autellix 适配，固定使用 **vLLM 0.6.1**。安装、服务、客户端和验证入口见 [主 README](../../README.md)。
+本项目独立实现的 Autellix 适配，固定使用 **vLLM 0.6.1**。安装、服务、客户端和验证入口见 [安装与首次使用](../../docs/getting-started.md)。
 
 ## 支持范围
 
@@ -21,7 +21,7 @@
 
 ## 配置
 
-主 README 的启动命令使用默认 `paper`、N=8、K=1。`--implementation compat` 选择旧包装实现：单 GPU 且 K=0 时使用原生缓存多步执行，其余情况在筛选后的请求集合中调用原生调度。
+[安装文档](../../docs/getting-started.md)的启动命令使用默认 `paper`、N=8、K=1。`--implementation compat` 选择旧包装实现：单 GPU 且 K=0 时使用原生缓存多步执行，其余情况在筛选后的请求集合中调用原生调度。
 
 `--devices 0,1` 启动两个独立副本。张量并行使用 `--device-groups '0,1;2,3'`，并在 `--engine-args` 中设置 `"tensor_parallel_size":2`；每组设备数必须匹配并行度。
 
@@ -37,4 +37,4 @@
 
 vLLM 0.6.1 不允许同时开启分块 prefill 与原生多步执行，因此后两者分开提供，不声称等于论文中的组合优化基准。`--native-opt-steps` 配置原生多步长度。
 
-`autellix_adapter.py` 保留旧元数据接口，其 `create_backend()` 可构造真实后端。回归测试包括抢占前后贪心结果一致、程序历史继承和无效输入隔离；双副本及张量并行测试需显式启用，见主 README。
+`autellix_adapter.py` 保留旧元数据接口，其 `create_backend()` 可构造真实后端。回归测试包括抢占前后贪心结果一致、程序历史继承和无效输入隔离；双副本及张量并行测试需显式启用，见[开发与验证](../../docs/development.md)。
