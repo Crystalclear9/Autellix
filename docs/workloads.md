@@ -81,5 +81,5 @@ benchmark 另行从 `submit()` 前开始计时，所以其关键路径调用延�
 `scripts/prepare_sharegpt_replay.py` 与 `scripts/compare_sglang.py` 提供可复核的
 ShareGPT 子集回放和配对重复实验，保存原始结果及输出哈希；
 `scripts/summarize_sglang_comparison.py` 拒绝缺失配对/重复，保留负收益和输出不一致标记。
-正的 latency reduction / throughput gain 才表示该指标改善，不能只挑选正值报告。
-完整约束见 [论文对照审计](autellix-paper-audit.md)，这些工具不等于论文全量实验。
+正的 latency reduction / throughput gain 表示改善，负值表示退化；汇总保留全部配对。
+源码与论文对应、数据设置和实测结果见 [论文核对与实验](autellix-paper-audit.md)。

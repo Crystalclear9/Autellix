@@ -10,12 +10,13 @@ from integrations.sglang.legacy_gpu import run_native_scheduler_process
 class NativeBaselineTests(unittest.TestCase):
     def test_native_target_only_installs_hardware_compatibility(self):
         module = ModuleType("sglang.srt.managers.scheduler")
+        module.Scheduler = type("Scheduler", (), {})
         module.run_scheduler_process = Mock(return_value="native-result")
         with patch.dict(sys.modules, {module.__name__: module}), \
              patch("integrations.sglang.legacy_gpu.install_native_ops") as kernels, \
              patch("integrations.sglang.scheduler.install") as hooks:
             self.assertEqual(run_native_scheduler_process(1, token=2), "native-result")
-        kernels.assert_called_once_with()
+        kernels.assert_called_once_with(prefix_attention=True)
         hooks.assert_not_called()
         module.run_scheduler_process.assert_called_once_with(1, token=2)
 

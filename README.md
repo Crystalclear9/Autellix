@@ -1,8 +1,8 @@
 # Autellix
 
-对论文 [Autellix: An Efficient Serving Engine for LLM Agents as General Programs（arXiv:2502.13965v1）](https://arxiv.org/abs/2502.13965v1) 的**非官方、独立复现尝试**。
+对论文 [Autellix: An Efficient Serving Engine for LLM Agents as General Programs（arXiv:2502.13965v1）](https://arxiv.org/abs/2502.13965v1) 的**复现尝试**。
 
-本项目实现程序感知调度，并接入真实 vLLM 和 SGLang 推理后端。可将项目描述为：**独立实现了 Autellix 的核心方法，并完成小模型功能验证。** 这不代表作者原始代码、完全相同的 CUDA 实现或论文性能结果。SGLang 是在论文 vLLM 方案之外增加的适配。
+本项目实现程序感知调度、PLAS/ATLAS、KV 交换、多步调度与预备请求，并接入 vLLM 和 SGLang 推理后端。源码核对、实测结果和改进方向统一记录在实验报告中。
 
 ## 文档
 
@@ -21,12 +21,13 @@
 后端专项说明：[vLLM](integrations/vllm/README.md)、[SGLang](integrations/sglang/README.md)；传输微基准：[KV benchmark](cuda/README.md)。
 
 2026-11-15 的 [P40 部署与验收记录](docs/p40-validation-20261115.md)记录了
-SmolLM2-135M 的真实生成、抢占恢复和 HTTP 验证，以及明确的待验证/未修复清单。
-P40 使用实验性 FP32/PyTorch 原生算子路径；小型基准不代表论文性能或生产验收。
+SmolLM2-135M 的真实生成、抢占恢复和 HTTP 验证，以及后续修改清单。
+P40 使用 PyTorch 原生算子路径，默认 FP32，也可显式选择 FP16。
 论文机制、原模型/数据集差距和直接 SGLang 对照协议见
-[论文核对与 SGLang 对照](docs/autellix-paper-audit.md)。`fcfs` 策略不是原生 SGLang 基线。
-本次 P40/ShareGPT 子集的 6 组主实验配对均未得到正收益：低/高到达率下平均程序
-响应分别增加 25.8%/42.4%。这不是论文模型与硬件配置下的性能复现。
+[论文核对与 SGLang 对照](docs/autellix-paper-audit.md)。对照使用 `sglang-native` 原生调度路径。
+本轮修正缓存前缀 attention 后，短 ShareGPT 回放的三组配对平均吞吐差距为 −8.54%，
+程序响应增加 25.91%。Llama-3.1-8B 原长度回放的单组对照中，程序响应减少 4.30%，
+吞吐下降 2.70%。完整参数、输出检查和后续改进见同一报告。
 
 ## 快速开始
 
@@ -54,10 +55,10 @@ with InferenceClient("http://127.0.0.1:8000") as client:
     print(result["choices"][0]["message"]["content"])
 ```
 
-## 项目边界
+## 实现与运行
 
-真实推理使用 `autellix.runtime`；`autellix.core`、`autellix.frontend`、`autellix.cli` 和旧的 `AutellixClient` / `AsyncMultiLLMEngine` 属于 CPU 模拟工具，不能替代真实模型执行。
+真实推理使用 `autellix.runtime`；`autellix.core`、`autellix.frontend`、`autellix.cli` 和旧的 `AutellixClient` / `AsyncMultiLLMEngine` 用于 CPU 离散时间模拟。
 
-当前默认在线 ATLAS、8 步窗口、1 个预备请求，另有 PLAS、MLFQ、FCFS。默认数值是项目选择；`paper` 模式表示实现目标，不是完全等价认证。SGLang 是论文方案之外的扩展。
+当前默认在线 ATLAS、8 步窗口、1 个预备请求，另有 PLAS、MLFQ、FCFS。`paper` 模式使用多步调度窗口，`compat` 保留旧后端包装路径。SGLang 是项目增加的后端适配。
 
-已有小模型功能验证，包括真实生成、抢占恢复、HTTP、流式输出、程序状态和同卡双副本；多 GPU TP 未完成硬件验证，未复现论文的大规模性能结果。当前没有完整生产服务所需的鉴权、配额、自动故障恢复等能力。详细支持范围见后端说明和[开发边界](docs/development.md#后续开发边界)。
+GPU 验证涵盖真实生成、抢占恢复、预备请求、HTTP、流式输出和程序状态。具体硬件、模型、实测结果与后续工作见[实验报告](docs/autellix-paper-audit.md)。

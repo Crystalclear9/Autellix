@@ -52,7 +52,7 @@ def summarize(records, expected_repeats=3):
             result[key] = dict(mean=statistics.mean(values), minimum=min(values), maximum=max(values))
         aggregate.append(result)
     return dict(pairs=pairs, aggregate=aggregate,
-                interpretation="positive reduction/gain favors Autellix; no confidence or generalization claim")
+                interpretation="positive reduction/gain favors Autellix; ranges describe observed paired repeats")
 
 
 def main():

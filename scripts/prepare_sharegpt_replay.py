@@ -18,7 +18,9 @@ def convert(row, tokenizer, context, output_cap):
                 return None
             prompt = tokenizer.apply_chat_template(history, tokenize=False, add_generation_prompt=True)
             reference_tokens = len(tokenizer.encode(content, add_special_tokens=False))
-            output_tokens = min(max(1, reference_tokens), output_cap)
+            output_tokens = max(1, reference_tokens)
+            if output_cap:
+                output_tokens = min(output_tokens, output_cap)
             if len(tokenizer.encode(prompt)) + output_tokens > context:
                 return None  # Drop the entire conversation, never truncate its turns.
             cid = str(len(calls))
@@ -38,11 +40,13 @@ def main():
     p.add_argument("--output", required=True)
     p.add_argument("--programs", type=int, default=12)
     p.add_argument("--context", type=int, default=2048)
-    p.add_argument("--output-cap", type=int, default=32)
+    p.add_argument("--output-cap", type=int, default=32, help="0 preserves reference answer lengths")
+    p.add_argument("--min-calls", type=int, default=2)
+    p.add_argument("--max-calls", type=int, default=8, help="0 allows any number of turns")
     p.add_argument("--seed", type=int, default=42)
     args = p.parse_args()
-    if args.programs < 1 or args.context < 2 or args.output_cap < 1:
-        p.error("programs/output-cap must be positive and context must be at least 2")
+    if args.programs < 1 or args.context < 2 or args.output_cap < 0:
+        p.error("programs must be positive, output-cap nonnegative and context at least 2")
     from transformers import AutoTokenizer
     tokenizer = AutoTokenizer.from_pretrained(args.model, local_files_only=True)
     source = Path(args.source).read_bytes()
@@ -52,7 +56,9 @@ def main():
     for row in rows:
         examined += 1
         item = convert(row, tokenizer, args.context, args.output_cap)
-        if item and 2 <= len(item["calls"]) <= 8 and item["program_id"] not in seen:
+        if (item and len(item["calls"]) >= args.min_calls
+                and (not args.max_calls or len(item["calls"]) <= args.max_calls)
+                and item["program_id"] not in seen):
             selected.append(item); seen.add(item["program_id"])
             if len(selected) == args.programs:
                 break
@@ -63,11 +69,11 @@ def main():
     manifest = dict(source_url="https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered",
                     source_sha256=hashlib.sha256(source).hexdigest(), source_records=len(rows),
                     examined=examined, selected_ids=sorted(seen), seed=args.seed,
-                    whole_source_records=True, calls_per_program_filter=[2, 8], context=args.context,
+                    whole_source_records=True, calls_per_program_filter=[args.min_calls, args.max_calls or None], context=args.context,
                     output_cap=args.output_cap, model=args.model,
                     limitations=["source dataset is already split; original unsplit conversations are not reconstructed",
                                  "filtered subset, not paper trace", "reference-history replay, not live agents",
-                                 "capped output length, ignore_eos; not model quality evaluation"],
+                                 "reference output lengths with ignore_eos" if not args.output_cap else "capped output length with ignore_eos"],
                     programs=len(selected), calls=sum(len(x["calls"]) for x in selected),
                     output_tokens=sum(c["max_tokens"] for x in selected for c in x["calls"]),
                     replay_sha256=hashlib.sha256(out.read_bytes()).hexdigest())

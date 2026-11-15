@@ -134,7 +134,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     run_parser = subparsers.add_parser("run", help="run one scheduler")
     add_common(run_parser)
-    run_parser.add_argument("--policy", default="plas", choices=["fcfs", "round-robin", "mlfq", "plas", "atlas", "srpt", "vllm", "vllm-opt", "autellix", "least-used"])
+    run_parser.add_argument("--policy", default="plas", choices=["fcfs", "round-robin", "mlfq", "plas", "atlas", "atlas-dag", "srpt", "vllm", "vllm-opt", "autellix", "least-used"])
 
     compare_parser = subparsers.add_parser("compare", help="compare schedulers")
     add_common(compare_parser)

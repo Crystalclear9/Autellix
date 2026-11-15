@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import random
+from dataclasses import replace
 from itertools import count
 
 from .datasets import load_programs_from_file
@@ -178,7 +179,19 @@ def make_paper_workload(
     dataset_path: str | None = None,
 ) -> list[ProgramSpec]:
     if dataset_path:
-        return load_programs_from_file(dataset_path, default_kind=kind)[:num_programs]
+        source = load_programs_from_file(dataset_path, default_kind=kind)
+        rng, now, sampled = random.Random(seed), 0., []
+        for index in range(num_programs):
+            if index:
+                now += rng.expovariate(arrival_rate)
+            program = rng.choice(source)
+            pid, arrival = f"{program.program_id}-{index}", int(now)
+            calls = tuple(replace(call, program_id=pid,
+                submit_time=None if call.submit_time is None else
+                arrival + max(0, call.submit_time - program.arrival_time))
+                for call in program.calls)
+            sampled.append(ProgramSpec(pid, calls, arrival_time=arrival))
+        return sampled
     return make_synthetic_workload(
         kind,
         seed=seed,

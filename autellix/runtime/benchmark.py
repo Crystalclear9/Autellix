@@ -95,7 +95,7 @@ def distribution(values):
     return dict(mean=statistics.mean(values), p95=percentile(.95), p99=percentile(.99), count=len(values))
 
 
-def run_workload(engine, programs):
+def run_workload(engine, programs, request_timeout=600):
     validate_workload(programs)
     results, pending, submitted = {}, {}, set()
     program_times = {}
@@ -133,8 +133,8 @@ def run_workload(engine, programs):
             done, _ = concurrent.futures.wait(pending, timeout=.01,
                                               return_when=concurrent.futures.FIRST_COMPLETED)
             if not done:
-                if any(time.monotonic() - call_starts[key] > 600 for key in pending.values()):
-                    raise TimeoutError("backend request exceeded 600 seconds")
+                if any(time.monotonic() - call_starts[key] > request_timeout for key in pending.values()):
+                    raise TimeoutError(f"backend request exceeded {request_timeout} seconds")
                 if not pending:
                     time.sleep(.001)
                 continue

@@ -141,7 +141,7 @@ def _get(row: dict[str, Any], *names: str, default: Any = None) -> Any:
 
 def _parents(row: dict[str, Any], previous_call_id: str | None) -> tuple[str, ...]:
     raw = _get(row, "parents", default=None)
-    if raw:
+    if raw is not None:
         if isinstance(raw, str):
             return tuple(part.strip() for part in raw.split("|") if part.strip())
         return tuple(str(part) for part in raw)

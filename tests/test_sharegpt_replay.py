@@ -33,6 +33,10 @@ class ShareGPTReplayTests(unittest.TestCase):
     def test_oversized_later_turn_drops_whole_record(self):
         self.assertIsNone(module.convert(self.row(),Tokenizer(),6,2))
 
+    def test_uncapped_reference_lengths(self):
+        calls=module.convert(self.row(),Tokenizer(),100,0)["calls"]
+        self.assertEqual([c["max_tokens"] for c in calls],[3,3])
+
     def test_incomplete_or_unknown_roles_are_not_silently_repaired(self):
         row=self.row(); row["conversations"].pop()
         self.assertIsNone(module.convert(row,Tokenizer(),100,2))

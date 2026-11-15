@@ -52,7 +52,7 @@ python -m pip install -e '.[server]' httpx matplotlib
 python -B -m unittest discover -s tests -v
 ```
 
-Windows PowerShell 激活命令为 `.\.venv\Scripts\Activate.ps1`。没有 Torch 时，依赖 CPU tensor 的测试会跳过；没有显式 GPU 环境变量时，真实推理测试会跳过。检查输出中的跳过原因，不能把 `OK (skipped=...)` 当成所有路径均已验证。
+Windows PowerShell 激活命令为 `.\.venv\Scripts\Activate.ps1`。没有 Torch 时，依赖 CPU tensor 的测试会跳过；没有显式 GPU 环境变量时，真实推理测试会跳过。测试汇总分别记录通过、失败和跳过数量。
 
 可编辑安装使源码修改立即生效，但运行中的服务和工作进程仍需重启。修改 `pyproject.toml`、入口点或依赖后需重新安装；升级后端版本不能只修改锁文件中的版本号。
 

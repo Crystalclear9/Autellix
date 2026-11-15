@@ -18,7 +18,7 @@
 
 `--schedule-interval`、`--overprovision`、`--implementation` 可在服务和真实工作负载命令中设置；其余策略参数通过 `PolicyConfig` 配置。这些数值是项目选择，不是论文公布的完整参数表。
 
-`paper` 表示按论文描述实现的调度语义，不是完全等价认证。`compat` 是可选的旧后端调度包装方式。窗口内仍需逐 token 更新执行元数据；预备请求需要真实 prefill（包括首个采样 token）或 KV 换入，并占用显存。
+`paper` 使用论文描述的调度语义。`compat` 是可选的旧后端调度包装方式。窗口内仍需逐 token 更新执行元数据；预备请求需要真实 prefill（包括首个采样 token）或 KV 换入，并占用显存。
 
 ## 服务端命令行
 

@@ -1,0 +1,1047 @@
+{
+  "title": "Autellix 论文复现尝试：P40 实测",
+  "paper": "https://arxiv.org/html/2502.13965v1",
+  "source_base_commit": "4f6fbdc0a8728fe3f63e6c96ee1c1e88149123ed",
+  "raw_server_directory": "/mnt/masfiles/runs/autellix/audit-rerun",
+  "hardware": {
+    "gpus": "3 x Tesla P40",
+    "compute_capability": "6.1",
+    "cpu_quota_cores": 18,
+    "ram_gib": 72
+  },
+  "validation": {
+    "local": {
+      "total": 115,
+      "passed": 110,
+      "skipped": 5
+    },
+    "linux": {
+      "total": 115,
+      "passed": 110,
+      "skipped": 5
+    },
+    "sglang_gpu": {
+      "passed": 3,
+      "vllm_cases_skipped": 2
+    },
+    "reserve_k1": "passed",
+    "http": "passed",
+    "service_parallel_requests": 3
+  },
+  "model": {
+    "repository": "NousResearch/Meta-Llama-3.1-8B-Instruct",
+    "revision": "d10aef7999a2b5ba950ab3974312feeedbfe0b77",
+    "files": [
+      {
+        "file": "model-00001-of-00004.safetensors",
+        "size": 4976698672,
+        "sha256": "2b1879f356aed350030bb40eb45ad362c89d9891096f79a3ab323d3ba5607668",
+        "expected_sha256": "2b1879f356aed350030bb40eb45ad362c89d9891096f79a3ab323d3ba5607668",
+        "matches": true
+      },
+      {
+        "file": "model-00002-of-00004.safetensors",
+        "size": 4999802720,
+        "sha256": "09d433f650646834a83c580877bd60c6d1f88f7755305c12576b5c7058f9af15",
+        "expected_sha256": "09d433f650646834a83c580877bd60c6d1f88f7755305c12576b5c7058f9af15",
+        "matches": true
+      },
+      {
+        "file": "model-00003-of-00004.safetensors",
+        "size": 4915916176,
+        "sha256": "fc1cdddd6bfa91128d6e94ee73d0ce62bfcdb7af29e978ddcab30c66ae9ea7fa",
+        "expected_sha256": "fc1cdddd6bfa91128d6e94ee73d0ce62bfcdb7af29e978ddcab30c66ae9ea7fa",
+        "matches": true
+      },
+      {
+        "file": "model-00004-of-00004.safetensors",
+        "size": 1168138808,
+        "sha256": "92ecfe1a2414458b4821ac8c13cf8cb70aed66b5eea8dc5ad9eeb4ff309d6d7b",
+        "expected_sha256": "92ecfe1a2414458b4821ac8c13cf8cb70aed66b5eea8dc5ad9eeb4ff309d6d7b",
+        "matches": true
+      }
+    ]
+  },
+  "workloads": [
+    {
+      "source_url": "https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered",
+      "source_sha256": "35f0e213ce091ed9b9af2a1f0755e9d39f9ccec34ab281cd4ca60d70f6479ba4",
+      "source_records": 94145,
+      "examined": 15,
+      "selected_ids": [
+        "0A1yFpE_0",
+        "5yOfC65_0",
+        "RwNX5pB_0",
+        "SpeI45i_0",
+        "UBSzn8r_6",
+        "UnjngE7_8",
+        "UoexrGJ_0",
+        "Ys9jddJ_0",
+        "ZrFMLCE_0",
+        "aSGXnFA_0",
+        "pb7XgKc_0",
+        "rp9NupP_0"
+      ],
+      "seed": 42,
+      "whole_source_records": true,
+      "calls_per_program_filter": [
+        1,
+        null
+      ],
+      "context": 8192,
+      "output_cap": 0,
+      "model": "/mnt/masfiles/models/SmolLM2-135M-Instruct",
+      "limitations": [
+        "source dataset is already split; original unsplit conversations are not reconstructed",
+        "filtered subset, not paper trace",
+        "reference-history replay, not live agents",
+        "reference output lengths with ignore_eos"
+      ],
+      "programs": 12,
+      "calls": 29,
+      "output_tokens": 10916,
+      "replay_sha256": "d6e42bff3879964f5ff16d956411290299c55df4bb2d149c11cf5900f150e562"
+    },
+    {
+      "source_url": "https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered",
+      "source_sha256": "35f0e213ce091ed9b9af2a1f0755e9d39f9ccec34ab281cd4ca60d70f6479ba4",
+      "source_records": 94145,
+      "examined": 5,
+      "selected_ids": [
+        "RwNX5pB_0",
+        "UnjngE7_8",
+        "UoexrGJ_0",
+        "aSGXnFA_0"
+      ],
+      "seed": 42,
+      "whole_source_records": true,
+      "calls_per_program_filter": [
+        1,
+        null
+      ],
+      "context": 4096,
+      "output_cap": 0,
+      "model": "/mnt/masfiles/models/Meta-Llama-3.1-8B-Instruct",
+      "limitations": [
+        "source dataset is already split; original unsplit conversations are not reconstructed",
+        "filtered subset, not paper trace",
+        "reference-history replay, not live agents",
+        "reference output lengths with ignore_eos"
+      ],
+      "programs": 4,
+      "calls": 9,
+      "output_tokens": 3423,
+      "replay_sha256": "639e5d39128062d88415cf9d9b77cd8b4a82b40875b3a4a587817b42764df8dd"
+    }
+  ],
+  "comparisons": [
+    {
+      "pairs": [
+        {
+          "rate": 1.0,
+          "repeat": 0,
+          "matched": true,
+          "native_mean_seconds": 30.656416890935102,
+          "atlas_mean_seconds": 43.642256264367205,
+          "mean_latency_reduction_pct": -42.359286212838285,
+          "paper_token_latency_reduction_pct": -64.77693448215325,
+          "output_throughput_gain_pct": -12.419756132386073,
+          "p95_latency_reduction_pct": -19.082846235590978
+        },
+        {
+          "rate": 1.0,
+          "repeat": 1,
+          "matched": true,
+          "native_mean_seconds": 40.38204328764414,
+          "atlas_mean_seconds": 44.64704962992604,
+          "mean_latency_reduction_pct": -10.561640756763978,
+          "paper_token_latency_reduction_pct": -10.616451161744012,
+          "output_throughput_gain_pct": -5.394277630012045,
+          "p95_latency_reduction_pct": -6.340998329129444
+        },
+        {
+          "rate": 1.0,
+          "repeat": 2,
+          "matched": true,
+          "native_mean_seconds": 36.014362309510204,
+          "atlas_mean_seconds": 44.946132748149026,
+          "mean_latency_reduction_pct": -24.800579174159743,
+          "paper_token_latency_reduction_pct": -38.45114844909943,
+          "output_throughput_gain_pct": -7.804289776211615,
+          "p95_latency_reduction_pct": -15.14154014565985
+        }
+      ],
+      "aggregate": [
+        {
+          "rate": 1.0,
+          "repeats": 3,
+          "all_outputs_match": true,
+          "mean_latency_reduction_pct": {
+            "mean": -25.907168714587336,
+            "minimum": -42.359286212838285,
+            "maximum": -10.561640756763978
+          },
+          "paper_token_latency_reduction_pct": {
+            "mean": -37.948178030998896,
+            "minimum": -64.77693448215325,
+            "maximum": -10.616451161744012
+          },
+          "output_throughput_gain_pct": {
+            "mean": -8.539441179536578,
+            "minimum": -12.419756132386073,
+            "maximum": -5.394277630012045
+          },
+          "p95_latency_reduction_pct": {
+            "mean": -13.52179490346009,
+            "minimum": -19.082846235590978,
+            "maximum": -6.340998329129444
+          }
+        }
+      ],
+      "interpretation": "positive reduction/gain favors Autellix; ranges describe observed paired repeats",
+      "name": "attention-fixed",
+      "raw_sha256": "32878da96f0122b78ab3f61a63c0fe1029b933449f33af53f0cd249e56e1f2f2",
+      "trials": [
+        {
+          "arm": "sglang-native",
+          "rate": 1.0,
+          "repeat": 0,
+          "model": "/mnt/masfiles/models/SmolLM2-135M-Instruct",
+          "versions": {
+            "sglang": "0.4.9.post6",
+            "torch": "2.7.1",
+            "transformers": "4.54.0"
+          },
+          "effective_engine_args": {
+            "autellix_legacy_gpu": true,
+            "context_length": 2048,
+            "max_running_requests": 2,
+            "max_total_tokens": 4096,
+            "mem_fraction_static": 0.5,
+            "random_seed": 0,
+            "autellix_native_baseline": true
+          },
+          "trace_sha256": "a53c7706b4245a9ecfa0a94df9e92840b29692ea875d51b60666c99ac9b35ca6",
+          "completion_tokens": 1532,
+          "output_tokens_per_second": 24.30235417271271,
+          "program_latency_seconds": {
+            "mean": 30.656416890935102,
+            "p95": 56.245021118116426,
+            "p99": 56.245021118116426,
+            "count": 12
+          },
+          "paper_sequential_token_latency": {
+            "mean": 0.2323301215347195,
+            "p95": 0.3195300696551253,
+            "p99": 0.3195300696551253,
+            "count": 12
+          },
+          "schedule_interval": 8,
+          "overprovision": 0,
+          "quantum_scale": 1.0
+        },
+        {
+          "arm": "atlas",
+          "rate": 1.0,
+          "repeat": 0,
+          "model": "/mnt/masfiles/models/SmolLM2-135M-Instruct",
+          "versions": {
+            "sglang": "0.4.9.post6",
+            "torch": "2.7.1",
+            "transformers": "4.54.0"
+          },
+          "effective_engine_args": {
+            "autellix_legacy_gpu": true,
+            "context_length": 2048,
+            "max_running_requests": 2,
+            "max_total_tokens": 4096,
+            "mem_fraction_static": 0.5,
+            "random_seed": 0,
+            "autellix_native_baseline": false
+          },
+          "trace_sha256": "a53c7706b4245a9ecfa0a94df9e92840b29692ea875d51b60666c99ac9b35ca6",
+          "completion_tokens": 1532,
+          "output_tokens_per_second": 21.284061050033042,
+          "program_latency_seconds": {
+            "mean": 43.642256264367205,
+            "p95": 66.97817201326225,
+            "p99": 66.97817201326225,
+            "count": 12
+          },
+          "paper_sequential_token_latency": {
+            "mean": 0.38282645214357175,
+            "p95": 0.5073916377225862,
+            "p99": 0.5073916377225862,
+            "count": 12
+          },
+          "schedule_interval": 8,
+          "overprovision": 0,
+          "quantum_scale": 1.0
+        },
+        {
+          "arm": "atlas",
+          "rate": 1.0,
+          "repeat": 1,
+          "model": "/mnt/masfiles/models/SmolLM2-135M-Instruct",
+          "versions": {
+            "sglang": "0.4.9.post6",
+            "torch": "2.7.1",
+            "transformers": "4.54.0"
+          },
+          "effective_engine_args": {
+            "autellix_legacy_gpu": true,
+            "context_length": 2048,
+            "max_running_requests": 2,
+            "max_total_tokens": 4096,
+            "mem_fraction_static": 0.5,
+            "random_seed": 0,
+            "autellix_native_baseline": false
+          },
+          "trace_sha256": "9ea0bed2ee65816a1161c43237e12e0b7f0d642b8dc624d0479b181023f38fec",
+          "completion_tokens": 1532,
+          "output_tokens_per_second": 21.63935930273668,
+          "program_latency_seconds": {
+            "mean": 44.64704962992604,
+            "p95": 64.0729651116719,
+            "p99": 64.0729651116719,
+            "count": 12
+          },
+          "paper_sequential_token_latency": {
+            "mean": 0.3911407274407357,
+            "p95": 0.47043096197739775,
+            "p99": 0.47043096197739775,
+            "count": 12
+          },
+          "schedule_interval": 8,
+          "overprovision": 0,
+          "quantum_scale": 1.0
+        },
+        {
+          "arm": "sglang-native",
+          "rate": 1.0,
+          "repeat": 1,
+          "model": "/mnt/masfiles/models/SmolLM2-135M-Instruct",
+          "versions": {
+            "sglang": "0.4.9.post6",
+            "torch": "2.7.1",
+            "transformers": "4.54.0"
+          },
+          "effective_engine_args": {
+            "autellix_legacy_gpu": true,
+            "context_length": 2048,
+            "max_running_requests": 2,
+            "max_total_tokens": 4096,
+            "mem_fraction_static": 0.5,
+            "random_seed": 0,
+            "autellix_native_baseline": true
+          },
+          "trace_sha256": "9ea0bed2ee65816a1161c43237e12e0b7f0d642b8dc624d0479b181023f38fec",
+          "completion_tokens": 1532,
+          "output_tokens_per_second": 22.87320339683955,
+          "program_latency_seconds": {
+            "mean": 40.38204328764414,
+            "p95": 60.25236373403571,
+            "p99": 60.25236373403571,
+            "count": 12
+          },
+          "paper_sequential_token_latency": {
+            "mean": 0.35360086436764043,
+            "p95": 0.44226310409190006,
+            "p99": 0.44226310409190006,
+            "count": 12
+          },
+          "schedule_interval": 8,
+          "overprovision": 0,
+          "quantum_scale": 1.0
+        },
+        {
+          "arm": "sglang-native",
+          "rate": 1.0,
+          "repeat": 2,
+          "model": "/mnt/masfiles/models/SmolLM2-135M-Instruct",
+          "versions": {
+            "sglang": "0.4.9.post6",
+            "torch": "2.7.1",
+            "transformers": "4.54.0"
+          },
+          "effective_engine_args": {
+            "autellix_legacy_gpu": true,
+            "context_length": 2048,
+            "max_running_requests": 2,
+            "max_total_tokens": 4096,
+            "mem_fraction_static": 0.5,
+            "random_seed": 0,
+            "autellix_native_baseline": true
+          },
+          "trace_sha256": "bae42c5e2ccc2cf43a508b08ec4981fd544d73e3fe8f8ca0a78236f5633e72aa",
+          "completion_tokens": 1532,
+          "output_tokens_per_second": 22.74786132827637,
+          "program_latency_seconds": {
+            "mean": 36.014362309510204,
+            "p95": 59.60344407914858,
+            "p99": 59.60344407914858,
+            "count": 12
+          },
+          "paper_sequential_token_latency": {
+            "mean": 0.2839587413177603,
+            "p95": 0.37126302938135647,
+            "p99": 0.37126302938135647,
+            "count": 12
+          },
+          "schedule_interval": 8,
+          "overprovision": 0,
+          "quantum_scale": 1.0
+        },
+        {
+          "arm": "atlas",
+          "rate": 1.0,
+          "repeat": 2,
+          "model": "/mnt/masfiles/models/SmolLM2-135M-Instruct",
+          "versions": {
+            "sglang": "0.4.9.post6",
+            "torch": "2.7.1",
+            "transformers": "4.54.0"
+          },
+          "effective_engine_args": {
+            "autellix_legacy_gpu": true,
+            "context_length": 2048,
+            "max_running_requests": 2,
+            "max_total_tokens": 4096,
+            "mem_fraction_static": 0.5,
+            "random_seed": 0,
+            "autellix_native_baseline": false
+          },
+          "trace_sha256": "bae42c5e2ccc2cf43a508b08ec4981fd544d73e3fe8f8ca0a78236f5633e72aa",
+          "completion_tokens": 1532,
+          "output_tokens_per_second": 20.972552312326904,
+          "program_latency_seconds": {
+            "mean": 44.946132748149026,
+            "p95": 68.62832349258878,
+            "p99": 68.62832349258878,
+            "count": 12
+          },
+          "paper_sequential_token_latency": {
+            "mean": 0.3931441384760465,
+            "p95": 0.5040634110337123,
+            "p99": 0.5040634110337123,
+            "count": 12
+          },
+          "schedule_interval": 8,
+          "overprovision": 0,
+          "quantum_scale": 1.0
+        }
+      ],
+      "matching_texts": [
+        {
+          "repeat": 0,
+          "total": 48,
+          "matching": 48,
+          "different": []
+        },
+        {
+          "repeat": 1,
+          "total": 48,
+          "matching": 48,
+          "different": []
+        },
+        {
+          "repeat": 2,
+          "total": 48,
+          "matching": 48,
+          "different": []
+        }
+      ]
+    },
+    {
+      "pairs": [
+        {
+          "rate": 1.0,
+          "repeat": 0,
+          "matched": true,
+          "native_mean_seconds": 31.326703988118467,
+          "atlas_mean_seconds": 40.12338174299995,
+          "mean_latency_reduction_pct": -28.080444588801523,
+          "paper_token_latency_reduction_pct": -47.22833860644074,
+          "output_throughput_gain_pct": -2.8471897419784176,
+          "p95_latency_reduction_pct": -8.154087525364261
+        }
+      ],
+      "aggregate": [
+        {
+          "rate": 1.0,
+          "repeats": 1,
+          "all_outputs_match": true,
+          "mean_latency_reduction_pct": {
+            "mean": -28.080444588801523,
+            "minimum": -28.080444588801523,
+            "maximum": -28.080444588801523
+          },
+          "paper_token_latency_reduction_pct": {
+            "mean": -47.22833860644074,
+            "minimum": -47.22833860644074,
+            "maximum": -47.22833860644074
+          },
+          "output_throughput_gain_pct": {
+            "mean": -2.8471897419784176,
+            "minimum": -2.8471897419784176,
+            "maximum": -2.8471897419784176
+          },
+          "p95_latency_reduction_pct": {
+            "mean": -8.154087525364261,
+            "minimum": -8.154087525364261,
+            "maximum": -8.154087525364261
+          }
+        }
+      ],
+      "interpretation": "positive reduction/gain favors Autellix; ranges describe observed paired repeats",
+      "name": "quantum64",
+      "raw_sha256": "e23b7703445b2f099c30c45ab0d64b124ed97b9da39f4e8a949d885eeac6faa7",
+      "trials": [
+        {
+          "arm": "sglang-native",
+          "rate": 1.0,
+          "repeat": 0,
+          "model": "/mnt/masfiles/models/SmolLM2-135M-Instruct",
+          "versions": {
+            "sglang": "0.4.9.post6",
+            "torch": "2.7.1",
+            "transformers": "4.54.0"
+          },
+          "effective_engine_args": {
+            "autellix_legacy_gpu": true,
+            "context_length": 2048,
+            "max_running_requests": 2,
+            "max_total_tokens": 4096,
+            "mem_fraction_static": 0.5,
+            "random_seed": 0,
+            "autellix_native_baseline": true
+          },
+          "trace_sha256": "a53c7706b4245a9ecfa0a94df9e92840b29692ea875d51b60666c99ac9b35ca6",
+          "completion_tokens": 1532,
+          "output_tokens_per_second": 23.75131227485762,
+          "program_latency_seconds": {
+            "mean": 31.326703988118467,
+            "p95": 57.7072953342319,
+            "p99": 57.7072953342319,
+            "count": 12
+          },
+          "paper_sequential_token_latency": {
+            "mean": 0.23501404428922304,
+            "p95": 0.3152936348941562,
+            "p99": 0.3152936348941562,
+            "count": 12
+          },
+          "schedule_interval": 8,
+          "overprovision": 0,
+          "quantum_scale": 64.0
+        },
+        {
+          "arm": "atlas",
+          "rate": 1.0,
+          "repeat": 0,
+          "model": "/mnt/masfiles/models/SmolLM2-135M-Instruct",
+          "versions": {
+            "sglang": "0.4.9.post6",
+            "torch": "2.7.1",
+            "transformers": "4.54.0"
+          },
+          "effective_engine_args": {
+            "autellix_legacy_gpu": true,
+            "context_length": 2048,
+            "max_running_requests": 2,
+            "max_total_tokens": 4096,
+            "mem_fraction_static": 0.5,
+            "random_seed": 0,
+            "autellix_native_baseline": false
+          },
+          "trace_sha256": "a53c7706b4245a9ecfa0a94df9e92840b29692ea875d51b60666c99ac9b35ca6",
+          "completion_tokens": 1532,
+          "output_tokens_per_second": 23.075067348182614,
+          "program_latency_seconds": {
+            "mean": 40.12338174299995,
+            "p95": 62.41279870430562,
+            "p99": 62.41279870430562,
+            "count": 12
+          },
+          "paper_sequential_token_latency": {
+            "mean": 0.3460072728988279,
+            "p95": 0.46087709553715456,
+            "p99": 0.46087709553715456,
+            "count": 12
+          },
+          "schedule_interval": 8,
+          "overprovision": 0,
+          "quantum_scale": 64.0
+        }
+      ],
+      "matching_texts": [
+        {
+          "repeat": 0,
+          "total": 48,
+          "matching": 48,
+          "different": []
+        }
+      ]
+    },
+    {
+      "pairs": [
+        {
+          "rate": 0.2,
+          "repeat": 0,
+          "matched": true,
+          "native_mean_seconds": 134.2519465603108,
+          "atlas_mean_seconds": 169.98643334851164,
+          "mean_latency_reduction_pct": -26.617481313127623,
+          "paper_token_latency_reduction_pct": -36.307600173676576,
+          "output_throughput_gain_pct": -5.528980615186862,
+          "p95_latency_reduction_pct": -5.632463999613901
+        }
+      ],
+      "aggregate": [
+        {
+          "rate": 0.2,
+          "repeats": 1,
+          "all_outputs_match": true,
+          "mean_latency_reduction_pct": {
+            "mean": -26.617481313127623,
+            "minimum": -26.617481313127623,
+            "maximum": -26.617481313127623
+          },
+          "paper_token_latency_reduction_pct": {
+            "mean": -36.307600173676576,
+            "minimum": -36.307600173676576,
+            "maximum": -36.307600173676576
+          },
+          "output_throughput_gain_pct": {
+            "mean": -5.528980615186862,
+            "minimum": -5.528980615186862,
+            "maximum": -5.528980615186862
+          },
+          "p95_latency_reduction_pct": {
+            "mean": -5.632463999613901,
+            "minimum": -5.632463999613901,
+            "maximum": -5.632463999613901
+          }
+        }
+      ],
+      "interpretation": "positive reduction/gain favors Autellix; ranges describe observed paired repeats",
+      "name": "full-length",
+      "raw_sha256": "88091b4fae042ea834c76580146e8af477992c2aef1a9cdd1c5b123619e5c03b",
+      "trials": [
+        {
+          "arm": "sglang-native",
+          "rate": 0.2,
+          "repeat": 0,
+          "model": "/mnt/masfiles/models/SmolLM2-135M-Instruct",
+          "versions": {
+            "sglang": "0.4.9.post6",
+            "torch": "2.7.1",
+            "transformers": "4.54.0"
+          },
+          "effective_engine_args": {
+            "autellix_legacy_gpu": true,
+            "context_length": 8192,
+            "max_running_requests": 4,
+            "max_total_tokens": 32768,
+            "mem_fraction_static": 0.6,
+            "random_seed": 0,
+            "autellix_native_baseline": true
+          },
+          "trace_sha256": "821bc0e2111e3e91be5dcd68c5c9f70eda6e5a513ae650e83b7fb1c4e5ab5ff3",
+          "completion_tokens": 10916,
+          "output_tokens_per_second": 32.56917949619105,
+          "program_latency_seconds": {
+            "mean": 134.2519465603108,
+            "p95": 292.04765417256226,
+            "p99": 292.04765417256226,
+            "count": 12
+          },
+          "paper_sequential_token_latency": {
+            "mean": 0.1722599681080665,
+            "p95": 0.31849857184013636,
+            "p99": 0.31849857184013636,
+            "count": 12
+          },
+          "schedule_interval": 8,
+          "overprovision": 0,
+          "quantum_scale": 1.0
+        },
+        {
+          "arm": "atlas",
+          "rate": 0.2,
+          "repeat": 0,
+          "model": "/mnt/masfiles/models/SmolLM2-135M-Instruct",
+          "versions": {
+            "sglang": "0.4.9.post6",
+            "torch": "2.7.1",
+            "transformers": "4.54.0"
+          },
+          "effective_engine_args": {
+            "autellix_legacy_gpu": true,
+            "context_length": 8192,
+            "max_running_requests": 4,
+            "max_total_tokens": 32768,
+            "mem_fraction_static": 0.6,
+            "random_seed": 0,
+            "autellix_native_baseline": false
+          },
+          "trace_sha256": "821bc0e2111e3e91be5dcd68c5c9f70eda6e5a513ae650e83b7fb1c4e5ab5ff3",
+          "completion_tokens": 10916,
+          "output_tokens_per_second": 30.76843587532123,
+          "program_latency_seconds": {
+            "mean": 169.98643334851164,
+            "p95": 308.49713315554874,
+            "p99": 308.49713315554874,
+            "count": 12
+          },
+          "paper_sequential_token_latency": {
+            "mean": 0.2348034285880461,
+            "p95": 0.3324081484573631,
+            "p99": 0.3324081484573631,
+            "count": 12
+          },
+          "schedule_interval": 8,
+          "overprovision": 1,
+          "quantum_scale": 1.0
+        }
+      ],
+      "matching_texts": [
+        {
+          "repeat": 0,
+          "total": 29,
+          "matching": 29,
+          "different": []
+        }
+      ]
+    },
+    {
+      "pairs": [
+        {
+          "rate": 0.2,
+          "repeat": 0,
+          "matched": false,
+          "native_mean_seconds": 227.8297920318227,
+          "atlas_mean_seconds": 218.03787799159994,
+          "mean_latency_reduction_pct": 4.2979076410055495,
+          "paper_token_latency_reduction_pct": 16.967705149361944,
+          "output_throughput_gain_pct": -2.7007040907410795,
+          "p95_latency_reduction_pct": -2.8999890055986466
+        }
+      ],
+      "aggregate": [
+        {
+          "rate": 0.2,
+          "repeats": 1,
+          "all_outputs_match": false,
+          "mean_latency_reduction_pct": {
+            "mean": 4.2979076410055495,
+            "minimum": 4.2979076410055495,
+            "maximum": 4.2979076410055495
+          },
+          "paper_token_latency_reduction_pct": {
+            "mean": 16.967705149361944,
+            "minimum": 16.967705149361944,
+            "maximum": 16.967705149361944
+          },
+          "output_throughput_gain_pct": {
+            "mean": -2.7007040907410795,
+            "minimum": -2.7007040907410795,
+            "maximum": -2.7007040907410795
+          },
+          "p95_latency_reduction_pct": {
+            "mean": -2.8999890055986466,
+            "minimum": -2.8999890055986466,
+            "maximum": -2.8999890055986466
+          }
+        }
+      ],
+      "interpretation": "positive reduction/gain favors Autellix; ranges describe observed paired repeats",
+      "name": "llama-full",
+      "raw_sha256": "5f402676b42a6904e46c63c9cadf48ce9727f320e38cbaf2b167bfbea1eefd6b",
+      "trials": [
+        {
+          "arm": "sglang-native",
+          "rate": 0.2,
+          "repeat": 0,
+          "model": "/mnt/masfiles/models/Meta-Llama-3.1-8B-Instruct",
+          "versions": {
+            "sglang": "0.4.9.post6",
+            "torch": "2.7.1",
+            "transformers": "4.54.0"
+          },
+          "effective_engine_args": {
+            "autellix_legacy_gpu": true,
+            "dtype": "float16",
+            "context_length": 4096,
+            "max_running_requests": 2,
+            "max_total_tokens": 8192,
+            "mem_fraction_static": 0.9,
+            "random_seed": 0,
+            "autellix_native_baseline": true
+          },
+          "trace_sha256": "d8f4f372bbe392d0f9dcaf5f5244d9efcc89720f73e3f9d928efd0ff8640ca16",
+          "completion_tokens": 3423,
+          "output_tokens_per_second": 9.650830656759515,
+          "program_latency_seconds": {
+            "mean": 227.8297920318227,
+            "p95": 339.52791313719615,
+            "p99": 339.52791313719615,
+            "count": 4
+          },
+          "paper_sequential_token_latency": {
+            "mean": 0.40036814840594576,
+            "p95": 0.7473116457253337,
+            "p99": 0.7473116457253337,
+            "count": 4
+          },
+          "schedule_interval": 8,
+          "overprovision": 0,
+          "quantum_scale": 1.0
+        },
+        {
+          "arm": "atlas",
+          "rate": 0.2,
+          "repeat": 0,
+          "model": "/mnt/masfiles/models/Meta-Llama-3.1-8B-Instruct",
+          "versions": {
+            "sglang": "0.4.9.post6",
+            "torch": "2.7.1",
+            "transformers": "4.54.0"
+          },
+          "effective_engine_args": {
+            "autellix_legacy_gpu": true,
+            "dtype": "float16",
+            "context_length": 4096,
+            "max_running_requests": 2,
+            "max_total_tokens": 8192,
+            "mem_fraction_static": 0.9,
+            "random_seed": 0,
+            "autellix_native_baseline": false
+          },
+          "trace_sha256": "d8f4f372bbe392d0f9dcaf5f5244d9efcc89720f73e3f9d928efd0ff8640ca16",
+          "completion_tokens": 3423,
+          "output_tokens_per_second": 9.390190278421917,
+          "program_latency_seconds": {
+            "mean": 218.03787799159994,
+            "p95": 349.37418528911337,
+            "p99": 349.37418528911337,
+            "count": 4
+          },
+          "paper_sequential_token_latency": {
+            "mean": 0.33243486147246504,
+            "p95": 0.4254680767048097,
+            "p99": 0.4254680767048097,
+            "count": 4
+          },
+          "schedule_interval": 8,
+          "overprovision": 0,
+          "quantum_scale": 1.0
+        }
+      ],
+      "matching_texts": [
+        {
+          "repeat": 0,
+          "total": 9,
+          "matching": 8,
+          "different": [
+            "RwNX5pB_0/4"
+          ]
+        }
+      ]
+    }
+  ],
+  "trace_statistics": [
+    {
+      "experiment": "attention-fixed",
+      "arm": "atlas",
+      "repeat": 0,
+      "events": {
+        "admit": 49,
+        "schedule_window": 99,
+        "batch": 817,
+        "execute": 817,
+        "plan_step": 817,
+        "continue_plan": 720,
+        "finished": 49,
+        "demote": 128,
+        "swap_out": 123,
+        "retract": 123,
+        "swap_in": 123
+      },
+      "model_seconds": 65.98158928298943,
+      "mean_batch": 1.8800489596083232
+    },
+    {
+      "experiment": "attention-fixed",
+      "arm": "atlas",
+      "repeat": 1,
+      "events": {
+        "admit": 49,
+        "schedule_window": 101,
+        "batch": 834,
+        "execute": 834,
+        "plan_step": 834,
+        "continue_plan": 736,
+        "finished": 49,
+        "demote": 126,
+        "swap_out": 116,
+        "retract": 116,
+        "swap_in": 116
+      },
+      "model_seconds": 65.35953673171997,
+      "mean_batch": 1.841726618705036
+    },
+    {
+      "experiment": "attention-fixed",
+      "arm": "atlas",
+      "repeat": 2,
+      "events": {
+        "admit": 49,
+        "schedule_window": 101,
+        "batch": 812,
+        "execute": 812,
+        "plan_step": 812,
+        "continue_plan": 714,
+        "finished": 49,
+        "demote": 137,
+        "swap_out": 130,
+        "retract": 130,
+        "swap_in": 130
+      },
+      "model_seconds": 66.5128335151671,
+      "mean_batch": 1.8916256157635467
+    },
+    {
+      "experiment": "quantum64",
+      "arm": "atlas",
+      "repeat": 0,
+      "events": {
+        "admit": 49,
+        "schedule_window": 99,
+        "batch": 803,
+        "execute": 803,
+        "plan_step": 803,
+        "continue_plan": 705,
+        "finished": 49,
+        "demote": 25,
+        "swap_out": 33,
+        "retract": 33,
+        "swap_in": 33,
+        "promote": 4
+      },
+      "model_seconds": 63.56823526382447,
+      "mean_batch": 1.912826899128269
+    },
+    {
+      "experiment": "full-length",
+      "arm": "atlas",
+      "repeat": 0,
+      "events": {
+        "admit": 30,
+        "schedule_window": 404,
+        "batch": 3372,
+        "execute": 3372,
+        "plan_step": 3372,
+        "continue_plan": 2746,
+        "finished": 30,
+        "demote": 1167,
+        "swap_out": 602,
+        "retract": 751,
+        "swap_in": 602,
+        "reserve": 149,
+        "resume_cached": 149,
+        "refill": 13
+      },
+      "model_seconds": 337.7618383407607,
+      "mean_batch": 3.2384341637010676
+    },
+    {
+      "experiment": "llama-full",
+      "arm": "atlas",
+      "repeat": 0,
+      "events": {
+        "admit": 10,
+        "schedule_window": 305,
+        "batch": 2510,
+        "execute": 2510,
+        "plan_step": 2510,
+        "continue_plan": 2210,
+        "finished": 10,
+        "demote": 401,
+        "swap_out": 168,
+        "retract": 168,
+        "swap_in": 168
+      },
+      "model_seconds": 354.2034150772102,
+      "mean_batch": 1.3653386454183267
+    }
+  ],
+  "attention_microbenchmark": {
+    "device": "Tesla P40",
+    "dtype": "float32",
+    "cases": [
+      {
+        "total_tokens": 512,
+        "query_tokens": 1,
+        "seconds": {
+          "padded": 0.0009962152689695358,
+          "suffix": 0.0005902387201786041
+        },
+        "speedup": 1.6878175472257813,
+        "max_absolute_error": 1.341104507446289e-07
+      },
+      {
+        "total_tokens": 2048,
+        "query_tokens": 1,
+        "seconds": {
+          "padded": 0.004702206701040268,
+          "suffix": 0.0005949102342128754
+        },
+        "speedup": 7.904060866025862,
+        "max_absolute_error": 9.685754776000977e-08
+      },
+      {
+        "total_tokens": 2048,
+        "query_tokens": 64,
+        "seconds": {
+          "padded": 0.004689773544669151,
+          "suffix": 0.0008931923657655716
+        },
+        "speedup": 5.2505750434280305,
+        "max_absolute_error": 0.0
+      },
+      {
+        "total_tokens": 2048,
+        "query_tokens": 2048,
+        "seconds": {
+          "padded": 0.0046499259769916534,
+          "suffix": 0.004350120201706886
+        },
+        "speedup": 1.0689189634730394,
+        "max_absolute_error": 0.0
+      }
+    ]
+  },
+  "llama_numerical_check": {
+    "prompt_tokens": 1791,
+    "completion_tokens": 365,
+    "native_atlas_uninterrupted_match": true,
+    "atlas_interrupted_matches_uninterrupted": true,
+    "native_standalone_matches_native_full": false,
+    "native_standalone_matches_atlas_full": true,
+    "events": {
+      "admit": 4,
+      "schedule_window": 96,
+      "batch": 766,
+      "execute": 766,
+      "plan_step": 766,
+      "continue_plan": 672,
+      "finished": 4,
+      "demote": 92,
+      "swap_out": 7,
+      "retract": 7,
+      "swap_in": 7
+    },
+    "raw_sha256": "5bcd718041435f679c9b01501bdeb7c48118beb52af5bc2e6d842af791187731"
+  }
+}

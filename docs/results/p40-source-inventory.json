@@ -1,0 +1,426 @@
+{
+  "files": 84,
+  "lines": 9231,
+  "sources": [
+    {
+      "path": "autellix/__init__.py",
+      "lines": 48,
+      "sha256": "5ea12901e46a9ad4e1a49300fdd41f4c3e05e7f4e880577c8e861ef573c82c01"
+    },
+    {
+      "path": "autellix/baselines.py",
+      "lines": 3,
+      "sha256": "9c659878bea22bef3da9f0d7600115ec86f00b0e966404a3b33a05712f26a9b9"
+    },
+    {
+      "path": "autellix/cli.py",
+      "lines": 257,
+      "sha256": "79a22e55c62450f2ee5ac85f4d57df8869395cff0195f57984cfc1c293aef859"
+    },
+    {
+      "path": "autellix/client.py",
+      "lines": 3,
+      "sha256": "34ef86822f3e75207e3d9287785c4c9e83e704f9e1d3dc37732ebaec8a95986a"
+    },
+    {
+      "path": "autellix/core/__init__.py",
+      "lines": 65,
+      "sha256": "bd7929067b4b953e69c2b4b644a3ae58566410c8b539a04955df6fe611e80222"
+    },
+    {
+      "path": "autellix/core/execution.py",
+      "lines": 117,
+      "sha256": "31bc9f0b724deadcc686fba28d25cc50d2db3c528cace84c9a403daedf1dd736"
+    },
+    {
+      "path": "autellix/core/load_balancer.py",
+      "lines": 99,
+      "sha256": "d72c1ce2bf3f353742d842a4cf4eee68f2545191de66c034d6906ee51981c207"
+    },
+    {
+      "path": "autellix/core/models.py",
+      "lines": 409,
+      "sha256": "74f5d2cc772e92e10f650c0fdce8755e8f5f2a1a35cd69f004c9cc79f9063e1d"
+    },
+    {
+      "path": "autellix/core/schedulers.py",
+      "lines": 415,
+      "sha256": "7bfd2ab3f81b397e99627753b64283df10ebfb768e33c176a117ed858da1b55a"
+    },
+    {
+      "path": "autellix/core/simulator.py",
+      "lines": 401,
+      "sha256": "1be294c5fb38502a2c47719a4a44fc9756cd5a806e2f061c217cf47663fad5b8"
+    },
+    {
+      "path": "autellix/datasets.py",
+      "lines": 3,
+      "sha256": "c8a3eaded4fb40716f478d5266055bc3a4f1daa209e2600159e54982c33d1abe"
+    },
+    {
+      "path": "autellix/engine.py",
+      "lines": 3,
+      "sha256": "564dbba64af0f70b8138dd08839b690e5676fd51ba8d07e59a40ce4398be5efc"
+    },
+    {
+      "path": "autellix/execution.py",
+      "lines": 3,
+      "sha256": "6049cfdcdfdc5a023f7ba0ba01d4a5e373c79df0a4a9a7d9a38541cc6e3c19ac"
+    },
+    {
+      "path": "autellix/experiments/__init__.py",
+      "lines": 22,
+      "sha256": "e3d5ca4b578085adb8e1730d6591196551a02a4b17cb6094eac892c103e277f3"
+    },
+    {
+      "path": "autellix/experiments/baselines.py",
+      "lines": 126,
+      "sha256": "a4ded4bea31f64ff80cd0f1376449ec9a1c85a373f7182c5a8e94659d9f7aa12"
+    },
+    {
+      "path": "autellix/experiments/datasets.py",
+      "lines": 172,
+      "sha256": "ad49e4b20eb1d4915071c84b7bc166633616cc8199eb20f33624aa2acf8255b6"
+    },
+    {
+      "path": "autellix/experiments/runner.py",
+      "lines": 393,
+      "sha256": "4736bf23b4414fe8abd04d8366763440d6b30294f9176af204ae7154b4381c00"
+    },
+    {
+      "path": "autellix/experiments/workloads.py",
+      "lines": 200,
+      "sha256": "4bd7d6970a65ac0f47b979f466173f55bfadc2078fc7d1b08df506a7d1976952"
+    },
+    {
+      "path": "autellix/frontend/__init__.py",
+      "lines": 17,
+      "sha256": "c1f00559b01ce275fea58ec7af3b564ef7f7531603f1b8d4cf18a199a15b9c61"
+    },
+    {
+      "path": "autellix/frontend/client.py",
+      "lines": 76,
+      "sha256": "4e7f0786c5bc96b9428bf2b3e60ca0bf9238587a06ee1e4c76ad485f909c10a2"
+    },
+    {
+      "path": "autellix/frontend/engine.py",
+      "lines": 259,
+      "sha256": "1be0f5ba91f1f455f6132cf046772c4efe8e74b246275bb1b3b883ce23da573f"
+    },
+    {
+      "path": "autellix/frontend/response.py",
+      "lines": 102,
+      "sha256": "ddd7c15f0cddfb6d8f88d838eecf09903f86ab5fb294e2f6c0cbcd6e0562f2cb"
+    },
+    {
+      "path": "autellix/frontend/service.py",
+      "lines": 361,
+      "sha256": "11d7cdaaa67edc2a9ccebb8094415b4ff40aaf351326c44300c7ee468c70ca3c"
+    },
+    {
+      "path": "autellix/load_balancer.py",
+      "lines": 3,
+      "sha256": "2ae005f8cbbd13cda299980317af349dfa59c40ab10586fc2396a524e44f7959"
+    },
+    {
+      "path": "autellix/models.py",
+      "lines": 3,
+      "sha256": "031e63d0d19b701b0e6eae02fa39de52880f9b871bb8c78865b789a613a1ca42"
+    },
+    {
+      "path": "autellix/response.py",
+      "lines": 3,
+      "sha256": "121dc1a522224f849665c5cbf2e3c34d64c59b38662e2d23b6bff57be34560cd"
+    },
+    {
+      "path": "autellix/runtime/__init__.py",
+      "lines": 7,
+      "sha256": "303afe79f0de1d08e2c998ca3ca9fa4f163d018c5c3037b207de6c9d13a67dd8"
+    },
+    {
+      "path": "autellix/runtime/benchmark.py",
+      "lines": 251,
+      "sha256": "ab35a081c62d49af6bd162ed2752a50b4a6a1ff1870067e12db3e5578d488385"
+    },
+    {
+      "path": "autellix/runtime/client.py",
+      "lines": 133,
+      "sha256": "00a04e36f714feba85066bd581903e80617aa5598b28ab9f9703bddf5fe68bdc"
+    },
+    {
+      "path": "autellix/runtime/engine.py",
+      "lines": 364,
+      "sha256": "e96134711c2869a31ff068c8eca7850b23d43cee8b576c8fc5850ac888d9e7d4"
+    },
+    {
+      "path": "autellix/runtime/policy.py",
+      "lines": 365,
+      "sha256": "52ff65b1c44339db4df0e91938a7d7d77266f471f5878f259ff3fc5c1d6d7f71"
+    },
+    {
+      "path": "autellix/runtime/server.py",
+      "lines": 232,
+      "sha256": "26e250e3d8e1a16bdeb8914afe1259a0c1fb1d845600bed8b2ec814a31f16687"
+    },
+    {
+      "path": "autellix/runtime/swap.py",
+      "lines": 65,
+      "sha256": "52ea9880056f3321f2f57285ee8bf3affaa1f7b38793319c1348f063cfdff281"
+    },
+    {
+      "path": "autellix/runtime/window.py",
+      "lines": 48,
+      "sha256": "080b57102e04096c0fc4e975defc7c2ead3e911c3a5e8aeb8fcf89e0ad90b02f"
+    },
+    {
+      "path": "autellix/schedulers.py",
+      "lines": 3,
+      "sha256": "8a5660026e42ea2e7ba023fc575f18c859b668e4737cc4555d096f7c79d835e2"
+    },
+    {
+      "path": "autellix/service.py",
+      "lines": 3,
+      "sha256": "f65f14023c5db1f854e0cd61922a83aad4d6123b773950f730aea1d03369c496"
+    },
+    {
+      "path": "autellix/simulator.py",
+      "lines": 3,
+      "sha256": "f713e4829ad62a21952f00a1d33ea7f04a9adb365d5829affe14be1195f61acc"
+    },
+    {
+      "path": "autellix/workloads.py",
+      "lines": 3,
+      "sha256": "68eaf1d142eba9f2ca5d265fcb5316142e56cf73842d4808a99039eaac063422"
+    },
+    {
+      "path": "cuda/batched_swap_benchmark.py",
+      "lines": 76,
+      "sha256": "180848ad1a1ef276fadc33943e4e9d0a77602a5af9789fe8b31cc26268847923"
+    },
+    {
+      "path": "examples/real_inference.py",
+      "lines": 31,
+      "sha256": "115587d770da60874cf5a1ffc557dd86b3854f888b7d8f4d3a854c6ee0a7f655"
+    },
+    {
+      "path": "integrations/__init__.py",
+      "lines": 1,
+      "sha256": "a08ac5f0f55c2cf4571a4277b9b081c729d69c20af0923a113de0c11c8c0e834"
+    },
+    {
+      "path": "integrations/sglang/__init__.py",
+      "lines": 1,
+      "sha256": "cb416784a92f57e1cf32376b85ef5763ed66c3857626f65ea097e9f8ea26c6be"
+    },
+    {
+      "path": "integrations/sglang/attention.py",
+      "lines": 27,
+      "sha256": "b497eba51a8a399c824551726620bc96656057cb69ea3d6ebdc53bbd265c45c4"
+    },
+    {
+      "path": "integrations/sglang/backend.py",
+      "lines": 154,
+      "sha256": "8736d5bd18c5a4402fb9cdb8e5f218f7bf9b2aea1ef715464c961ac765e85c93"
+    },
+    {
+      "path": "integrations/sglang/launch.py",
+      "lines": 8,
+      "sha256": "a45b70ac226675c6c4539f9fae4d1e0236de2cffc13e6b5001825e4eb5b2de87"
+    },
+    {
+      "path": "integrations/sglang/legacy_gpu.py",
+      "lines": 60,
+      "sha256": "54ab577b76e59b4eeab6ce15f4a0a1e0f50469c8296c4ee2dc7954afb4d08f4f"
+    },
+    {
+      "path": "integrations/sglang/pressure.py",
+      "lines": 35,
+      "sha256": "51937c0c59e739d7dc8ed366e1788010c6de0dfcd0819d4749e837f06998c03b"
+    },
+    {
+      "path": "integrations/sglang/profiling.py",
+      "lines": 27,
+      "sha256": "c301ae321d4f08822e2f6df09b59463a6c5d3ea1d5a5b632c75be5637bfa4513"
+    },
+    {
+      "path": "integrations/sglang/reserve.py",
+      "lines": 20,
+      "sha256": "84a559f7f09cb7eb541d5ee23c029a1c64a667c80d623ccb512672705fc27023"
+    },
+    {
+      "path": "integrations/sglang/scheduler.py",
+      "lines": 345,
+      "sha256": "a1304cd17e262898e25f12d3464415620950f3016995b26c5f7937393f6a28b9"
+    },
+    {
+      "path": "integrations/sglang/swap.py",
+      "lines": 67,
+      "sha256": "2c73d34a725bdcfb803a8ea014d56b8737076618cbf3ada090a829aedc47630e"
+    },
+    {
+      "path": "integrations/vllm/__init__.py",
+      "lines": 11,
+      "sha256": "a789b75814a725d4bf5de271ef9affad02e8baa07c1ca040433286ba835518eb"
+    },
+    {
+      "path": "integrations/vllm/autellix_adapter.py",
+      "lines": 47,
+      "sha256": "569444148f04b897375413a64e5f40315288fee37eccf2865929101507fd8777"
+    },
+    {
+      "path": "integrations/vllm/backend.py",
+      "lines": 166,
+      "sha256": "3fa94c48f02713084a12b76d81632eed7fcf337f8a3214554825f427cbfd45e0"
+    },
+    {
+      "path": "integrations/vllm/executor.py",
+      "lines": 18,
+      "sha256": "ae028f69cb4cc27c702ddb53427e78663ec6def9f71fadf1fbdeb465b6152962"
+    },
+    {
+      "path": "integrations/vllm/paper.py",
+      "lines": 159,
+      "sha256": "48daf121abf3d5b70fa08282203cc88d3390febc219c91be62009a6a3b7f7769"
+    },
+    {
+      "path": "integrations/vllm/scheduler.py",
+      "lines": 130,
+      "sha256": "1d951ba6b10e2ee573c56f0f6ce2bd3ed5c2203465f5acf01948fcdf635b2572"
+    },
+    {
+      "path": "scripts/benchmark_prefix_attention.py",
+      "lines": 48,
+      "sha256": "2d0ee86f9c8732de1cbb91ba60910e9cf8c7cde38634c52369f637ebc2fa31be"
+    },
+    {
+      "path": "scripts/compare_sglang.py",
+      "lines": 99,
+      "sha256": "96b1710d9b184d597a6a4860b8c6be7ecf2e58453cc4303b22743eaa841ba4c1"
+    },
+    {
+      "path": "scripts/http_smoke.py",
+      "lines": 102,
+      "sha256": "9776a9bf81572443227350b0dd6726b7c31df62fe4c8e56eef2071f278c5ab5e"
+    },
+    {
+      "path": "scripts/prepare_sharegpt_replay.py",
+      "lines": 85,
+      "sha256": "6d74267a3b3eee22f83007a33b18ee10b0d5da6a06d8cf354448a15c43d11887"
+    },
+    {
+      "path": "scripts/serve_p40.sh",
+      "lines": 19,
+      "sha256": "97217baa3b44871506275d6906eb95758e316e1c045eec9f479c91ff42d90891"
+    },
+    {
+      "path": "scripts/setup_backend.sh",
+      "lines": 19,
+      "sha256": "2579529d4c05afe312db6af8c045f539f1c4e33941eb57bbae680bc850174342"
+    },
+    {
+      "path": "scripts/summarize_sglang_comparison.py",
+      "lines": 74,
+      "sha256": "ce7a7bdf69cdbcb78cab03baab0059b43f31deeef15afb5c84b9513a312365fc"
+    },
+    {
+      "path": "scripts/validate_backend.sh",
+      "lines": 24,
+      "sha256": "70887f10e583a7b7485697b8e4be508d59bd45703a18a23863a4b0f8f4c891cc"
+    },
+    {
+      "path": "tests/test_autellix.py",
+      "lines": 636,
+      "sha256": "3f333d3129c36ba95d7337587386546c33674fe6fc5f2648293e3087465a974c"
+    },
+    {
+      "path": "tests/test_client_lifecycle.py",
+      "lines": 88,
+      "sha256": "3d3031407fb35c2eb75da7fdfdafa535c74b0eb6d2ae6720df629e5d13c527ec"
+    },
+    {
+      "path": "tests/test_client_stream.py",
+      "lines": 58,
+      "sha256": "ee5f4d3fec9d4b55b12b54045c5454ff70299d726ea2af4305a9b9cb019a726c"
+    },
+    {
+      "path": "tests/test_comparison_summary.py",
+      "lines": 39,
+      "sha256": "aca4027e20734439f3bdf1cddde041fd836202470819e72ffa8fa368a61d30d2"
+    },
+    {
+      "path": "tests/test_dataset_dependencies.py",
+      "lines": 25,
+      "sha256": "9b2309a4dfc9f3fbec9bc82c83389df4bef2af028e36f2840f42dc5bfb18483f"
+    },
+    {
+      "path": "tests/test_decode_pressure.py",
+      "lines": 43,
+      "sha256": "cea957bea9155718028cd8ab4834cda39140e008353edefe5b064d614711ed54"
+    },
+    {
+      "path": "tests/test_gpu_runtime.py",
+      "lines": 190,
+      "sha256": "df3c51387b6d30e75aed7d9813eaf5994e7be943d054a9898bc00ef659723c49"
+    },
+    {
+      "path": "tests/test_host_swap.py",
+      "lines": 83,
+      "sha256": "b6aa29a537f54c4dc1009c8238b0d389fffb68afa056f98ef1651d0becaaf1b0"
+    },
+    {
+      "path": "tests/test_http.py",
+      "lines": 129,
+      "sha256": "cb6899752ffa06f161b1461e501288cc0c9da70781f4bce6552c5c0fdf8bd9e2"
+    },
+    {
+      "path": "tests/test_native_sglang_baseline.py",
+      "lines": 30,
+      "sha256": "a2b35cd1d4d717db5b4daa93d5403c077051fe74c8910c1b52ac514fc3a2fb22"
+    },
+    {
+      "path": "tests/test_paper_plan.py",
+      "lines": 165,
+      "sha256": "460f394d039309e3d0f2b4ca38a1d83660a1f5a95a07a175b5af0819f95e4d46"
+    },
+    {
+      "path": "tests/test_prefix_attention.py",
+      "lines": 56,
+      "sha256": "9603fe005e7ddbc06e00d4cc1e49c51bbd6ce11f0237677c92848c7f614b0289"
+    },
+    {
+      "path": "tests/test_reserve_release.py",
+      "lines": 31,
+      "sha256": "b376b00740a49c6af371c979fa29a6541b73b67f9d36dc03155709854ca2ef69"
+    },
+    {
+      "path": "tests/test_runtime.py",
+      "lines": 164,
+      "sha256": "9611aaf3ffb4ce58603856ca1ed86a2e04ceceacbc9d1ea87fac25f10105c592"
+    },
+    {
+      "path": "tests/test_runtime_regressions.py",
+      "lines": 156,
+      "sha256": "868f1712823981f25ee341b727607dd1b8562d2c138bcfd58d2ca129390494c0"
+    },
+    {
+      "path": "tests/test_sglang_scheduler.py",
+      "lines": 248,
+      "sha256": "c73390586b7cf84113c5bd4d799de40c952194e9d90022bda76d69b64d4dd7a6"
+    },
+    {
+      "path": "tests/test_sharegpt_replay.py",
+      "lines": 44,
+      "sha256": "6d4a5571ee0f8f297413e4fa0c3f9dea1743bddee0df5c82098b81886999c8ec"
+    },
+    {
+      "path": "tests/test_simulator_paper.py",
+      "lines": 73,
+      "sha256": "b1aa7520019fec57e93e09cf8d275feb901022cfeccadbecc64ac109c6587495"
+    },
+    {
+      "path": "tests/test_transport.py",
+      "lines": 80,
+      "sha256": "a1ff0d94a414d73b36ca4794e4e070922eb344acd313f3c6f3f1f08dcb007d2c"
+    }
+  ]
+}

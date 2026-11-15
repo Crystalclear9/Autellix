@@ -70,7 +70,7 @@ class RealInferenceTests(unittest.TestCase):
             args = dict(context_length=512, max_running_requests=1, mem_fraction_static=.35,
                         dtype="float16", random_seed=0)
             if os.environ.get("AUTELLIX_TEST_LEGACY_GPU") == "1":
-                args.update(autellix_legacy_gpu=True, max_total_tokens=2048)
+                args.update(autellix_legacy_gpu=True, max_total_tokens=2048, dtype="float32")
         # Very short slices deliberately force real preemption with a tiny model.
         policy = PolicyConfig(boundaries=(0, .001, .002, math.inf),
                               quanta=(.0001, .0002, .0004), beta=1e12,
@@ -136,9 +136,10 @@ class RealInferenceTests(unittest.TestCase):
                 dict(context_length=512, max_running_requests=1, mem_fraction_static=.2,
                      dtype="float16", random_seed=0))
         if BACKEND == "sglang" and os.environ.get("AUTELLIX_TEST_LEGACY_GPU") == "1":
-            args.update(autellix_legacy_gpu=True, max_total_tokens=2048)
+            args.update(autellix_legacy_gpu=True, max_total_tokens=2048, dtype="float32")
         with tempfile.TemporaryDirectory(prefix="autellix-replicas-") as directory:
-            engine = InferenceEngine([ReplicaConfig(BACKEND, MODEL, engine_args=args) for _ in range(2)],
+            devices = os.environ.get("AUTELLIX_TEST_DEVICES", "0,0").split(",")
+            engine = InferenceEngine([ReplicaConfig(BACKEND, MODEL, device=device, engine_args=args) for device in devices],
                                      state_dir=directory, locality_threshold=10)
             try:
                 engine.wait_ready(600)

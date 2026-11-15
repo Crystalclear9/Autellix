@@ -46,14 +46,14 @@ InferenceClient / HTTP 请求 / 直接 Python 调用
 
 ## 模拟器
 
-`autellix.core`、`autellix.frontend` 和 `autellix.cli` 是独立的 CPU 模拟功能，不能用于真实模型推理。旧的 `AutellixClient`、`AsyncMultiLLMEngine` 及根包导入路径保留兼容用途。
+`autellix.core`、`autellix.frontend` 和 `autellix.cli` 是独立的 CPU 模拟功能，负责离散时间调度实验。旧的 `AutellixClient`、`AsyncMultiLLMEngine` 及根包导入路径保留兼容用途。
 
 ```bash
 python -m autellix.cli compare --workload figure2 --policies fcfs,mlfq,plas
 python -m autellix.cli paper-preset --preset workload-analysis --dataset tests/fixtures/tiny_workload.jsonl
 ```
 
-在线 `atlas` 对应算法 1，显式父节点版本 `atlas-dag` 对应公式 2。模拟窗口按模型 tick 而非真实解码步计数；执行、缓存命中率及交换开销都是成本模型。模拟器中的 `vllm` / `vllm-opt` 标签和 paper-style presets 不代表真实后端测量或论文实验复现。
+在线 `atlas` 对应算法 1，显式父节点版本 `atlas-dag` 对应公式 2。模拟窗口按模型 tick 而非真实解码步计数；执行、缓存命中率及交换开销都是成本模型。模拟器中的 `vllm` / `vllm-opt` 标签使用成本模型；GPU 测量由 `autellix.runtime` 完成。
 
 ## 目录
 
@@ -126,6 +126,6 @@ SQLite 使用 WAL 和事务，各连接内还使用线程锁。`activity` 中的
 | 核心方法 | PLAS/在线 ATLAS、分级 FIFO、时间片、防饥饿、程序路由、KV 交换、多步与预备请求 |
 | 实现选择 | SQLite 协调、PyTorch CUDA 打包、具体默认阈值、固定版本钩子、HTTP 子集 |
 | 额外扩展 | SGLang 适配、CPU 模拟器、真实小模型验证工具 |
-| 未建立的结论 | 作者 CUDA kernel 等价、全部硬件/模型支持、论文规模性能复现、生产可靠性 |
+| 后续工作 | 批量交换 CUDA kernel、多 GPU 性能、完整 agent 轨迹与扩展模型 |
 
-论文方法与代码的对应关系用于理解设计，不是新的审计结论。改变实现选择时，应验证是否保留方法所需的不变量，并同步更新[开发文档](development.md)。
+论文方法与代码的对应关系用于定位实现。改变实现选择时，应验证是否保留方法所需的不变量，并同步更新[开发文档](development.md)。

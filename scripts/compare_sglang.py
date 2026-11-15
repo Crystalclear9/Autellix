@@ -12,16 +12,19 @@ from autellix.runtime import InferenceEngine, ReplicaConfig, PolicyConfig
 from autellix.runtime.benchmark import load_workloads, run_workload, distribution
 
 
-def trial(model, device, engine_args, trace, arm, reserve=0):
+def trial(model, device, engine_args, trace, arm, reserve=0, interval=8, quantum_scale=1., request_timeout=600):
     options = dict(engine_args)
     options["autellix_native_baseline"] = arm == "sglang-native"
+    defaults = PolicyConfig()
     policy = PolicyConfig(policy="fcfs" if arm == "sglang-native" else arm,
-                          schedule_interval=8, overprovision=0 if arm == "sglang-native" else reserve)
+                          schedule_interval=interval, overprovision=0 if arm == "sglang-native" else reserve,
+                          boundaries=tuple(x * quantum_scale for x in defaults.boundaries),
+                          quanta=tuple(x * quantum_scale for x in defaults.quanta))
     with InferenceEngine([ReplicaConfig("sglang", model, device, options)], policy=policy) as engine:
         sid = engine.start_session()
         engine.submit(sid, prompt="Warmup.", sampling={"temperature": 0, "max_tokens": 4}).result(120)
         engine.end_session(sid); engine.wait_idle(30)
-        result = run_workload(engine, trace)
+        result = run_workload(engine, trace, request_timeout=request_timeout)
         assert all(bool(c["metrics"].get("native_sglang")) == (arm == "sglang-native")
                    for c in result["calls"]), "unexpected scheduler accounting path"
         engine.wait_idle(30)
@@ -32,6 +35,7 @@ def trial(model, device, engine_args, trace, arm, reserve=0):
         result["hooks_installed"] = arm != "sglang-native"
         result["overprovision"] = policy.overprovision
         result["schedule_interval"] = policy.schedule_interval
+        result["quantum_scale"] = quantum_scale
         # For these sequential programs the paper metric uses entire response
         # time, including initial admission/driver delay, divided by output count.
         counts = {p["program_id"]: 0 for p in trace}
@@ -55,6 +59,9 @@ def main():
     p.add_argument("--rates", default="0.1,1.0")
     p.add_argument("--arms", default="sglang-native,atlas")
     p.add_argument("--reserve", type=int, default=0, help="Autellix reserves; native keeps zero, KV budget unchanged")
+    p.add_argument("--interval", type=int, default=8)
+    p.add_argument("--quantum-scale", type=float, default=1.)
+    p.add_argument("--request-timeout", type=float, default=600)
     p.add_argument("--engine-args", default='{"autellix_legacy_gpu":true,"context_length":2048,"max_running_requests":2,"max_total_tokens":4096,"mem_fraction_static":0.5,"random_seed":0}')
     args = p.parse_args()
     if args.repeats < 1 or args.reserve < 0:
@@ -77,7 +84,8 @@ def main():
             for arm in arms:
                 print(f"START rate={rate} repeat={repeat} arm={arm}", flush=True)
                 start = time.time()
-                result = trial(args.model, args.device, json.loads(args.engine_args), trace, arm, args.reserve)
+                result = trial(args.model, args.device, json.loads(args.engine_args), trace, arm,
+                               args.reserve, args.interval, args.quantum_scale, args.request_timeout)
                 result.update(rate=rate, repeat=repeat, wall_start=start,
                               trace_sha256=hashlib.sha256(json.dumps(trace,sort_keys=True).encode()).hexdigest(),
                               versions={p:version(p) for p in ["sglang","torch","transformers"]})
