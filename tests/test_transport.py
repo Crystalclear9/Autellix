@@ -1,7 +1,6 @@
 """IPC contract tests with a deliberately fake worker; no model claims."""
 import os
 import tempfile
-import time
 import unittest
 from unittest.mock import patch
 
@@ -60,9 +59,9 @@ class IPCTransportTests(unittest.TestCase):
         self.engine.end_session(pid)
         for future in (first, second, third, fourth):
             self.assertTrue(future.cancel())
-        deadline = time.monotonic() + 10
-        while self.engine.pending and time.monotonic() < deadline:
-            time.sleep(.01)
+        # pending is removed before SQLite/session cleanup; wait under the
+        # coordinator condition so the assertions observe completed cleanup.
+        self.engine.wait_idle(10)
         self.assertEqual(self.engine.loads, [0, 0])
         self.assertEqual(self.engine.table.snapshot(), {})
 

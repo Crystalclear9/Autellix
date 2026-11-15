@@ -74,6 +74,12 @@ vLLM 默认 paper 模式强制关闭异步输出处理，启用支持混合阶�
 
 SGLang 适配强制 `disable_overlap_schedule=True`、`chunked_prefill_size=-1`、`page_size=1`。TP/PP/DP、LoRA、HiCache、推测解码等不受支持，具体校验见后端说明。其他未强制覆盖的参数仍需符合固定版本及当前适配的要求。
 
+SGLang 可显式设置 `autellix_legacy_gpu=true`（默认关闭），用于实验性 P40 兼容。
+它强制 `dtype=float32`、`attention_backend=torch_native`、`sampling_backend=pytorch`、
+`disable_cuda_graph=True`、`disable_custom_all_reduce=True`，并在 scheduler 进程禁用
+Dynamo、替换标准模型算子。该开关不意味着任意模型或 GPU 已受支持，见
+[验收范围](p40-validation-20261115.md)。
+
 ## 设备分组
 
 ```bash
@@ -98,5 +104,8 @@ autellix-serve --backend vllm --model /absolute/path/to/model \
 | `AUTELLIX_TEST_STEPS`、`AUTELLIX_TEST_RESERVE` | GPU unittest | 特定生成测试的 N、K，测试默认 1、0，与服务默认 8、1 不同 |
 | `AUTELLIX_TEST_REPLICAS`、`AUTELLIX_TEST_CUDA_SWAP`、`AUTELLIX_TEST_TP` | GPU unittest | 可选双副本、CUDA KV、TP 测试开关 |
 | `AUTELLIX_TEST_IMPLEMENTATION` | GPU unittest | `paper` 或 `compat` |
+| `AUTELLIX_TEST_LEGACY_GPU` | SGLang GPU unittest | 严格等于 `1` 时启用原生算子兼容模式及 2048 KV token 测试预算 |
+| `AUTELLIX_MODEL`、`AUTELLIX_DEVICES`、`AUTELLIX_PORT` | `scripts/serve_p40.sh` | 模型目录、设备列表、端口；默认模型为持久盘 SmolLM2-135M，设备 `0`、端口 `8000` |
+| `AUTELLIX_PYTHON`、`AUTELLIX_STATE_DIR` | `scripts/serve_p40.sh` | 解释器及状态目录；默认独立持久盘环境，每次新建 `/tmp/autellix-p40-XXXXXX` 状态目录 |
 
-可选测试开关按环境变量是否为非空判断；禁用时应取消设置，不要设成字符串 `0`。执行 CPU 测试前确认未继承上一轮 GPU 验证变量。
+除严格判断 `1` 的 `AUTELLIX_TEST_LEGACY_GPU` 外，可选测试开关按环境变量是否为非空判断；禁用时应取消设置，不要设成字符串 `0`。执行 CPU 测试前确认未继承上一轮 GPU 验证变量。

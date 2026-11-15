@@ -17,6 +17,12 @@ class SGLangBackend:
         if version("sglang") != "0.4.9.post6":
             raise RuntimeError("this integration requires sglang==0.4.9.post6")
         config = config or PolicyConfig()
+        legacy_gpu = engine_args.pop("autellix_legacy_gpu", False)
+        if legacy_gpu:
+            # Explicit compatibility mode: native PyTorch ops, no CUDA JIT.
+            engine_args.update(attention_backend="torch_native", sampling_backend="pytorch",
+                               dtype="float32", disable_cuda_graph=True,
+                               disable_custom_all_reduce=True)
         for key in ("tp_size", "pp_size", "dp_size"):
             if engine_args.get(key, 1) != 1:
                 raise ValueError(f"{key} must be 1; use independent replicas")
@@ -31,7 +37,8 @@ class SGLangBackend:
         host_bytes = int(engine_args.pop("autellix_swap_space", 1) * 1024**3)
         if host_bytes <= 0:
             raise ValueError("autellix_swap_space must be positive GiB")
-        options = dict(table_path=table_path, config=asdict(config), trace=trace, host_bytes=host_bytes)
+        options = dict(table_path=table_path, config=asdict(config), trace=trace,
+                       host_bytes=host_bytes, legacy_gpu=legacy_gpu)
         target = entry.run_scheduler_process
         entry.run_scheduler_process = partial(run_scheduler_process, autellix_options=options)
         args = dict(disable_overlap_schedule=True, disable_cuda_graph=True,

@@ -20,6 +20,10 @@
 
 后端专项说明：[vLLM](integrations/vllm/README.md)、[SGLang](integrations/sglang/README.md)；传输微基准：[KV benchmark](cuda/README.md)。
 
+2026-11-15 的 [P40 部署与验收记录](docs/p40-validation-20261115.md)记录了
+SmolLM2-135M 的真实生成、抢占恢复和 HTTP 验证，以及明确的待验证/未修复清单。
+P40 使用实验性 FP32/PyTorch 原生算子路径；小型基准不代表论文性能或生产验收。
+
 ## 快速开始
 
 真实推理需 Linux/Ubuntu WSL、NVIDIA GPU 和独立 Python 3.10 环境。先安装 `uv`，在仓库根目录执行：

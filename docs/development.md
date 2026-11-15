@@ -30,6 +30,11 @@ bash scripts/validate_backend.sh vllm /absolute/path/to/model
 
 SGLang 同样替换后端名称。可用 `AUTELLIX_PYTHON` 指定 Python 路径，`AUTELLIX_ENGINE_ARGS` 调整 HTTP 和 DAG 验证参数。生成结果写入 `outputs/validation/`，不纳入版本控制。KV 传输单独测量见 [cuda/README.md](../cuda/README.md)。
 
+P40 需为 GPU unittest 另外设置 `AUTELLIX_TEST_LEGACY_GPU=1`，并在 HTTP/DAG
+的 `AUTELLIX_ENGINE_ARGS` 中设置 `autellix_legacy_gpu=true`；这两个配置不能互相替代。
+已完成检查和未修复/未验证项统一维护在 [P40 验收记录](p40-validation-20261115.md)。
+测试数量不能简单累加：专项运行复用了同一测试文件，不是新增的独立用例数量。
+
 ## 开发约束与修改流程
 
 ### 开发时必须保持的约束

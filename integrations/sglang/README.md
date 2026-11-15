@@ -29,4 +29,28 @@ N=8、K=1 是项目默认参数。预备请求的已计算前缀通过 radix 锁
 
 ## 验证
 
+### P40 实验性兼容模式
+
+`--engine-args` 中设置 `"autellix_legacy_gpu": true`，可显式启用 Pascal
+兼容路径：强制 FP32、`torch_native` attention、PyTorch sampling，关闭 CUDA
+Graph、自定义 all-reduce 和 Dynamo 编译。调度子进程内将标准 RMSNorm、激活和
+旋转位置编码切换到原生 PyTorch 实现，并仅移除固定版本模型加载器中的 sm75
+限制及其强制 FP16 逻辑。不修改已安装的 SGLang 文件，也不伪造 GPU 算力。
+
+这要求 PyTorch 本身包含 Pascal 内核（本项目固定的 Torch 2.7.1/CUDA 12.6），
+不能复用不含 sm61 支持的新版 CUDA wheel。目标是标准稠密文本模型的小规模
+功能验证，不承诺其他模型、量化、MoE 或性能。默认优化路径不受影响。
+
+持久盘部署示例：`bash scripts/serve_p40.sh`。通过 `AUTELLIX_PYTHON`、
+`AUTELLIX_MODEL`、`AUTELLIX_DEVICES`、`AUTELLIX_PORT` 覆盖配置；SQLite
+状态默认保存在新建的本地 `/tmp/autellix-p40-XXXXXX` 目录，可通过
+`AUTELLIX_STATE_DIR` 显式指定；不要放到网络持久盘或与活动服务共用。
+GPU 回归使用 `AUTELLIX_TEST_LEGACY_GPU=1`；仍需设置后端和模型环境变量。
+
+当前仅有 SmolLM2-135M 的 P40 实测证据。其他模型、量化、低精度、长上下文、
+高并发及长时间运行均未完成验证。原生算子与独立 Transformers 基线的数值比较
+尚未完成；已通过的是同一适配引擎的抢占/不中断贪心输出一致性。
+运行时补丁依赖固定版本的内部源码结构，不能直接用于其他 SGLang 版本。
+完整证据与未修复项见 [P40 验收记录](../../docs/p40-validation-20261115.md)。
+
 [开发与验证](../../docs/development.md)中的 GPU 测试覆盖真实生成、抢占恢复、程序服务继承和预备请求补位。`AUTELLIX_TEST_REPLICAS=1` 额外测试同一张 GPU 上两个独立模型进程的路由、取消及清理，不等同于多 GPU 验证。HTTP 验证包含客户端流式输出和会话释放。

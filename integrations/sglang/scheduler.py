@@ -17,6 +17,9 @@ def decode_request(value):
 
 def run_scheduler_process(*args, autellix_options, **kwargs):
     """Spawn-safe process target: install hooks inside the actual GPU process."""
+    if autellix_options.get("legacy_gpu"):
+        from .legacy_gpu import install_native_ops
+        install_native_ops()
     import sglang.srt.managers.scheduler as module
     install(module.Scheduler, autellix_options)
     return module.run_scheduler_process(*args, **kwargs)
