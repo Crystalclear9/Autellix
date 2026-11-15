@@ -17,6 +17,9 @@ class SGLangBackend:
         if version("sglang") != "0.4.9.post6":
             raise RuntimeError("this integration requires sglang==0.4.9.post6")
         config = config or PolicyConfig()
+        self.native = engine_args.pop("autellix_native_baseline", False)
+        if self.native and config.overprovision:
+            raise ValueError("native SGLang baseline requires overprovision=0")
         legacy_gpu = engine_args.pop("autellix_legacy_gpu", False)
         if legacy_gpu:
             # Explicit compatibility mode: native PyTorch ops, no CUDA JIT.
@@ -40,7 +43,12 @@ class SGLangBackend:
         options = dict(table_path=table_path, config=asdict(config), trace=trace,
                        host_bytes=host_bytes, legacy_gpu=legacy_gpu)
         target = entry.run_scheduler_process
-        entry.run_scheduler_process = partial(run_scheduler_process, autellix_options=options)
+        if self.native:
+            if legacy_gpu:
+                from .legacy_gpu import run_native_scheduler_process
+                entry.run_scheduler_process = run_native_scheduler_process
+        else:
+            entry.run_scheduler_process = partial(run_scheduler_process, autellix_options=options)
         args = dict(disable_overlap_schedule=True, disable_cuda_graph=True,
                     chunked_prefill_size=-1, page_size=1, max_running_requests=8,
                     schedule_policy="fcfs", attention_backend="triton")
@@ -81,8 +89,8 @@ class SGLangBackend:
                 if result is None:
                     raise RuntimeError("SGLang returned no output")
                 # Tokenizer output and GPU completion accounting cross separate IPC paths.
-                metrics = None
-                for _ in range(1000):
+                metrics = {"native_sglang": True} if self.native else None
+                for _ in range(0 if self.native else 1000):
                     metrics = self.table.take_metrics(rid)
                     if metrics is not None:
                         break
@@ -124,7 +132,7 @@ class SGLangBackend:
         if task:
             task.cancel()
             self.loop.run_until_complete(asyncio.gather(task, return_exceptions=True))
-        if program:
+        if program and not self.native:
             deadline = time.monotonic() + 5
             while time.monotonic() < deadline:
                 if self.table.take_metrics(rid) is not None:

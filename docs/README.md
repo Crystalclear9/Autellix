@@ -16,6 +16,7 @@
 | [真实工作负载与指标](workloads.md) | JSON/JSONL 格式、DAG 依赖、基准对照与指标含义 | 构建验证输入 |
 | [运行维护与排错](operations.md) | 启停、状态目录、日志、故障与资源清理 | 日常运行 |
 | [P40 部署与验收记录](p40-validation-20261115.md) | 实测配置、证据、未修复项与后续验收条件 | 部署与验证 |
+| [论文核对与 SGLang 对照](autellix-paper-audit.md) | 方法与实验复现差距、原生调度基线、ShareGPT 配对协议 | 评估收益 |
 
 后端特有的 KV 所有权和限制见 [vLLM](../integrations/vllm/README.md)、[SGLang](../integrations/sglang/README.md)。GPU 传输测量见 [KV 传输微基准](../cuda/README.md)。
 

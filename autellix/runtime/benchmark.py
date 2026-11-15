@@ -208,6 +208,11 @@ def main(argv=None):
         for policy in map(str.strip, args.policies.split(",")):
             engine_args = json.loads(args.engine_args)
             native = policy in {"vllm", "vllm-opt", "vllm-opt-multistep"}
+            native_sglang = policy == "sglang-native"
+            if native_sglang:
+                if args.backend != "sglang":
+                    raise ValueError("native SGLang baseline requires --backend sglang")
+                engine_args["autellix_native_baseline"] = True
             if native:
                 if args.backend != "vllm":
                     raise ValueError("native vLLM baselines require --backend vllm")
@@ -216,8 +221,8 @@ def main(argv=None):
             replicas = [ReplicaConfig(args.backend, args.model, d.strip(), engine_args)
                         for d in groups if d.strip()]
             interval = args.native_opt_steps if policy == "vllm-opt-multistep" else (1 if native else args.schedule_interval)
-            config = PolicyConfig(policy="fcfs" if native else policy, schedule_interval=interval,
-                                  overprovision=0 if native else args.overprovision,
+            config = PolicyConfig(policy="fcfs" if native or native_sglang else policy, schedule_interval=interval,
+                                  overprovision=0 if native or native_sglang else args.overprovision,
                                   implementation=args.implementation)
             with InferenceEngine(replicas, policy=config) as engine:
                 sid = engine.start_session()

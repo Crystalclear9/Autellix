@@ -71,3 +71,15 @@ benchmark 另行从 `submit()` 前开始计时，所以其关键路径调用延�
 运行时创建的 session ID 与输入的 `program_id` 不必相同；结果的 `workload_program` 和 `workload_call` 用来关联原始数据。benchmark 对每种策略创建新的引擎并做短预热，然后执行同一输入或同一随机种子的采样 trace。比较结果时检查 `workload_sha256`、`engine_args`、版本、N/K 和模式，而不是只比较输出文件名。
 
 结果文件顶层为记录列表，每个记录对应一个到达率/策略组合。中途失败时可能只保留此前完成的组合；记录数少于计划组合数不表示其余组合已经通过。现有 benchmark 不自动恢复中断实验。
+
+## 原生 SGLang 配对对照
+
+`--backend sglang --policies sglang-native,atlas --overprovision 0` 可在通用 benchmark
+中选择无 Autellix 调度钩子的 SGLang 基线。原 `fcfs` 仍是 Autellix 内部策略，
+不能代表原生后端。P40 上必须给双方同样的 `autellix_legacy_gpu=true` 配置。
+
+`scripts/prepare_sharegpt_replay.py` 与 `scripts/compare_sglang.py` 提供可复核的
+ShareGPT 子集回放和配对重复实验，保存原始结果及输出哈希；
+`scripts/summarize_sglang_comparison.py` 拒绝缺失配对/重复，保留负收益和输出不一致标记。
+正的 latency reduction / throughput gain 才表示该指标改善，不能只挑选正值报告。
+完整约束见 [论文对照审计](autellix-paper-audit.md)，这些工具不等于论文全量实验。

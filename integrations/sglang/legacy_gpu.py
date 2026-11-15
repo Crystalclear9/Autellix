@@ -44,3 +44,10 @@ def install_native_ops():
         "Autellix legacy GPU mode: FP32/native PyTorch operations; "
         "optimized SGLang GPU kernels are bypassed for dense text models."
     )
+
+
+def run_native_scheduler_process(*args, **kwargs):
+    """P40 kernels only; leave SGLang's scheduling and KV management untouched."""
+    install_native_ops()
+    from sglang.srt.managers.scheduler import run_scheduler_process
+    return run_scheduler_process(*args, **kwargs)

@@ -110,6 +110,8 @@ N=8、K=1，random_seed=0；每种策略单次运行。
 
 样本很小，实验期间其他 GPU 有验证/服务启动活动，共享主机 CPU；没有重复试验、
 置信区间或上游原生 SGLang 对照，不能由此证明性能提升或复现论文结果。
+上述 FCFS 与 ATLAS 都安装了本项目调度钩子，故不能由这张表声称优于原生 SGLang。
+后续新增的直接对照协议与结果见 [论文对照审计](autellix-paper-audit.md)。
 这也是原生 PyTorch 兼容路径，不能与优化内核性能混为一谈。
 部分测试/benchmark 在退出时报告 multiprocessing semaphore 清理警告，原始日志已保留；
 请求、会话和 GPU 显存的清理检查均通过，此警告尚未单独修复。

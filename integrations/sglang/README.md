@@ -53,4 +53,16 @@ GPU 回归使用 `AUTELLIX_TEST_LEGACY_GPU=1`；仍需设置后端和模型环�
 运行时补丁依赖固定版本的内部源码结构，不能直接用于其他 SGLang 版本。
 完整证据与未修复项见 [P40 验收记录](../../docs/p40-validation-20261115.md)。
 
+### 原生调度对照
+
+`autellix_native_baseline=true` 仅用于对照：跳过 Autellix scheduler 钩子、
+程序服务历史调度和主机 KV 换出实现，沿用 SGLang 的调度与 KV 管理。
+要求 `PolicyConfig.overprovision=0`；返回 metrics 中的 `native_sglang=true`
+用于标记这条路径，不包含 Autellix 的执行/继承统计。外层 IPC 与会话封装仍在。
+若同时启用 `autellix_legacy_gpu`，只安装相同的硬件兼容算子，不安装调度钩子。
+双方关闭 overlap/chunked prefill 等共同约束仍然生效，因此它不是上游优化配置的
+全面性能基线。不能把 `policy=fcfs` 当作该模式。
+
+配对实验、输入构造限制和结论见 [论文对照审计](../../docs/autellix-paper-audit.md)。
+
 [开发与验证](../../docs/development.md)中的 GPU 测试覆盖真实生成、抢占恢复、程序服务继承和预备请求补位。`AUTELLIX_TEST_REPLICAS=1` 额外测试同一张 GPU 上两个独立模型进程的路由、取消及清理，不等同于多 GPU 验证。HTTP 验证包含客户端流式输出和会话释放。
