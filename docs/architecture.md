@@ -96,6 +96,11 @@ python -m autellix.cli paper-preset --preset workload-analysis --dataset tests/f
 
 多步冻结的是请求选择，不是全部 CPU 工作：IPC、输出、token/block 元数据和部分内存检查仍会执行。vLLM 预留未来 KV 槽位；SGLang 依赖 radix 锁和按优先级释放内存，二者不是逐行相同的实现。
 
+SGLang 恢复前先保护高优先级请求已有的缓存前缀。若低优先级恢复项占用了新请求
+所需的 prefill 空间，调度器从低优先级端释放临时锁并重试接纳，保留被延后请求的
+主机备份。KV 换入和换出按层、按 token 分块，GPU 临时张量上限为 16 MiB；
+主机备份在原生接纳取得 KV 所有权后释放。
+
 ## 请求从提交到完成
 
 1. 客户端选择自动或显式会话，附加调用与线程 ID；直接 Python 接口由调用者管理程序会话。
@@ -128,7 +133,8 @@ SQLite 使用 WAL 和事务，各连接内还使用线程锁。`activity` 中的
 | --- | --- |
 | 核心方法 | PLAS/在线 ATLAS、分级 FIFO、时间片、防饥饿、程序路由、KV 交换、多步与预备请求 |
 | 实现选择 | SQLite 协调、PyTorch CUDA 打包、具体默认阈值、固定版本钩子、HTTP 子集 |
-| 额外扩展 | SGLang 适配、CPU 模拟器、真实小模型验证工具 |
-| 后续工作 | 批量交换 CUDA kernel、多 GPU 性能、完整 agent 轨迹与扩展模型 |
+| 额外扩展 | SGLang 适配、三卡 PP 与 32B 模型、CPU 模拟器、真实 GPU 验证工具 |
+| 工作负载 | 完整 ShareGPT、固定版本 BFCL 工具循环与官方 checker、LATS 树搜索采集和 DAG 回放 |
+| 后续工作 | 跨请求批量交换 CUDA kernel、论文其余模型与硬件规模 |
 
 论文方法与代码的对应关系用于定位实现。改变实现选择时，应验证是否保留方法所需的不变量，并同步更新[开发文档](development.md)。

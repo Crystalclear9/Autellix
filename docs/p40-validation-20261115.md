@@ -13,22 +13,22 @@ GPU 2、ATLAS、SmolLM2-135M-Instruct，监听 `127.0.0.1:8000`，显存约 845 
 
 ## 服务器资源快照
 
-| 项目 | 当前实测 |
+| 项目 | 初次部署实测 |
 | --- | --- |
 | 系统 | Ubuntu 22.04.5 LTS，Linux 5.15，容器环境 |
 | 宿主 CPU | 2 × Xeon E5-2680 v4，28 物理核 / 56 逻辑线程 |
 | 容器 CPU 配额 | `cpu.max=1800000 100000`，相当于 18 核 CPU 时间，并非独享 56 核 |
 | 容器内存限制 | 72 GiB（77309411328 字节），检查时可用约 68 GiB，无 swap |
-| GPU 0 | Tesla P40，报告总显存 23040 MiB，当前空闲 |
-| GPU 1 | Tesla P40，报告总显存 24576 MiB，当前空闲 |
+| GPU 0 | Tesla P40，报告总显存 23040 MiB，当时空闲 |
+| GPU 1 | Tesla P40，报告总显存 24576 MiB，当时空闲 |
 | GPU 2 | Tesla P40，报告总显存 24576 MiB，服务占用约 845 MiB |
 | 持久盘 | `/mnt/masfiles` 网络文件系统，500G，总可用约 102G |
 | 系统盘 | overlay 100G，可用约 86G，不视作持久存储 |
 | 服务配置 | GPU 2 单副本，FP32，ATLAS/paper，N=8，K=1，活动容量 B=2 |
 | 长度/预算 | context=512，max_total_tokens=2048，mem_fraction_static=0.35 |
 
-显存、内存和磁盘可用量会随任务变化。3 张卡并未合并成一个模型副本；
-当前服务只有一个模型进程使用 GPU 2，历史“双副本”测试发生在同一张 GPU。
+显存、内存和磁盘可用量会随任务变化。初次部署时，3 张卡并未合并成一个模型副本；
+初次部署只有一个模型进程使用 GPU 2，当轮“双副本”测试发生在同一张 GPU。
 
 ## 路径与环境
 
@@ -37,8 +37,8 @@ GPU 2、ATLAS、SmolLM2-135M-Instruct，监听 `127.0.0.1:8000`，显存约 845 
 - 模型：`/mnt/masfiles/autellix/models/SmolLM2-135M-Instruct`
 - 原始日志/JSON：`/mnt/masfiles/autellix/runs/20261115`
 - 服务日志/PID：上述目录中的 `server.log` / `server.pid`
-- 当前运行实例 SQLite：`/tmp/autellix-p40`，避开网络持久盘；更新后的启动脚本
-  在下次启动默认新建 `/tmp/autellix-p40-XXXXXX`，不影响当前进程
+- 初次部署的 SQLite：`/tmp/autellix-p40`；现有启动脚本使用
+  `autellix/tmp/` 统一入口，见[服务器目录](server-layout.md)
 - 本地结果副本：`outputs/server-p40-20261115/`
 
 Python 3.10.12，SGLang 0.4.9.post6，Torch 2.7.1+cu126，Transformers 4.54.0，

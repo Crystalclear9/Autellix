@@ -28,8 +28,13 @@ P40 使用 PyTorch 原生算子路径，默认 FP32，也可显式选择 FP16。
 单卡的[完整对话与负载实验](docs/experiment-design-review.md)修复了 ShareGPT 分片、
 重复 BOS 和合成统计问题，并完成三个到达率、策略及独立参数消融。
 Llama-3.1-8B 高负载下，扩大服务历史区间后，程序响应/输出 token 下降 11.21%，
-平均程序响应增加 5.37%，吞吐下降 0.52%。核心机制已接入真实 GPU；专用交换内核、
-BFCL/LATS 真实工作流和大规模实验仍在后续工作中。
+平均程序响应增加 5.37%，吞吐下降 0.52%。核心机制已接入真实 GPU。
+
+最新的[原始工作负载复现](docs/paper-workload-experiment.md)使用论文 8B 模型系列、
+完整 ShareGPT、固定版本 BFCL 工具循环和 LATS 搜索，加入 Mixed 与三卡共享模型
+对照，正式实验正在运行。长上下文 KV 交换和接纳顺序的修复已通过 P40 验证；
+论文专用 CUDA 聚合交换内核仍待实现。服务器文件统一在
+`/mnt/masfiles/autellix/`，目录和复跑入口见[服务器目录](docs/server-layout.md)。
 
 [三卡大模型实验](docs/three-gpu-experiment.md)增加了 SGLang PP=3：Qwen3-32B
 的性能回放按 20/22/22 层分布在全部三张 P40 上，程序调度、GPU 计时和 KV 交换在各阶段同步。

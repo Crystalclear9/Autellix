@@ -2,6 +2,8 @@
 
 后续的完整对话恢复、BOS 修正、调度时间尺度消融和负载曲线见
 [完整对话与负载实验](experiment-design-review.md)。本页保留上一轮协议与结果。
+最新工作负载、修复和目录见[原始工作负载复现](paper-workload-experiment.md)与
+[服务器目录](server-layout.md)；下文服务进程及实现清单是该轮验收时的记录。
 
 复现目标：[Autellix arXiv:2502.13965v1](https://arxiv.org/html/2502.13965v1)。
 本项目实现论文的程序调度方法，推理后端为 vLLM 0.6.1 和 SGLang 0.4.9.post6。
@@ -243,7 +245,7 @@ AUTELLIX_ENGINE_ARGS='{"autellix_legacy_gpu":true,"dtype":"float16","context_len
 bash scripts/serve_p40.sh
 ```
 
-当前常驻服务为 **GPU 2 / Llama-3.1-8B-Instruct / FP16 / ATLAS / N=8 / K=1**，
+该轮验收时的常驻服务为 **GPU 2 / Llama-3.1-8B-Instruct / FP16 / ATLAS / N=8 / K=1**，
 PID 为 `22496`，状态目录 `/tmp/autellix-p40-Sk7dM2`，日志为
 `/mnt/masfiles/autellix/runs/audit-rerun/server.log`。
 三路并发 HTTP 请求完成并回收会话，法国首都与加法问题分别返回 `Paris` 和 `5`。

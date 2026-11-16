@@ -2,6 +2,8 @@
 
 本轮把一个 Qwen3-32B 模型拆到三张 P40 上执行，并与相同资源配置的原生
 SGLang 调度对照。论文依据仍为 [Autellix v1](https://arxiv.org/html/2502.13965v1)。
+本页保留三卡 32B 实验时的实现状态与数据；后续固定版本 BFCL/LATS 工作流、
+长上下文修复和 8B 负载曲线见[原始工作负载复现](paper-workload-experiment.md)。
 
 ## 三卡资源与模型
 
