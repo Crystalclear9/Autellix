@@ -23,11 +23,29 @@ class HostSwapTests(unittest.TestCase):
             swap.save("r", list(range(9)), torch.arange(9))
         self.assertIs(swap.saved["r"], old)
         self.assertEqual(swap.used_bytes, original_size)
-        with patch("torch.stack", side_effect=RuntimeError("packing failed")):
-            with self.assertRaisesRegex(RuntimeError, "packing failed"):
+        with patch("torch.empty", side_effect=RuntimeError("allocation failed")):
+            with self.assertRaisesRegex(RuntimeError, "allocation failed"):
                 swap.save("r", list(range(8)), torch.arange(8))
         self.assertIs(swap.saved["r"], old)
         self.assertEqual(swap.used_bytes, original_size)
+
+    def test_chunked_save_and_restore_preserve_noncontiguous_tokens(self):
+        swap, state = self.make_swap()
+        swap.transfer_bytes = 4  # one token per transfer
+        for i, layer in enumerate(swap.layers):
+            layer.copy_(torch.arange(8).reshape(8, 1) + i * 100)
+        indices = torch.tensor([7, 2, 5, 0, 3, 1, 6, 4])
+        expected = torch.stack([layer[indices].clone() for layer in swap.layers])
+        swap.used_bytes = swap.saved["r"][1].numel() * swap.saved["r"][1].element_size()
+        with patch("torch.cuda.current_stream", return_value=SimpleNamespace(synchronize=lambda: None)):
+            swap.save("r", list(range(8)), indices)
+            self.assertTrue(torch.equal(swap.saved["r"][1], expected))
+            for layer in swap.layers:
+                layer.zero_()
+            self.assertTrue(swap.restore("r"))
+        for layer, values in zip(swap.layers, expected):
+            self.assertTrue(torch.equal(layer[6:], values[6:]))
+        self.assertEqual(swap.used_bytes, expected.numel() * expected.element_size())
 
     def make_swap(self, fail_alloc=False):
         layer = torch.zeros((8, 1))
