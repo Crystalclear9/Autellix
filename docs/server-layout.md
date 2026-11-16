@@ -54,7 +54,10 @@ bash scripts/run_paper_suite.sh
 
 入口脚本为每轮创建独立的 `runs/` 和 `plans/` 子目录。三个 GPU 分别运行一个
 ShareGPT 配对点，随后继续第二随机种子、BFCL 采集/回放、LATS 采集/回放及 Mixed。
+这些任务完成后，三张卡共同运行 Llama-3.1-8B PP=3、大 KV 预算的配对实验。
 每组完成后立即保存 JSON 和退出码；完整命令、种子和输入 trace 哈希写入结果。
+单个矩阵中断后，可用原计划和输出文件重新执行 `run_sglang_matrix.py --resume`，
+复用已经完整结束的策略项，再执行余下项。
 
 `scripts/organize_server.py` 保存此次迁移逻辑；迁移内容限定为项目专属目录和上述
 四个模型。重复执行时跳过已迁移项，共用 Qwen 模型的旧入口保持可用。

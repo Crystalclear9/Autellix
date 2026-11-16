@@ -37,7 +37,10 @@ def metrics(row):
             gpu[device] = dict(mean_utilization=statistics.mean(g["utilization"] for g in samples),
                                peak_memory_mib=max(g["used_mib"] for g in samples))
     return dict(workload=kind, condition=row["condition"], rate=row["rate"], seed=row["seed"],
+                model=row["model"], versions=row["versions"], engine_args=row["effective_engine_args"],
+                devices=row["device_groups"], trace_sha256=row["trace_sha256"],
                 programs=len(arrivals), calls=len(row["calls"]), output_tokens=row["completion_tokens"],
+                input_tokens_per_call=distribution(c["prompt_tokens"] for c in row["calls"]),
                 program_response_seconds=distribution(row["programs"].values()),
                 paper_token_latency=distribution(token_times.values()),
                 paper_metric="critical_path/total_output_tokens" if kind in {"lats", "mixed"} else "program_response/total_output_tokens",
@@ -77,8 +80,17 @@ def summarize(records):
                           same_model=row["model"] == native["model"], same_versions=row["versions"] == native["versions"])
             if not all(paired.values()):
                 raise ValueError(f"unmatched workload or resources: {key}, {paired}")
+            per_program = []
+            for pid, response in row["programs"].items():
+                calls = [c for c in row["calls"] if c["workload_program"] == pid]
+                per_program.append(dict(program=pid, calls=len(calls),
+                    output_tokens=sum(c["completion_tokens"] for c in calls),
+                    max_input_tokens=max(c["prompt_tokens"] for c in calls),
+                    native_seconds=native["programs"][pid], candidate_seconds=response,
+                    response_delta_seconds=response-native["programs"][pid]))
             comparisons.append(dict(workload=key[0], rate=key[1], seed=key[2], devices=key[3], condition=row["condition"],
                 pairing=paired, programs=len(row["programs"]),
+                per_program=sorted(per_program, key=lambda p: -p["response_delta_seconds"]),
                 faster_programs=sum(row["programs"][p] < native["programs"][p] for p in row["programs"]),
                 matching_texts=sum(native["output_hashes"][c] == text for c, text in row["output_hashes"].items()),
                 calls=len(row["calls"]),

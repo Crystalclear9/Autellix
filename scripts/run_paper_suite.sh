@@ -23,6 +23,12 @@ for gpu, rate in enumerate([.004, .008, .016]):
     plan = dict(base, device=str(gpu), rates=[rate])
     plan['cases'] = base['cases'][::-1] if gpu == 1 else base['cases']
     (plans/f'sharegpt-gpu{gpu}.json').write_text(json.dumps(plan, indent=2))
+pp = dict(base, device='0,1,2', rates=[.048], workload_kind='sharegpt-pp3',
+          layer_partition=[10,11,11])
+pp['engine_args'] = dict(base['engine_args'], pp_size=3, max_running_requests=12,
+                         max_total_tokens=327680, mem_fraction_static=.9,
+                         autellix_attention_score_elements=16777216)
+(plans/'sharegpt-pp3.json').write_text(json.dumps(pp, indent=2))
 PY
 for gpu in 0 1 2; do
   (
@@ -45,4 +51,11 @@ failure=0
 for gpu in 0 1 2; do
   wait "$(cat "$run_dir/gpu$gpu.pid")" || failure=1
 done
+if [[ "$failure" == 0 ]]; then
+  set +e
+  "$python_bin" -u scripts/run_sglang_matrix.py --plan "$plans_dir/sharegpt-pp3.json" \
+    --output "$run_dir/sharegpt-pp3.json" > "$run_dir/sharegpt-pp3.log" 2>&1
+  failure=$?
+  echo "$failure" > "$run_dir/sharegpt-pp3.exit"
+fi
 exit "$failure"

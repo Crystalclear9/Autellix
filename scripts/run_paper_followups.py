@@ -50,11 +50,11 @@ def main():
         base["engine_args"] = dict(base["engine_args"], max_running_requests=8)
         run_plan("sharegpt-batch8", Path(base["workload"]), [.016], 8, seed=2027)
     elif gpu == 2:
-        workload = root / "datasets/bfcl-captured16.json"
+        workload = root / "datasets/bfcl-captured64.json"
         with (run / "bfcl-collection.log").open("w") as log:
             result = subprocess.run([sys.executable, "scripts/collect_bfcl.py", "--source", str(root / "datasets/bfcl-v3-source"),
                                      "--model", base["model"], "--device", str(gpu), "--output", str(workload),
-                                     "--programs", "16"], stdout=log, stderr=subprocess.STDOUT)
+                                     "--programs", "64"], stdout=log, stderr=subprocess.STDOUT)
         (run / "bfcl-collection.exit").write_text(str(result.returncode))
         result.check_returncode()
         run_plan("bfcl", workload, [.02, .05, .1], 48)
@@ -74,7 +74,7 @@ def main():
         if dependency.read_text().strip() != "0":
             raise RuntimeError("BFCL collection failed")
         mixed = []
-        for path in [Path(base["workload"]), root / "datasets/bfcl-captured16.json", workload]:
+        for path in [Path(base["workload"]), root / "datasets/bfcl-captured64.json", workload]:
             mixed.extend(json.loads(path.read_text()))
         mixed_path = root / "datasets/mixed-paper.json"
         mixed_path.write_text(json.dumps(mixed, ensure_ascii=False))

@@ -15,7 +15,7 @@ def main():
     p.add_argument("--output", required=True)
     args = p.parse_args()
     server, run, output = Path(args.root), Path(args.run_dir), Path(args.output)
-    names = [f"sharegpt-gpu{i}" for i in range(3)] + ["sharegpt-repeat", "sharegpt-ablation", "sharegpt-batch8", "bfcl", "lats", "mixed"]
+    names = [f"sharegpt-gpu{i}" for i in range(3)] + ["sharegpt-repeat", "sharegpt-ablation", "sharegpt-batch8", "bfcl", "lats", "mixed", "sharegpt-pp3"]
     for name in names + ["bfcl-collection", "lats-collection"]:
         if (run / (name + ".exit")).read_text().strip() != "0":
             raise ValueError(f"unfinished trial: {name}")
@@ -42,14 +42,18 @@ def main():
                 shutil.copy2(search_log, inputs / search_log.name)
         traces = root / "traces"
         traces.mkdir()
-        for name in sorted({row["state_dir"] for row in rows}):
+        state_dirs = {row["state_dir"] for row in rows}
+        check = run / "prefill-priority-gpu-check.json"
+        if check.exists():
+            state_dirs.update(row["state_dir"] for row in json.loads(check.read_text()))
+        for name in sorted(state_dirs):
             shutil.copytree(name, traces / Path(name).name)
         for name in ["bfcl-v3-source", "lats-source"]:
             shutil.copytree(server / "datasets" / name, root / "upstream" / name,
                             ignore=shutil.ignore_patterns("__pycache__"))
         shutil.copy2(server / "datasets/source-downloads.json", root / "source-downloads.json")
         shutil.copy2(server / "layout-migration.json", root / "layout-migration.json")
-        for name in ["paper-suite-networkfs-start", "paper-suite-swap-oom"]:
+        for name in ["paper-suite-networkfs-start", "paper-suite-swap-oom", "paper-suite-prefill-capacity"]:
             failure = run.parent / name
             if failure.exists():
                 shutil.copytree(failure, root / "startup-failures" / name)
