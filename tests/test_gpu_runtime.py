@@ -169,6 +169,25 @@ class RealInferenceTests(unittest.TestCase):
 
 @unittest.skipUnless(os.environ.get("AUTELLIX_TEST_CUDA_SWAP"), "requires AUTELLIX_TEST_CUDA_SWAP=1")
 class CUDASwapTests(unittest.TestCase):
+    def test_tiled_prefix_attention_cuda(self):
+        import torch
+        from integrations.sglang.attention import prefix_attention
+        torch.manual_seed(19)
+        for dtype in (torch.float16, torch.float32):
+            total, count, heads = 4096, 1024, 32
+            q = torch.randn(count, heads, 16, device="cuda", dtype=dtype)
+            k, v = [torch.randn(total, 8, 16, device="cuda", dtype=dtype) for _ in range(2)]
+            mask = torch.arange(total, device="cuda")[None] <= total-count+torch.arange(count, device="cuda")[:, None]
+            expected = torch.nn.functional.scaled_dot_product_attention(
+                q.transpose(0, 1)[None], k.transpose(0, 1)[None], v.transpose(0, 1)[None],
+                attn_mask=mask, enable_gqa=True)[0].transpose(0, 1)
+            output = torch.empty_like(q)
+            prefix_attention(None, q, output, k, v, torch.arange(total, device="cuda")[None],
+                             torch.tensor([0], device="cuda"), torch.tensor([total], device="cuda"),
+                             torch.tensor([total-count], device="cuda"), torch.tensor([count], device="cuda"),
+                             enable_gqa=True, causal=True)
+            torch.testing.assert_close(output, expected, atol=1e-3 if dtype==torch.float16 else 1e-5, rtol=1e-3)
+
     def test_real_kv_roundtrip_nontrivial_mapping(self):
         import torch
         from autellix.runtime.swap import batched_swap

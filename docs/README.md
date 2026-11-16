@@ -17,6 +17,7 @@
 | [运行维护与排错](operations.md) | 启停、状态目录、日志、故障与资源清理 | 日常运行 |
 | [P40 部署与验收记录](p40-validation-20261115.md) | 实测配置、证据、未修复项与后续验收条件 | 部署与验证 |
 | [论文核对与 SGLang 对照](autellix-paper-audit.md) | 方法与实验复现差距、原生调度基线、ShareGPT 配对协议 | 评估收益 |
+| [完整对话与负载实验](experiment-design-review.md) | 最新源码核对、输入修正、策略消融和完整对话负载曲线 | 复现与调参 |
 
 后端特有的 KV 所有权和限制见 [vLLM](../integrations/vllm/README.md)、[SGLang](../integrations/sglang/README.md)。GPU 传输测量见 [KV 传输微基准](../cuda/README.md)。
 

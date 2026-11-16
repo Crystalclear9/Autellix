@@ -9,22 +9,24 @@ from pathlib import Path
 from importlib.metadata import version
 
 from autellix.runtime import InferenceEngine, ReplicaConfig, PolicyConfig
-from autellix.runtime.benchmark import load_workloads, run_workload, distribution
+from autellix.runtime.benchmark import load_workloads, run_workload, distribution, poisson_trace
 
 
-def trial(model, device, engine_args, trace, arm, reserve=0, interval=8, quantum_scale=1., request_timeout=600):
+def trial(model, device, engine_args, trace, arm, reserve=0, interval=8, quantum_scale=1., request_timeout=600,
+          boundary_scale=None, beta=8., progress_interval=0):
     options = dict(engine_args)
     options["autellix_native_baseline"] = arm == "sglang-native"
     defaults = PolicyConfig()
+    boundary_scale = quantum_scale if boundary_scale is None else boundary_scale
     policy = PolicyConfig(policy="fcfs" if arm == "sglang-native" else arm,
                           schedule_interval=interval, overprovision=0 if arm == "sglang-native" else reserve,
-                          boundaries=tuple(x * quantum_scale for x in defaults.boundaries),
-                          quanta=tuple(x * quantum_scale for x in defaults.quanta))
+                          boundaries=tuple(x * boundary_scale for x in defaults.boundaries),
+                          quanta=tuple(x * quantum_scale for x in defaults.quanta), beta=beta)
     with InferenceEngine([ReplicaConfig("sglang", model, device, options)], policy=policy) as engine:
         sid = engine.start_session()
         engine.submit(sid, prompt="Warmup.", sampling={"temperature": 0, "max_tokens": 4}).result(120)
         engine.end_session(sid); engine.wait_idle(30)
-        result = run_workload(engine, trace, request_timeout=request_timeout)
+        result = run_workload(engine, trace, request_timeout=request_timeout, progress_interval=progress_interval)
         assert all(bool(c["metrics"].get("native_sglang")) == (arm == "sglang-native")
                    for c in result["calls"]), "unexpected scheduler accounting path"
         engine.wait_idle(30)
@@ -36,6 +38,8 @@ def trial(model, device, engine_args, trace, arm, reserve=0, interval=8, quantum
         result["overprovision"] = policy.overprovision
         result["schedule_interval"] = policy.schedule_interval
         result["quantum_scale"] = quantum_scale
+        result["boundary_scale"] = boundary_scale
+        result["beta"] = beta
         # For these sequential programs the paper metric uses entire response
         # time, including initial admission/driver delay, divided by output count.
         counts = {p["program_id"]: 0 for p in trace}
@@ -61,6 +65,10 @@ def main():
     p.add_argument("--reserve", type=int, default=0, help="Autellix reserves; native keeps zero, KV budget unchanged")
     p.add_argument("--interval", type=int, default=8)
     p.add_argument("--quantum-scale", type=float, default=1.)
+    p.add_argument("--boundary-scale", type=float, help="service-history bins; defaults to quantum scale")
+    p.add_argument("--beta", type=float, default=8.)
+    p.add_argument("--programs", type=int, default=0, help="sample this many whole programs with replacement; 0 replays all")
+    p.add_argument("--seed", type=int, default=100)
     p.add_argument("--request-timeout", type=float, default=600)
     p.add_argument("--engine-args", default='{"autellix_legacy_gpu":true,"context_length":2048,"max_running_requests":2,"max_total_tokens":4096,"mem_fraction_static":0.5,"random_seed":0}')
     args = p.parse_args()
@@ -73,20 +81,25 @@ def main():
         if rate <= 0:
             raise ValueError("arrival rate must be positive")
         for repeat in range(args.repeats):
-            trace = copy.deepcopy(programs)
-            rng = random.Random(100+repeat); rng.shuffle(trace)
-            arrival = 0.
-            for i, program in enumerate(trace):
-                if i: arrival += rng.expovariate(rate)
-                program["arrival_time"] = arrival
+            if args.programs:
+                trace = poisson_trace(programs, args.programs, rate, args.seed + repeat)
+            else:
+                trace = copy.deepcopy(programs)
+                rng = random.Random(args.seed+repeat); rng.shuffle(trace)
+                arrival = 0.
+                for i, program in enumerate(trace):
+                    if i: arrival += rng.expovariate(rate)
+                    program["arrival_time"] = arrival
             arms = args.arms.split(",")
             if repeat % 2: arms.reverse()
             for arm in arms:
                 print(f"START rate={rate} repeat={repeat} arm={arm}", flush=True)
                 start = time.time()
                 result = trial(args.model, args.device, json.loads(args.engine_args), trace, arm,
-                               args.reserve, args.interval, args.quantum_scale, args.request_timeout)
+                               args.reserve, args.interval, args.quantum_scale, args.request_timeout,
+                               args.boundary_scale, args.beta)
                 result.update(rate=rate, repeat=repeat, wall_start=start,
+                              trace_seed=args.seed + repeat, sampled_programs=args.programs,
                               trace_sha256=hashlib.sha256(json.dumps(trace,sort_keys=True).encode()).hexdigest(),
                               versions={p:version(p) for p in ["sglang","torch","transformers"]})
                 records.append(result)

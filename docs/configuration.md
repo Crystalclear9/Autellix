@@ -16,7 +16,9 @@
 | 各队列时间片（秒） | `.01,.02,.04,.08,.16,.32,.64` |
 | 防饥饿阈值 beta | 8 |
 
-`--schedule-interval`、`--overprovision`、`--implementation` 可在服务和真实工作负载命令中设置；其余策略参数通过 `PolicyConfig` 配置。这些数值是项目选择，不是论文公布的完整参数表。
+`--schedule-interval`、`--overprovision`、`--implementation` 可在服务和真实工作负载命令中设置。
+服务 CLI 另有 `--quantum-scale`、`--boundary-scale` 缩放默认时间片和区间，默认 1；
+完整策略参数通过 `PolicyConfig` 配置。这些数值是项目选择，不是论文公布的完整参数表。
 
 `paper` 使用论文描述的调度语义。`compat` 是可选的旧后端调度包装方式。窗口内仍需逐 token 更新执行元数据；预备请求需要真实 prefill（包括首个采样 token）或 KV 换入，并占用显存。
 
@@ -38,7 +40,7 @@
 | `--state-dir` | 自动创建临时目录 | SQLite 和 trace 所在目录；每个服务实例使用独立目录 |
 | `--host`、`--port` | `127.0.0.1`、`8000` | HTTP 监听地址和端口 |
 
-配置区间与时间片用 Python 设置，而不是塞进 `--engine-args`：
+自定义完整区间与时间片用 Python 设置：
 
 ```python
 import math
@@ -75,10 +77,15 @@ vLLM 默认 paper 模式强制关闭异步输出处理，启用支持混合阶�
 SGLang 适配强制 `disable_overlap_schedule=True`、`chunked_prefill_size=-1`、`page_size=1`。TP/PP/DP、LoRA、HiCache、推测解码等不受支持，具体校验见后端说明。其他未强制覆盖的参数仍需符合固定版本及当前适配的要求。
 
 SGLang 可显式设置 `autellix_legacy_gpu=true`（默认关闭），用于实验性 P40 兼容。
-它强制 `dtype=float32`、`attention_backend=torch_native`、`sampling_backend=pytorch`、
+它默认 `dtype=float32`，保留显式指定的 `dtype=float16`；固定使用
+`attention_backend=torch_native`、`sampling_backend=pytorch`、
 `disable_cuda_graph=True`、`disable_custom_all_reduce=True`，并在 scheduler 进程禁用
-Dynamo、替换标准模型算子。该开关不意味着任意模型或 GPU 已受支持，见
-[验收范围](p40-validation-20261115.md)。
+Dynamo、替换标准模型算子。已测模型与配置见[验收记录](p40-validation-20261115.md)。
+
+`autellix_retain_running=true` 默认在选中的 prefill、decode 及剩余输出全部能放入
+KV 预算时保留已选中的 decode，避免一次无必要的换出/恢复；不足时仍按优先级释放。
+设为 false 可运行旧接纳方式的消融。`compare_sglang.py` 的 `--quantum-scale` 与
+`--boundary-scale` 分别缩放时间片和服务历史区间，后者缺省时沿用前者。
 
 ## 设备分组
 
@@ -106,6 +113,7 @@ autellix-serve --backend vllm --model /absolute/path/to/model \
 | `AUTELLIX_TEST_IMPLEMENTATION` | GPU unittest | `paper` 或 `compat` |
 | `AUTELLIX_TEST_LEGACY_GPU` | SGLang GPU unittest | 严格等于 `1` 时启用原生算子兼容模式及 2048 KV token 测试预算 |
 | `AUTELLIX_MODEL`、`AUTELLIX_DEVICES`、`AUTELLIX_PORT` | `scripts/serve_p40.sh` | 模型目录、设备列表、端口；默认模型为持久盘 SmolLM2-135M，设备 `0`、端口 `8000` |
+| `AUTELLIX_QUANTUM_SCALE`、`AUTELLIX_BOUNDARY_SCALE` | `scripts/serve_p40.sh` | 时间片倍数默认 1，服务区间倍数默认跟随时间片；生产服务可直接复用实验参数 |
 | `AUTELLIX_PYTHON`、`AUTELLIX_STATE_DIR` | `scripts/serve_p40.sh` | 解释器及状态目录；默认独立持久盘环境，每次新建 `/tmp/autellix-p40-XXXXXX` 状态目录 |
 
 除严格判断 `1` 的 `AUTELLIX_TEST_LEGACY_GPU` 外，可选测试开关按环境变量是否为非空判断；禁用时应取消设置，不要设成字符串 `0`。执行 CPU 测试前确认未继承上一轮 GPU 验证变量。

@@ -1,5 +1,8 @@
 # Autellix 论文复现尝试：源码核对与 GPU 实验
 
+后续的完整对话恢复、BOS 修正、调度时间尺度消融和负载曲线见
+[完整对话与负载实验](experiment-design-review.md)。本页保留上一轮协议与结果。
+
 复现目标：[Autellix arXiv:2502.13965v1](https://arxiv.org/html/2502.13965v1)。
 本项目实现论文的程序调度方法，推理后端为 vLLM 0.6.1 和 SGLang 0.4.9.post6。
 本轮在 3×Tesla P40 服务器检查源码、测量开销、修正实现并重新运行对照。

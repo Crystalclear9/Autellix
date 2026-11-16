@@ -39,6 +39,8 @@ Graph、自定义 all-reduce 和 Dynamo 编译。调度子进程内将标准 RMS
 
 环境固定为包含 Pascal 内核的 Torch 2.7.1/CUDA 12.6。支持标准稠密文本模型。
 缓存前缀 attention 只计算新增 Query，原生 SGLang 对照和 Autellix 共用这条路径。
+长 prefill 按 Query 分块，每块使用绝对前缀位置构造因果遮罩，控制临时 attention
+矩阵大小。FP16/FP32 CUDA 数值回归覆盖此路径。
 `autellix_prefix_attention=false` 可复测原来的完整 Query 填充实现。
 
 持久盘部署示例：`bash scripts/serve_p40.sh`。通过 `AUTELLIX_PYTHON`、

@@ -139,7 +139,15 @@ def install(cls, options):
                         # it cannot consume the space needed by a higher arrival.
                         # Re-admit that suffix in the same global FIFO order.
                         cutoff = min(pending)
-                        keep = {rid for rid in keep if order[rid] < cutoff}
+                        lower_running = [r.rid for r in batch.reqs if r.rid in keep and order[r.rid] >= cutoff]
+                        from .admission import can_keep_running
+                        pending_reqs = [r for r in self.waiting_queue if r.rid in keep]
+                        if (lower_running and options.get("retain_running", True)
+                                and can_keep_running(self, pending_reqs, keep)):
+                            ctl.emit("retain_running", requests=lower_running,
+                                     pending=[r.rid for r in pending_reqs])
+                        else:
+                            keep = {rid for rid in keep if order[rid] < cutoff}
                 victims = [i for i, r in enumerate(batch.reqs) if r.rid not in keep]
                 # Use the pinned engine's native retraction ownership rules.
                 # Generated output_ids are preserved by reset_for_retract().

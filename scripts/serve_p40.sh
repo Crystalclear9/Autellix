@@ -14,6 +14,8 @@ cd "$project_dir"
 # SQLite must stay on a local filesystem, not the network-mounted persistent disk.
 exec "$python_bin" -m autellix.runtime.server --backend sglang --model "$model" \
   --policy atlas --devices "${AUTELLIX_DEVICES:-0}" \
+  --quantum-scale "${AUTELLIX_QUANTUM_SCALE:-1}" \
+  --boundary-scale "${AUTELLIX_BOUNDARY_SCALE:-${AUTELLIX_QUANTUM_SCALE:-1}}" \
   --host 127.0.0.1 --port "${AUTELLIX_PORT:-8000}" \
   --state-dir "$state_dir" \
   --engine-args "$engine_args"

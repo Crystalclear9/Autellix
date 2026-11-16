@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import random
+import math
 from dataclasses import replace
 from itertools import count
 
@@ -48,7 +49,7 @@ def make_figure2_workload() -> list[ProgramSpec]:
 
 
 def _bounded_lognormal(rng: random.Random, mean: float, sigma: float, cap: int) -> int:
-    value = int(rng.lognormvariate(0, sigma) * mean)
+    value = round(rng.lognormvariate(-sigma * sigma / 2, sigma) * mean)
     return max(1, min(cap, value))
 
 
@@ -62,7 +63,7 @@ def _arrival_times(rng: random.Random, count_: int, arrival_rate: float) -> list
 
 
 def _make_sharegpt_program(rng: random.Random, program_id: str, arrival: int) -> ProgramSpec:
-    call_count = min(80, max(1, int(rng.expovariate(1 / 5.5)) + 1))
+    call_count = min(80, int(rng.expovariate(-math.log1p(-1 / 6.66))) + 1)
     prefill: list[int] = []
     decode: list[int] = []
     model_times: list[int] = []
@@ -82,13 +83,13 @@ def _make_sharegpt_program(rng: random.Random, program_id: str, arrival: int) ->
 
 
 def _make_bfcl_program(rng: random.Random, program_id: str, arrival: int) -> ProgramSpec:
-    call_count = min(70, max(1, int(rng.gauss(11, 4))))
+    call_count = min(70, max(1, round(rng.gauss(10.75, 4))))
     prefill: list[int] = []
     decode: list[int] = []
     model_times: list[int] = []
     for _ in range(call_count):
-        p = _bounded_lognormal(rng, 735, 0.65, 40_000)
-        d = _bounded_lognormal(rng, 34, 0.55, 1_000)
+        p = _bounded_lognormal(rng, 735.06, 0.65, 40_000)
+        d = _bounded_lognormal(rng, 34.14, 0.55, 1_000)
         prefill.append(p)
         decode.append(d)
         model_times.append(max(1, d // 20 + p // 900))
@@ -102,12 +103,12 @@ def _make_bfcl_program(rng: random.Random, program_id: str, arrival: int) -> Pro
 
 
 def _make_lats_program(rng: random.Random, program_id: str, arrival: int) -> ProgramSpec:
-    target_calls = min(400, max(40, int(rng.gauss(160, 48))))
+    target_calls = min(400, max(40, round(rng.gauss(159.7, 48))))
     calls: list[CallSpec] = []
     id_counter = count(1)
     root_id = f"{program_id}{next(id_counter)}"
-    root_prefill = _bounded_lognormal(rng, 467, 0.6, 20_000)
-    root_decode = _bounded_lognormal(rng, 73, 0.6, 2_000)
+    root_prefill = _bounded_lognormal(rng, 467.2, 0.6, 20_000)
+    root_decode = _bounded_lognormal(rng, 72.6, 0.6, 2_000)
     calls.append(
         CallSpec(
             call_id=root_id,
@@ -124,8 +125,8 @@ def _make_lats_program(rng: random.Random, program_id: str, arrival: int) -> Pro
         for _ in range(width):
             call_id = f"{program_id}{next(id_counter)}"
             parent = rng.choice(frontier)
-            p = _bounded_lognormal(rng, 467, 0.6, 20_000)
-            d = _bounded_lognormal(rng, 73, 0.6, 2_000)
+            p = _bounded_lognormal(rng, 467.2, 0.6, 20_000)
+            d = _bounded_lognormal(rng, 72.6, 0.6, 2_000)
             calls.append(
                 CallSpec(
                     call_id=call_id,

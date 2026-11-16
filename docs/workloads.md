@@ -35,6 +35,7 @@ python -m autellix.runtime.benchmark --backend vllm \
 | 调用 | `max_tokens` | 默认 32 |
 | 调用 | `sampling` | 覆盖默认采样参数的对象，使用后端支持字段 |
 | 调用 | `append_parent_outputs` | 默认 true，将父调用文本附到提示末尾 |
+| 调用 | `input_ids` | 可选的固定输入 token；不追加父输出时直接提交，避免重复编码模板 |
 
 DAG 在 benchmark 驱动侧控制何时提交调用；真实在线 ATLAS 调度器并不读取这些父节点计算精确 DAG 优先级。区分这一点有助于避免把驱动侧的依赖执行与调度器本身混为一谈。
 
@@ -44,6 +45,9 @@ DAG 在 benchmark 驱动侧控制何时提交调用；真实在线 ATLAS 调度�
 | `output_tokens_per_second` | 全部输出 token 数除以工作负载总耗时，包括到达间隔与外部等待 |
 | `program_critical_path_seconds` | 沿依赖路径累计实测调用延迟与 `think_time` 的最大值 |
 | `program_token_latencies` | 程序关键路径时间除以该程序所有线程总输出 token 数 |
+| `arrival_horizon_seconds`、`drain_seconds` | 最后一次到达的时刻，以及此后排空队列的耗时 |
+| `completions_during_arrivals` | 最后一次到达前已完成的程序数 |
+| `first_submission_lag_seconds` | 第一次提交相对程序计划到达的延迟 |
 | 调用 `latency_seconds` | 协调器创建 Future 到收到最终结果的耗时，不含此前同步分词 |
 | 调用 `ttft_seconds` | 创建 Future 到收到第一段非空文本的耗时；不是逐 token GPU 内核时间 |
 | `metrics.executed` | 已记录的模型执行服务时间；批次耗时分别计入参与调用，不按批大小均分 |
@@ -83,3 +87,30 @@ ShareGPT 子集回放和配对重复实验，保存原始结果及输出哈希�
 `scripts/summarize_sglang_comparison.py` 拒绝缺失配对/重复，保留负收益和输出不一致标记。
 正的 latency reduction / throughput gain 表示改善，负值表示退化；汇总保留全部配对。
 源码与论文对应、数据设置和实测结果见 [论文核对与实验](autellix-paper-audit.md)。
+
+## 完整对话与负载曲线
+
+ShareGPT 原始文件的 `<对话ID>_<数字>` 后缀是消息偏移。准备脚本默认先合并同一
+对话的片段，再按整段对话过滤上下文；重叠消息逐项核对。默认保留 1–80 次调用，
+上下文 32768，输出长度不截短。`--source-records` 可复测旧的分片协议。
+
+```bash
+python scripts/prepare_sharegpt_replay.py \
+  --source /mnt/masfiles/datasets/autellix-paper-20261115/sharegpt.json \
+  --model /mnt/masfiles/models/Meta-Llama-3.1-8B-Instruct \
+  --programs 128 --seed 42 --output outputs/sharegpt-whole128.json
+python scripts/run_sglang_matrix.py --plan examples/p40-sharegpt-plan.json \
+  --output outputs/load-curve.json
+python scripts/summarize_sglang_matrix.py outputs/load-curve.json \
+  --output outputs/load-curve-summary.json
+```
+
+计划中的模型、数据和设备路径可按机器修改。所有策略在同一到达率、重复编号下使用
+相同 trace；每次重启引擎、预热后计时。该顺序回放保留参考历史、固定参考输出长度，
+生成内容不反馈到下轮输入。用 `paper_sequential_token_latency` 比较程序响应秒数/输出
+token 随程序到达率的变化；`output_tokens_per_second` 包含到达间隔和尾部排空时间。
+这是两个不同指标。汇总分别报告输入/长度匹配和生成文本一致数。
+
+CPU 合成负载按论文表校准平均调用数和 token 数，用于检查策略与参数。
+对数正态分布的均值使用 `mu=-sigma²/2` 校正；sigma、裁剪阈值和模拟执行成本
+由项目设定。其输出标记为 `measurement=simulation`，真实 GPU 输出为 `real_backend`。

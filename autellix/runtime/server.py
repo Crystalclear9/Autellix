@@ -210,6 +210,8 @@ def main(argv=None):
     parser.add_argument("--state-dir")
     parser.add_argument("--schedule-interval", type=int, default=8)
     parser.add_argument("--overprovision", type=int, default=1)
+    parser.add_argument("--quantum-scale", type=float, default=1.)
+    parser.add_argument("--boundary-scale", type=float, help="defaults to quantum scale")
     parser.add_argument("--implementation", choices=("paper", "compat"), default="paper")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
@@ -217,8 +219,12 @@ def main(argv=None):
     groups = args.device_groups.split(";") if args.device_groups else args.devices.split(",")
     replicas = [ReplicaConfig(args.backend, args.model, d.strip(), json.loads(args.engine_args))
                 for d in groups]
+    defaults = PolicyConfig()
+    boundary_scale = args.quantum_scale if args.boundary_scale is None else args.boundary_scale
     engine = InferenceEngine(replicas, state_dir=args.state_dir,
                              policy=PolicyConfig(policy=args.policy, schedule_interval=args.schedule_interval,
+                                                 boundaries=tuple(x * boundary_scale for x in defaults.boundaries),
+                                                 quanta=tuple(x * args.quantum_scale for x in defaults.quanta),
                                                  overprovision=args.overprovision,
                                                  implementation=args.implementation))
     import uvicorn

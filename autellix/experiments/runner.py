@@ -34,6 +34,7 @@ def result_record(
     responses = [m.response_time for m in result.program_metrics.values()]
     makespan = max(1, result.makespan)
     return {
+        "measurement": "simulation",
         "workload": workload,
         "baseline": baseline,
         "policy": result.policy,
@@ -359,7 +360,8 @@ def write_records(records: list[dict[str, float | int | str]], output_dir: str |
     json_path.write_text(json.dumps(records, indent=2, sort_keys=True), encoding="utf-8")
     if records:
         with csv_path.open("w", newline="", encoding="utf-8") as handle:
-            writer = csv.DictWriter(handle, fieldnames=list(records[0].keys()))
+            fields = list(dict.fromkeys(key for record in records for key in record))
+            writer = csv.DictWriter(handle, fieldnames=fields)
             writer.writeheader()
             writer.writerows(records)
     else:

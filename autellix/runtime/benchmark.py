@@ -95,14 +95,21 @@ def distribution(values):
     return dict(mean=statistics.mean(values), p95=percentile(.95), p99=percentile(.99), count=len(values))
 
 
-def run_workload(engine, programs, request_timeout=600):
+def run_workload(engine, programs, request_timeout=600, progress_interval=0):
     validate_workload(programs)
     results, pending, submitted = {}, {}, set()
     program_times = {}
+    first_submissions = {}
     sessions, completions, call_starts, critical = {}, {}, {}, {}
     start = time.monotonic()
+    last_progress = start
     try:
         while len(results) < sum(len(p["calls"]) for p in programs):
+            now = time.monotonic()
+            if progress_interval and now - last_progress >= progress_interval:
+                print(f"PROGRESS elapsed={now-start:.1f}s calls={len(results)} "
+                      f"programs={len(program_times)}/{len(programs)} pending={len(pending)}", flush=True)
+                last_progress = now
             for program in programs:
                 pid = program["program_id"]
                 arrival = start + program.get("arrival_time", 0)
@@ -122,7 +129,11 @@ def run_workload(engine, programs, request_timeout=600):
                     if parents and call.get("append_parent_outputs", True):
                         prompt += "\nPrevious results:\n" + "\n".join(results[parent]["text"] for parent in parents)
                     call_starts[key] = time.monotonic()
-                    future = engine.submit(sessions[pid], prompt=prompt, call_id=call["call_id"],
+                    first_submissions.setdefault(pid, call_starts[key] - start)
+                    frozen_input = "input_ids" in call and not (parents and call.get("append_parent_outputs", True))
+                    inputs = ({"input_ids": call["input_ids"]} if frozen_input
+                              else {"prompt": prompt})
+                    future = engine.submit(sessions[pid], **inputs, call_id=call["call_id"],
                                            sampling={"temperature": 0, "max_tokens": call.get("max_tokens", 32),
                                                      **call.get("sampling", {})})
                     pending[future] = key
@@ -163,10 +174,20 @@ def run_workload(engine, programs, request_timeout=600):
             critical_times[pid] = max(critical[(pid, c["call_id"])] for c in program["calls"])
             count = sum(results[(pid, c["call_id"])].get("completion_tokens", len(results[(pid, c["call_id"])] ["token_ids"])) for c in program["calls"])
             token_latencies[pid] = critical_times[pid] / count if count else None
+        arrival_end = max(p.get("arrival_time", 0) for p in programs)
+        completion_times = {p["program_id"]: p.get("arrival_time", 0) + program_times[p["program_id"]]
+                            for p in programs}
         return dict(measurement="real_backend", policy=engine.policy.policy,
                     backend=[r.backend for r in engine.replicas], model=engine.model,
                     elapsed_seconds=elapsed, completion_tokens=tokens,
                     output_tokens_per_second=tokens/elapsed,
+                    completed_programs_per_second=len(programs)/elapsed,
+                    arrival_horizon_seconds=arrival_end,
+                    drain_seconds=max(0., elapsed-arrival_end),
+                    completions_during_arrivals=sum(t <= arrival_end for t in completion_times.values()),
+                    program_completion_times=completion_times,
+                    first_submission_lag_seconds={p["program_id"]: first_submissions[p["program_id"]] - p.get("arrival_time", 0)
+                                                  for p in programs},
                     program_latency_seconds=distribution(program_times.values()),
                     program_token_latency_seconds=distribution(token_latencies.values()),
                     program_critical_path_seconds=critical_times,

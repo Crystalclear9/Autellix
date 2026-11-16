@@ -1,0 +1,48 @@
+{
+  "model": "/mnt/masfiles/models/Meta-Llama-3.1-8B-Instruct",
+  "device": "1",
+  "workload": "outputs/sharegpt-whole128.json",
+  "rates": [
+    0.005,
+    0.02,
+    0.08
+  ],
+  "programs": 12,
+  "repeats": 1,
+  "seed": 100,
+  "request_timeout": 7200,
+  "engine_args": {
+    "autellix_legacy_gpu": true,
+    "dtype": "float16",
+    "context_length": 32768,
+    "max_running_requests": 4,
+    "max_total_tokens": 32768,
+    "mem_fraction_static": 0.9,
+    "random_seed": 0,
+    "autellix_swap_space": 8,
+    "max_prefill_tokens": 32768
+  },
+  "cases": [
+    {
+      "name": "native",
+      "policy": "sglang-native"
+    },
+    {
+      "name": "plas-scaled",
+      "policy": "plas",
+      "reserve": 1,
+      "quantum_scale": 64,
+      "boundary_scale": 64
+    },
+    {
+      "name": "mlfq-scaled",
+      "policy": "mlfq",
+      "reserve": 1,
+      "quantum_scale": 64,
+      "boundary_scale": 64,
+      "rates": [
+        0.08
+      ]
+    }
+  ]
+}

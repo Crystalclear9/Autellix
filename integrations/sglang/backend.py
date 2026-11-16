@@ -22,6 +22,7 @@ class SGLangBackend:
             raise ValueError("native SGLang baseline requires overprovision=0")
         legacy_gpu = engine_args.pop("autellix_legacy_gpu", False)
         prefix_attention = engine_args.pop("autellix_prefix_attention", True)
+        retain_running = engine_args.pop("autellix_retain_running", True)
         if legacy_gpu:
             # Explicit compatibility mode: native PyTorch ops, no CUDA JIT.
             engine_args.setdefault("dtype", "float32")
@@ -43,7 +44,8 @@ class SGLangBackend:
         if host_bytes <= 0:
             raise ValueError("autellix_swap_space must be positive GiB")
         options = dict(table_path=table_path, config=asdict(config), trace=trace,
-                       host_bytes=host_bytes, legacy_gpu=legacy_gpu, prefix_attention=prefix_attention)
+                       host_bytes=host_bytes, legacy_gpu=legacy_gpu, prefix_attention=prefix_attention,
+                       retain_running=retain_running)
         target = entry.run_scheduler_process
         if self.native:
             if legacy_gpu:

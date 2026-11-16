@@ -9,6 +9,45 @@ from integrations.sglang.scheduler import encode_request, install
 
 
 class CompletedDecodeTests(unittest.TestCase):
+    def test_selected_decode_stays_resident_when_higher_prefill_fits(self):
+        with tempfile.TemporaryDirectory() as directory:
+            class Native:
+                def __init__(self):
+                    self.policy = SimpleNamespace()
+                    self.server_args = SimpleNamespace(max_running_requests=2)
+                    self.max_prefill_tokens = 1024
+                    self.token_to_kv_pool_allocator = SimpleNamespace(available_size=lambda: 2048)
+                    self.tree_cache = SimpleNamespace(evictable_size=lambda: 0)
+                    self.waiting_queue = []
+                _add_request_to_queue = Mock()
+                _extend_requests_to_queue = Mock()
+                run_batch = Mock()
+                process_batch_result = Mock()
+                abort_request = Mock()
+                check_memory = Mock()
+                def get_new_batch_prefill(self):
+                    result = SimpleNamespace(reqs=self.waiting_queue + self.running_batch.reqs)
+                    self.waiting_queue = []
+                    return result
+            with patch.dict("sys.modules", {"torch": Mock()}):
+                install(Native, {"table_path": str(Path(directory, "state.sqlite")),
+                                 "config": {"overprovision": 0}, "capacity": 2})
+            scheduler = Native()
+            try:
+                scheduler.autellix.table.open("p")
+                for rid in ("higher", "running"):
+                    scheduler.autellix.admit(rid, "p")
+                req = lambda rid: SimpleNamespace(rid=rid, origin_input_ids=[1]*10, output_ids=[2],
+                                                 sampling_params=SimpleNamespace(max_new_tokens=8))
+                scheduler.waiting_queue = [req("higher")]
+                scheduler.running_batch = SimpleNamespace(reqs=[req("running")], filter_batch=lambda: None,
+                    seq_lens=SimpleNamespace(cpu=lambda: SimpleNamespace(tolist=lambda: [10])))
+                result = scheduler.get_new_batch_prefill()
+                self.assertEqual([r.rid for r in result.reqs], ["higher", "running"])
+                self.assertEqual([r.rid for r in scheduler.running_batch.reqs], ["running"])
+            finally:
+                scheduler.autellix.table.close()
+
     def test_restored_prefix_is_pinned_through_admission_and_unlocked_on_error(self):
         for fail_admission in (False, True):
             with self.subTest(fail_admission=fail_admission), tempfile.TemporaryDirectory() as directory:

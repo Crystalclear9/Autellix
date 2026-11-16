@@ -13,6 +13,26 @@ from autellix.runtime.window import SchedulingWindow
 
 
 class RuntimeRegressions(unittest.TestCase):
+    def test_frozen_prompt_ids_and_arrival_drain_metrics(self):
+        from autellix.runtime.benchmark import run_workload
+        clock, submitted = [0.], []
+        def submit(pid, **kwargs):
+            submitted.append(kwargs)
+            clock[0] += 2
+            result = concurrent.futures.Future()
+            result.set_result(dict(text="answer", token_ids=[1, 2]))
+            return result
+        engine = SimpleNamespace(start_session=lambda: "s", end_session=lambda _: None, submit=submit,
+                                 policy=SimpleNamespace(policy="plas"), replicas=[SimpleNamespace(backend="test")], model="m")
+        workload = [dict(program_id="p", calls=[dict(call_id="a", prompt="template", input_ids=[7, 8])])]
+        with patch("autellix.runtime.benchmark.time.monotonic", lambda: clock[0]):
+            result = run_workload(engine, workload)
+        self.assertEqual(submitted[0]["input_ids"], [7, 8])
+        self.assertNotIn("prompt", submitted[0])
+        self.assertEqual(result["drain_seconds"], 2)
+        self.assertEqual(result["completed_programs_per_second"], .5)
+        self.assertEqual(result["first_submission_lag_seconds"], {"p": 0})
+
     def test_poisson_trace_is_reproducible_and_rejects_invalid_rates(self):
         from autellix.runtime.benchmark import poisson_trace
         source = [{"program_id": "p", "calls": [{"call_id": "a", "prompt": "real prompt"}]}]
