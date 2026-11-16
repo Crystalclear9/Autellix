@@ -28,7 +28,7 @@ def main():
     paths += [f"bfcl/eval_checker/multi_turn_eval/func_source_code/{name}.py"
               for name in classes + ["long_context", "__init__"]]
     paths += ["bfcl/eval_checker/multi_turn_eval/" + name + ".py"
-              for name in ["__init__", "multi_turn_utils"]]
+              for name in ["__init__", "multi_turn_utils", "multi_turn_checker"]]
     paths += ["bfcl/model_handler/local_inference/llama_fc.py", "bfcl/model_handler/utils.py",
               "bfcl/model_handler/constant.py", "bfcl/model_handler/local_inference/base_oss_handler.py",
               "bfcl/model_handler/base_handler.py", "bfcl/_llm_response_generation.py"]

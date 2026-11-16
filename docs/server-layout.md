@@ -50,6 +50,10 @@ python_bin="$AUTELLIX_HOME/env/sglang/bin/python"
   --model "$AUTELLIX_HOME/models/Meta-Llama-3.1-8B-Instruct" \
   --programs 128 --seed 42 --output "$AUTELLIX_HOME/datasets/sharegpt-whole128.json"
 bash scripts/run_paper_suite.sh
+"$python_bin" scripts/evaluate_bfcl_capture.py \
+  --source "$AUTELLIX_HOME/datasets/bfcl-v3-source" \
+  --capture "$AUTELLIX_HOME/datasets/bfcl-captured64.json" \
+  --output "$AUTELLIX_HOME/runs/bfcl-capture-quality.json"
 ```
 
 入口脚本为每轮创建独立的 `runs/` 和 `plans/` 子目录。三个 GPU 分别运行一个
