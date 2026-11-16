@@ -19,9 +19,17 @@ def run_scheduler_process(*args, autellix_options, **kwargs):
     """Spawn-safe process target: install hooks inside the actual GPU process."""
     if autellix_options.get("legacy_gpu"):
         from .legacy_gpu import install_native_ops
-        install_native_ops(prefix_attention=autellix_options.get("prefix_attention", True))
+        install_native_ops(prefix_attention=autellix_options.get("prefix_attention", True),
+                           attention_score_elements=autellix_options.get("attention_score_elements", 2**26))
     import sglang.srt.managers.scheduler as module
+    if autellix_options["config"].get("implementation", "paper") == "paper":
+        from sglang.srt.managers import schedule_policy
+        # Admission reserves the current decode window. Generation still uses
+        # each request's original max_new_tokens and normal stopping rules.
+        schedule_policy.CLIP_MAX_NEW_TOKENS_ESTIMATION = autellix_options["config"]["schedule_interval"]
     install(module.Scheduler, autellix_options)
+    from .pipeline import install as install_pipeline
+    install_pipeline(module.Scheduler)
     from .profiling import install as install_profile
     install_profile(module.Scheduler)
     return module.run_scheduler_process(*args, **kwargs)
@@ -44,18 +52,24 @@ def install(cls, options):
 
     def init(self, *a, **kw):
         original_init(self, *a, **kw)
-        self.autellix = RuntimeScheduler(ProgramTable(options["table_path"]),
-                                        PolicyConfig(**options["config"]), options.get("trace"))
+        self.pp_size = getattr(self, "pp_size", 1)
+        if self.pp_size > 1:
+            from .pipeline import configure
+            configure(self, options)
+        else:
+            self.autellix = RuntimeScheduler(ProgramTable(options["table_path"]),
+                                            PolicyConfig(**options["config"]), options.get("trace"))
         self._autellix_steps = 0
         self._autellix_paper = self.autellix.config.implementation == "paper"
         if self._autellix_paper:
             # Mixed execution prevents native prefill preference from excluding
             # higher-priority decodes already admitted by the global plan.
             self.is_mixed_chunk = True
+            self.new_token_ratio = self.init_new_token_ratio = 1.0
         self._autellix_rids = {}
         self._autellix_reserve = {}
         self._autellix_window = None
-        if options.get("capacity"):
+        if options.get("capacity") and self.pp_size == 1:
             from autellix.runtime.window import SchedulingWindow
             self._autellix_window = SchedulingWindow(self.autellix, options["capacity"])
         if options.get("host_bytes"):
@@ -90,9 +104,16 @@ def install(cls, options):
 
     def prefill(self):
         restored_nodes = []
+        other_reserves = set()
+        if self.pp_size > 1:
+            other_reserves = {rid for reserves in self._autellix_reserves
+                              if reserves is not self._autellix_reserve for rid in reserves}
+        held = [req for req in self.waiting_queue if req.rid in other_reserves]
+        self.waiting_queue = [req for req in self.waiting_queue if req.rid not in other_reserves]
         try:
             return prefill_plan(self, restored_nodes)
         finally:
+            self.waiting_queue.extend(held)
             # Native admission has acquired its own locks for accepted requests.
             # Others retain their host backup and must remain evictable on retry.
             for node in reversed(restored_nodes):
@@ -217,7 +238,9 @@ def install(cls, options):
                     restored_nodes.append(matched.last_device_node)
                     ctl.emit("swap_in", rid=req.rid)
                 else:
-                    if not self.running_batch.reqs and ready_index == 0:
+                    from .pressure import other_pipeline_requests
+                    if (not self.running_batch.reqs and ready_index == 0
+                            and not other_pipeline_requests(self, self.running_batch)):
                         raise RuntimeError("insufficient GPU KV capacity to restore one request")
                     # Do not admit a lower-priority request past a failed
                     # restoration. A successfully prepared prefix can still run.
@@ -260,7 +283,9 @@ def install(cls, options):
             for i, rid in enumerate(self._autellix_window.cohort):
                 if rid in ready_ids and rid not in admitted:
                     if i == 0:
-                        raise RuntimeError("highest-priority request cannot fit the configured token/KV budget")
+                        from .pressure import other_pipeline_requests
+                        if not other_pipeline_requests(self, self.running_batch):
+                            raise RuntimeError("highest-priority request cannot fit the configured token/KV budget")
                     self._autellix_window.retain_prefix(i)
                     break
         if result is not None:
@@ -275,19 +300,26 @@ def install(cls, options):
 
     def run(self, batch):
         rids = [req.rid for req in batch.reqs]
-        self.autellix.begin(rids)
+        input_tokens = batch.input_ids.numel()
+        if self.pp_size > 1:
+            self._autellix_batches[self._autellix_microbatch] = batch
+            self.autellix.begin(rids, active_rids=self._autellix_inflight)
+            self._autellix_inflight.update(rids)
+        else:
+            self.autellix.begin(rids)
         start, end = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
         start.record()
         result = original_run(self, batch)
         end.record()
         end.synchronize()
-        self.autellix.executed(rids, start.elapsed_time(end) / 1000.)
+        if self.pp_size == 1:
+            self.autellix.executed(rids, start.elapsed_time(end) / 1000.)
         if self._autellix_window is not None:
             only_prefill = batch.forward_mode.is_extend() and not getattr(batch, "decoding_reqs", None)
             ctl = self.autellix
             if self._autellix_paper:
                 ctl.emit("plan_step", requests=rids, decode=not only_prefill,
-                         remaining=self._autellix_window.remaining)
+                         remaining=self._autellix_window.remaining, input_tokens=input_tokens)
             self._autellix_window.executed(only_prefill)
         return result
 
@@ -302,15 +334,22 @@ def install(cls, options):
         # to replace paper priorities in the middle of a scheduling window.
         from .pressure import make_decode_room
         make_decode_room(self, batch)
+        if batch.is_empty():
+            return batch
         batch.prepare_for_decode()
         return batch
 
     def process(self, batch, result, *a, **kw):
         reqs = list(batch.reqs)
+        if self.pp_size > 1:
+            seconds = self._autellix_tape.value("gpu_seconds", lambda: self._autellix_completed_seconds)
+            self.autellix.executed([req.rid for req in reqs], seconds)
+            self._autellix_inflight.difference_update(req.rid for req in reqs)
         ret = original_result(self, batch, result, *a, **kw)
         for req in reqs:
             if req.finished() and req.rid in self.autellix.calls:
-                metrics = self.autellix.finish(req.rid)
+                reason = "cancelled" if getattr(req, "to_abort", False) else "finished"
+                metrics = self.autellix.finish(req.rid, reason)
                 rid = self._autellix_rids.pop(req.rid)
                 self.autellix.table.save_metrics(rid, metrics)
         return ret
@@ -319,12 +358,17 @@ def install(cls, options):
         queued = [r.rid for r in self.waiting_queue
                   if request.abort_all or r.rid.startswith(request.rid)]
         ret = original_abort(self, request)
+        if self.pp_size > 1:
+            from .pipeline import abort_inflight
+            abort_inflight(self, request)
         for internal in queued:
             if self._autellix_host is not None:
                 self._autellix_host.discard(internal)
-            node = self._autellix_reserve.pop(internal, None)
-            if node is not None:
-                self.tree_cache.dec_lock_ref(node)
+            pools = self._autellix_reserves if self.pp_size > 1 else [self._autellix_reserve]
+            for reserves in pools:
+                node = reserves.pop(internal, None)
+                if node is not None:
+                    self.tree_cache.dec_lock_ref(node)
             metrics = self.autellix.finish(internal, "cancelled")
             external = self._autellix_rids.pop(internal, None)
             if external:
@@ -335,10 +379,13 @@ def install(cls, options):
         # Native idle accounting assumes there are no protected request KV
         # blocks. Reserves are cache entries, so unpin them when the executor
         # becomes idle; the radix cache can still reuse them on next admission.
-        for rid, node in self._autellix_reserve.items():
-            self.tree_cache.dec_lock_ref(node)
-            self.autellix.emit("release_reserve", rid=rid)
-        self._autellix_reserve.clear()
+        pools = self._autellix_reserves if self.pp_size > 1 else [self._autellix_reserve]
+        for reserves in pools:
+            for rid, node in reserves.items():
+                self.tree_cache.dec_lock_ref(node)
+                if self.pp_size == 1:
+                    self.autellix.emit("release_reserve", rid=rid)
+            reserves.clear()
         return original_check_memory(self)
 
     cls.__init__ = init

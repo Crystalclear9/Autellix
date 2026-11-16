@@ -1,0 +1,43 @@
+{
+  "model": "/mnt/masfiles/models/Qwen3-32B",
+  "device": "0,1,2",
+  "workload": "/mnt/masfiles/runs/autellix/three-gpu/sharegpt-qwen.json",
+  "programs": 8,
+  "rates": [
+    0.08
+  ],
+  "repeats": 1,
+  "seed": 100,
+  "request_timeout": 7200,
+  "engine_args": {
+    "autellix_legacy_gpu": true,
+    "dtype": "float16",
+    "pp_size": 3,
+    "context_length": 4096,
+    "max_running_requests": 6,
+    "max_total_tokens": 16384,
+    "mem_fraction_static": 0.96,
+    "random_seed": 0,
+    "autellix_swap_space": 2
+  },
+  "cases": [
+    {
+      "name": "native-pp3",
+      "policy": "sglang-native",
+      "reserve": 0
+    },
+    {
+      "name": "plas-pp3",
+      "policy": "plas",
+      "reserve": 1,
+      "interval": 8,
+      "quantum_scale": 64,
+      "boundary_scale": 1024
+    }
+  ],
+  "layer_partition": [
+    20,
+    22,
+    22
+  ]
+}

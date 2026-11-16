@@ -22,6 +22,15 @@ AUTELLIX_GPU_BACKEND=vllm AUTELLIX_TEST_MODEL=/absolute/path/to/model \
 
 SGLang 将后端变量改为 `sglang`。可选项：`AUTELLIX_TEST_REPLICAS=1` 验证双进程路由和取消；`AUTELLIX_TEST_CUDA_SWAP=1` 验证实际 KV 传输；`AUTELLIX_TEST_TP=1` 启用需要两张 GPU 的 vLLM 张量并行测试；`AUTELLIX_TEST_IMPLEMENTATION=compat` 验证旧模式。
 
+三张 P40 的流水线回归：
+
+```bash
+AUTELLIX_TEST_PP_MODEL=/mnt/masfiles/models/SmolLM2-135M-Instruct \
+  python -m unittest discover -s tests -p test_pipeline_gpu.py -v
+```
+
+该测试运行真实 PP=3，强制 KV 换出和恢复，比较中断与连续生成，检查服务历史继承、取消清理以及三个阶段逐条一致的调度记录。
+
 完整的小模型验证入口会依次运行测试、真实 HTTP 流程和四策略 DAG 工作负载：
 
 ```bash
@@ -31,28 +40,29 @@ bash scripts/validate_backend.sh vllm /absolute/path/to/model
 SGLang 同样替换后端名称。可用 `AUTELLIX_PYTHON` 指定 Python 路径，`AUTELLIX_ENGINE_ARGS` 调整 HTTP 和 DAG 验证参数。生成结果写入 `outputs/validation/`，不纳入版本控制。KV 传输单独测量见 [cuda/README.md](../cuda/README.md)。
 
 P40 需为 GPU unittest 另外设置 `AUTELLIX_TEST_LEGACY_GPU=1`，并在 HTTP/DAG
-的 `AUTELLIX_ENGINE_ARGS` 中设置 `autellix_legacy_gpu=true`；这两个配置不能互相替代。
-已完成检查和未修复/未验证项统一维护在 [P40 验收记录](p40-validation-20261115.md)。
+的 `AUTELLIX_ENGINE_ARGS` 中设置 `autellix_legacy_gpu=true`；两处分别控制对应入口。
+当前三卡配置、检查结果和待办见[三卡大模型实验](three-gpu-experiment.md)，
+早期单卡记录见 [P40 验收记录](p40-validation-20261115.md)。
 专项运行会复用测试文件；汇总时按独立用例计数。
 
 ## 开发约束与修改流程
 
 ### 开发时必须保持的约束
 
-1. **服务统计与优先级窗口分开**：防饥饿可以重置局部等待/运行窗口，不能清除调用整个生命周期的实际执行统计。
-2. **按当前队列顺序移动请求**：不能用最初到达顺序替代降级、提升后的 FIFO 顺序。
+1. **服务统计与优先级窗口分开**：防饥饿重置局部等待/运行窗口，保留调用整个生命周期的实际执行统计。
+2. **按当前队列顺序移动请求**：降级和提升后使用更新后的 FIFO 顺序。
 3. **窗口内不随意重新选批次**：新调用等待边界，提前完成由窗口已有预备请求补位；容量不足按有定义的顺序释放资源。
-4. **先保全 KV，再释放所有权**：CPU 备份失败不能丢失原有 GPU KV；恢复数据在正式接纳前不能被其他恢复操作逐出。
-5. **传输屏障保持顺序**：不要让新换入覆盖尚未完成换出的 GPU block，也不要重复重放原生多步的换入。
-6. **取消以确认完成为准**：Future 被取消不代表 GPU 或数据库已回收，错误和取消路径都必须完成负载及会话清理。
-7. **路由不能使用未知输出长度**：仅按实际输入 token 数判断 2048 阈值。
-8. **保留接口分层**：模拟器数据、估算耗时和 fake worker 不能替代真实后端验证。
+4. **先保全 KV，再释放所有权**：CPU 备份完成后释放原有 GPU KV；恢复数据保持前缀锁直到正式接纳。
+5. **传输屏障保持顺序**：换出完成后复用 GPU block，原生多步的换入只执行一次。
+6. **取消以确认完成为准**：等待 worker 确认，再检查 GPU、负载和会话清理。
+7. **路由使用可观察输入**：按实际输入 token 数判断 2048 阈值。
+8. **保留接口分层**：模拟器、fake worker 与真实后端分别测试和记录结果。
 
 ### 修改与升级流程
 
 先阅读受影响模块及对应测试，在现有目录内修改；通常不需要增加新的说明文件。修改策略应同时检查真实 runtime 与模拟器，若两者有刻意差异，在架构文档中解释。
 
-升级 vLLM/SGLang 时，在独立环境验证原生 scheduler、block/token pool、radix lock、输入输出结构、worker 启动方式和 CUDA 计时接口。更新版本检查、锁文件及适配代码后，再执行下列验证，不能仅放宽版本检查。
+升级 vLLM/SGLang 时，在独立环境验证原生 scheduler、block/token pool、radix lock、输入输出结构、worker 启动方式和 CUDA 计时接口。同步更新版本检查、锁文件及适配代码，然后执行下列验证。
 
 | 修改范围 | 至少需要的验证 |
 | --- | --- |
@@ -73,7 +83,7 @@ python -B scripts/http_smoke.py --help
 
 增加新策略需更新 `PolicyConfig` 的合法值、继承和完成统计、队列行为、服务/benchmark CLI 的策略选项及测试；若需要模拟支持，再修改 `autellix/core/schedulers.py`。新增后端还需实现工作进程使用的初始化、分词、接纳、step、cancel、has_work 和 close 接口，并接入副本配置及 CLI 校验。当前没有自动注册后端的插件接口。
 
-## 后续开发边界
+## 后续开发方向
 
 在固定环境上维护回归基线，逐项扩展模型、设备和后端版本。
 
@@ -83,8 +93,8 @@ python -B scripts/http_smoke.py --help
 
 1. 明确触发条件和预期行为，用最小输入描述问题；读取当前实现，不凭后端新版本的接口印象修改固定版本钩子。
 2. 为有行为变化的边界补回归测试，尤其是取消/失败后的资源回收；不只检查返回文本是否非空。
-3. 先跑受影响的 CPU 测试，再按上表选择真实后端测试。修改 GPU KV 所有权不能仅凭 mock 测试交付。
-4. 输出一致性使用同一个加载引擎、同一提示和贪心参数比较中断/不中断执行；不要把跨环境文本差异直接归因于调度。
+3. 先跑受影响的 CPU 测试，再按上表选择真实后端测试；GPU KV 所有权修改包含实际换出/恢复验证。
+4. 输出一致性使用同一个加载引擎、同一提示和贪心参数比较中断/不中断执行，并记录模型精度和批次配置。
 5. 检查 `git diff --check` 和变更文件。模型、PDF、虚拟环境、缓存、`outputs/` 不入库。
 6. 提交时说明改了什么、验证了哪些条件、哪些条件仍未验证；必要时同步接口、配置和后端文档。
 
@@ -92,7 +102,7 @@ python -B scripts/http_smoke.py --help
 
 ## 后端迁移清单
 
-迁移至少涉及以下调用契约，不能只让 import 成功：
+迁移涉及以下调用契约：
 
 - worker 的启动方式、CUDA 可见设备和模型初始化顺序；子进程能否正确安装调度钩子。
 - 请求进入、完成、取消和失败时的回调；每条路径是否正确更新程序统计。
@@ -100,9 +110,9 @@ python -B scripts/http_smoke.py --help
 - SGLang token pool 与 radix cache 的锁引用、释放规则、重排后的 tensor 与 request 对齐。
 - KV tensor 形状、dtype、stride 和索引映射；原生复制与批量传输是否保留相同内容。
 - 批次执行计时和事件同步；是不是仍只把执行时间计入参与调用。
-- 流式输出结构、结束原因和 token 数；客户端不能吞掉错误或把中断流当成功。
+- 流式输出结构、结束原因和 token 数，以及客户端的完成与错误事件。
 
-验证后再更新锁文件和版本校验。现有适配依赖内部 API，不保证可直接适用于较新后端。SGLang 的 TP 支持、其他 KV 布局和多模态等都需要独立设计与测试，而非添加一个 CLI 参数即可完成。
+验证后更新锁文件和版本校验。现有适配依赖固定版本的内部 API；升级时按上述契约迁移。SGLang TP、其他 KV 布局和多模态分别扩展对应模型执行与缓存路径，并补充硬件测试。
 
 ## 示例命令验证
 
@@ -115,4 +125,4 @@ python -B examples/real_inference.py --help
 python -B scripts/http_smoke.py --help
 ```
 
-执行示例脚本前，应按安装文档在当前环境完成 `pip install -e .` 或后端安装脚本。未安装项目时，直接执行子目录中的脚本可能报 `No module named autellix`；不要因为根目录下 `python -m autellix...` 能运行就认定已经安装。完整真实验证仍需激活对应的固定版本环境。CPU 环境中模块 import 成功不代表后端依赖已经可用。
+执行子目录中的示例脚本前，先在对应后端环境完成 `pip install -e .` 或运行后端安装脚本，再执行真实 GPU 检查。

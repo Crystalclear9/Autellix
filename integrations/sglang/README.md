@@ -4,10 +4,10 @@
 
 ## 支持范围
 
-- 每个副本一张 GPU，文本生成，每次调用一个输出序列。
+- 单 GPU 副本或 PP 多 GPU 副本，文本生成，每次调用一个输出序列。
 - MHA KV token pool、radix 前缀缓存、page size 1。
 - 非重叠执行、不分块 prefill；允许多个独立副本由真实协调器管理。
-- 不支持 TP/PP/DP、推测解码、LoRA、HiCache 或关闭 radix 缓存。
+- Autellix 的模型并行使用 PP；TP、DP attention、推测解码、LoRA 和 HiCache 尚未接入。
 
 `backend.py` 启动真实 Engine，`scheduler.py` 在生成进程内安装钩子，不修改已安装的 SGLang 文件。程序和调用信息随请求传递，用户无需提供执行时间估计或 DAG。
 
@@ -16,6 +16,27 @@
 默认 `paper` 模式在窗口边界按 PLAS/ATLAS 等策略选择请求集合，混合执行已接纳的 prefill 和 decode。纯解码窗口内跳过原生 prefill 接纳；显存压力下按窗口中的优先级选择抢占对象，不采用原生按长度排序的回退规则。
 
 N=8、K=1 是项目默认参数。预备请求的已计算前缀通过 radix 锁保留，活动请求结束后可补位。`--implementation compat` 保留旧的原生调度钩子路径。
+
+### 三卡流水线
+
+`--device-groups '0,1,2'` 与 `pp_size=3` 将一个模型按层拆到三张 GPU。
+`--devices 0,1,2` 则启动三个完整模型副本，用于程序路由实验。
+
+`pipeline.py` 在原生 PP 微批次循环中传递首阶段的程序表读取结果与策略时钟。
+取消会覆盖全部在途微批次，包括尚未合并到 running batch 的 prefill。
+首阶段维护全局程序历史，其余阶段复用同一策略输入，各自管理本阶段的 KV。
+每个微批次有独立的 N 步窗口和 K 个预备请求，B 在微批次间均分。
+模型执行时间由三个阶段的 CUDA 计时累加，随采样结果返回首阶段并统一记账。
+跨阶段的 `batch`、`execute`、`swap_out`、`swap_in` 与完成事件可逐条核对。
+
+P40 路径同时修复了固定版本 Llama 模型在 PP 下的 tied embedding 加载：
+首阶段加载输入 embedding，末阶段从同一权重加载输出 head。
+
+运行 `bash scripts/serve_p40_three_gpu.sh` 启动 Qwen3-32B FP16、PP=3。
+服务的 64 层按 `20,23,21` 分配，同时考虑 GPU 0 少 1.5 GiB 和末阶段输出 head 的占用。
+服务使用 KV=8192、prefill 上限 4096 和 `autellix_attention_score_elements=16777216`，
+控制接近上下文上限的输入所需的 attention 临时空间。
+完整配置与对照结果见[三卡实验](../../docs/three-gpu-experiment.md)。
 
 ## KV 所有权与恢复
 
@@ -42,15 +63,17 @@ Graph、自定义 all-reduce 和 Dynamo 编译。调度子进程内将标准 RMS
 长 prefill 按 Query 分块，每块使用绝对前缀位置构造因果遮罩，控制临时 attention
 矩阵大小。FP16/FP32 CUDA 数值回归覆盖此路径。
 `autellix_prefix_attention=false` 可复测原来的完整 Query 填充实现。
+`autellix_attention_score_elements` 调整前缀 attention 的分块预算，默认 `67108864`；
+原生基线和 Autellix 使用同一实现及参数传递路径。
 
 持久盘部署示例：`bash scripts/serve_p40.sh`。通过 `AUTELLIX_PYTHON`、
 `AUTELLIX_MODEL`、`AUTELLIX_DEVICES`、`AUTELLIX_PORT`、`AUTELLIX_ENGINE_ARGS` 覆盖配置；SQLite
 状态默认保存在新建的本地 `/tmp/autellix-p40-XXXXXX` 目录，可通过
-`AUTELLIX_STATE_DIR` 显式指定；不要放到网络持久盘或与活动服务共用。
+`AUTELLIX_STATE_DIR` 显式指定；每个服务使用独立的本地状态目录。
 GPU 回归使用 `AUTELLIX_TEST_LEGACY_GPU=1`；仍需设置后端和模型环境变量。
 
 模型、精度、上下文与 GPU 数值测试的最新结果见
-[论文复现实验报告](../../docs/autellix-paper-audit.md)。
+[三卡论文复现实验报告](../../docs/three-gpu-experiment.md)。
 
 ### 原生调度对照
 

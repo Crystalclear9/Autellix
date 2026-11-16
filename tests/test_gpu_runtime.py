@@ -1,4 +1,4 @@
-"""Opt-in integration checks; never report these as passed when skipped.
+"""Opt-in GPU integration checks for the real inference backends.
 
 AUTELLIX_GPU_BACKEND=vllm|sglang AUTELLIX_TEST_MODEL=/path/to/model
 python -m unittest discover -s tests -p test_gpu_runtime.py -v

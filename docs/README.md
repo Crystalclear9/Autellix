@@ -17,7 +17,8 @@
 | [运行维护与排错](operations.md) | 启停、状态目录、日志、故障与资源清理 | 日常运行 |
 | [P40 部署与验收记录](p40-validation-20261115.md) | 实测配置、证据、未修复项与后续验收条件 | 部署与验证 |
 | [论文核对与 SGLang 对照](autellix-paper-audit.md) | 方法与实验复现差距、原生调度基线、ShareGPT 配对协议 | 评估收益 |
-| [完整对话与负载实验](experiment-design-review.md) | 最新源码核对、输入修正、策略消融和完整对话负载曲线 | 复现与调参 |
+| [完整对话与负载实验](experiment-design-review.md) | 单卡源码核对、输入修正、策略消融和完整对话负载曲线 | 复现与调参 |
+| [三卡大模型实验](three-gpu-experiment.md) | Qwen3-32B PP=3、跨阶段调度与原生 SGLang 对照 | 多卡部署与评估 |
 
 后端特有的 KV 所有权和限制见 [vLLM](../integrations/vllm/README.md)、[SGLang](../integrations/sglang/README.md)。GPU 传输测量见 [KV 传输微基准](../cuda/README.md)。
 
@@ -27,7 +28,7 @@
 2. **接入自己的程序**：接口 → 配置 → 工作负载与指标 → 排错。先确定哪些调用属于同一程序，再决定会话生命周期。
 3. **继续改代码**：架构 → 后端说明 → 开发约束 → 对应回归测试。先在固定版本上建立可运行基线，再迁移依赖或扩展模型支持。
 
-## 示例与证据的边界
+## 示例与测试记录
 
 所有终端命令从仓库根目录执行；真实推理命令使用对应 Linux/WSL 后端环境。`/absolute/path/to/model` 是需要替换的占位路径；小模型示例不是任意 GPU 或任意大模型的推荐配置。
 

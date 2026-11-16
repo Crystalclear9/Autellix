@@ -1,4 +1,4 @@
-"""Paired, alternated native-SGLang/Autellix trials on one GPU."""
+"""Paired native-SGLang/Autellix trials with matching GPU replica groups."""
 import argparse
 import copy
 import hashlib
@@ -10,10 +10,11 @@ from importlib.metadata import version
 
 from autellix.runtime import InferenceEngine, ReplicaConfig, PolicyConfig
 from autellix.runtime.benchmark import load_workloads, run_workload, distribution, poisson_trace
+from autellix.runtime.telemetry import GPUMonitor
 
 
 def trial(model, device, engine_args, trace, arm, reserve=0, interval=8, quantum_scale=1., request_timeout=600,
-          boundary_scale=None, beta=8., progress_interval=0):
+          boundary_scale=None, beta=8., progress_interval=0, routing="program"):
     options = dict(engine_args)
     options["autellix_native_baseline"] = arm == "sglang-native"
     defaults = PolicyConfig()
@@ -22,11 +23,22 @@ def trial(model, device, engine_args, trace, arm, reserve=0, interval=8, quantum
                           schedule_interval=interval, overprovision=0 if arm == "sglang-native" else reserve,
                           boundaries=tuple(x * boundary_scale for x in defaults.boundaries),
                           quanta=tuple(x * quantum_scale for x in defaults.quanta), beta=beta)
-    with InferenceEngine([ReplicaConfig("sglang", model, device, options)], policy=policy) as engine:
-        sid = engine.start_session()
-        engine.submit(sid, prompt="Warmup.", sampling={"temperature": 0, "max_tokens": 4}).result(120)
-        engine.end_session(sid); engine.wait_idle(30)
-        result = run_workload(engine, trace, request_timeout=request_timeout, progress_interval=progress_interval)
+    groups = device.split(";")
+    with InferenceEngine([ReplicaConfig("sglang", model, group, options) for group in groups],
+                         policy=policy, routing=routing) as engine:
+        sessions = [engine.start_session() for _ in groups]
+        futures = [engine.submit(sid, prompt="Warmup.", sampling={"temperature": 0, "max_tokens": 4})
+                   for sid in sessions]
+        for sid, future in zip(sessions, futures):
+            future.result(120)
+            engine.end_session(sid)
+        engine.wait_idle(30)
+        with GPUMonitor() as monitor:
+            result = run_workload(engine, trace, request_timeout=request_timeout, progress_interval=progress_interval)
+        result["gpu_samples"] = monitor.samples
+        result["gpu_sampling_errors"] = monitor.errors
+        result["device_groups"] = groups
+        result["routing"] = routing
         assert all(bool(c["metrics"].get("native_sglang")) == (arm == "sglang-native")
                    for c in result["calls"]), "unexpected scheduler accounting path"
         engine.wait_idle(30)
@@ -58,10 +70,11 @@ def main():
     p.add_argument("--model", required=True)
     p.add_argument("--workload", required=True)
     p.add_argument("--output", required=True)
-    p.add_argument("--device", default="0")
+    p.add_argument("--device", default="0", help="one TP/PP group, or semicolon-separated replica groups")
     p.add_argument("--repeats", type=int, default=3)
     p.add_argument("--rates", default="0.1,1.0")
     p.add_argument("--arms", default="sglang-native,atlas")
+    p.add_argument("--routing", choices=("program", "least-used", "round-robin"), default="program")
     p.add_argument("--reserve", type=int, default=0, help="Autellix reserves; native keeps zero, KV budget unchanged")
     p.add_argument("--interval", type=int, default=8)
     p.add_argument("--quantum-scale", type=float, default=1.)
@@ -97,7 +110,7 @@ def main():
                 start = time.time()
                 result = trial(args.model, args.device, json.loads(args.engine_args), trace, arm,
                                args.reserve, args.interval, args.quantum_scale, args.request_timeout,
-                               args.boundary_scale, args.beta)
+                               args.boundary_scale, args.beta, routing=args.routing)
                 result.update(rate=rate, repeat=repeat, wall_start=start,
                               trace_seed=args.seed + repeat, sampled_programs=args.programs,
                               trace_sha256=hashlib.sha256(json.dumps(trace,sort_keys=True).encode()).hexdigest(),

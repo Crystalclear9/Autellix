@@ -25,11 +25,20 @@ SmolLM2-135M 的真实生成、抢占恢复和 HTTP 验证，以及后续修改�
 P40 使用 PyTorch 原生算子路径，默认 FP32，也可显式选择 FP16。
 论文机制、原模型/数据集差距和直接 SGLang 对照协议见
 [论文核对与 SGLang 对照](docs/autellix-paper-audit.md)。对照使用 `sglang-native` 原生调度路径。
-最新的[完整对话与负载实验](docs/experiment-design-review.md)修复了 ShareGPT 分片、
+单卡的[完整对话与负载实验](docs/experiment-design-review.md)修复了 ShareGPT 分片、
 重复 BOS 和合成统计问题，并完成三个到达率、策略及独立参数消融。
 Llama-3.1-8B 高负载下，扩大服务历史区间后，程序响应/输出 token 下降 11.21%，
 平均程序响应增加 5.37%，吞吐下降 0.52%。核心机制已接入真实 GPU；专用交换内核、
 BFCL/LATS 真实工作流和大规模实验仍在后续工作中。
+
+[三卡大模型实验](docs/three-gpu-experiment.md)增加了 SGLang PP=3：Qwen3-32B
+的性能回放按 20/22/22 层分布在全部三张 P40 上，程序调度、GPU 计时和 KV 交换在各阶段同步。
+在 8 个完整 ShareGPT 程序的配对回放中，相对原生 SGLang 吞吐提高 8.84%，
+平均程序响应下降 1.54%，程序响应/输出 token 下降 18.76%，显存峰值为 68.94 GiB。
+同轮 Llama-3.1-8B 三副本实验中，program 路由的两个长对话集中到同一卡，
+平均程序响应增加 23.79%、吞吐下降 25.31%，归一化程序延迟下降 5.84%。
+报告保留不同配置下的全部结果和逐卡运行图。常驻服务为长输入使用 20/23/21 层、
+KV=8192 和较小的 attention 分块，启动入口为 `bash scripts/serve_p40_three_gpu.sh`。
 
 ## 快速开始
 
@@ -44,7 +53,7 @@ autellix-serve --backend vllm --model HuggingFaceTB/SmolLM2-135M-Instruct \
   --engine-args '{"max_model_len":512,"max_num_seqs":4,"gpu_memory_utilization":0.35,"swap_space":0.25}'
 ```
 
-这是小模型功能验证配置，较大模型需要调整资源。SGLang 使用另一套独立环境，不能直接复用 vLLM 依赖。安装前置条件和 SGLang 命令见[安装文档](docs/getting-started.md)。
+这是小模型功能验证配置，较大模型需要调整资源。SGLang 使用另一套独立依赖环境。安装前置条件和 SGLang 命令见[安装文档](docs/getting-started.md)。
 
 ```python
 from autellix.runtime import InferenceClient

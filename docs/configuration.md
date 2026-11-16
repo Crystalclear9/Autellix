@@ -31,8 +31,9 @@
 | `--backend` | `vllm` | `vllm` 或 `sglang` |
 | `--model` | 必需 | 模型名称或本地路径；同一协调器的副本模型须一致 |
 | `--devices` | `0` | 逗号分隔，每项启动一个独立副本 |
-| `--device-groups` | 无 | 分号分隔 TP 副本设备组，提供时优先于 `--devices` |
+| `--device-groups` | 无 | 分号分隔 TP/PP 副本设备组，提供时优先于 `--devices` |
 | `--policy` | `atlas` | 当前策略之一 |
+| `--routing` | `program` | 程序亲和路由；消融可选 `least-used`、`round-robin` |
 | `--implementation` | `paper` | `paper` 或 `compat` |
 | `--schedule-interval` | `8` | 正整数，解码窗口长度 |
 | `--overprovision` | `1` | 非负整数，预备请求数 |
@@ -72,9 +73,11 @@ policy = PolicyConfig(
 
 上下文长度和 token 预算不是同一个概念；GPU 内存比例也不能直接在两个后端间等价换算。B 控制活动请求，K 个预备请求另占显存；适配内部会扩展原生容量到 B+K。
 
-vLLM 默认 paper 模式强制关闭异步输出处理，启用支持混合阶段的执行配置，内部 `num_scheduler_steps` 为 1，由 Autellix 自己维护 N 步调度窗口。因此原生启动日志显示 1 不代表 Autellix N=8 未生效。若显式传入 `num_scheduler_steps`，它必须与 `PolicyConfig.schedule_interval` 一致，随后仍按适配路径设置执行参数。不要把原生参数覆盖当成禁用 Autellix 逻辑的方法。
+vLLM 的 paper 模式关闭异步输出处理，启用混合阶段执行，内部 `num_scheduler_steps=1`；Autellix 自己维护 N 步调度窗口。显式传入的 `num_scheduler_steps` 与 `PolicyConfig.schedule_interval` 保持一致。
 
-SGLang 适配强制 `disable_overlap_schedule=True`、`chunked_prefill_size=-1`、`page_size=1`。TP/PP/DP、LoRA、HiCache、推测解码等不受支持，具体校验见后端说明。其他未强制覆盖的参数仍需符合固定版本及当前适配的要求。
+SGLang 适配设置 `disable_overlap_schedule=True`、`chunked_prefill_size=-1`、`page_size=1`。支持单卡与 `pp_size>1` 的流水线并行；TP、DP attention、LoRA、HiCache 和推测解码尚未接入 Autellix 调度。
+
+PP 配置中，B=`max_running_requests` 是整个副本的活动容量，按 PP 阶段数均分到微批次，B 取 PP 的整数倍。K 是每个微批次的预备数，原生槽位总数为 B+PP×K。各阶段使用相同 token 容量，仅保存本阶段层的 KV。`SGLANG_PP_LAYER_PARTITION` 可指定分层，例如 Qwen3-32B 的 `20,22,22`。
 
 SGLang 可显式设置 `autellix_legacy_gpu=true`（默认关闭），用于实验性 P40 兼容。
 它默认 `dtype=float32`，保留显式指定的 `dtype=float16`；固定使用
@@ -82,8 +85,13 @@ SGLang 可显式设置 `autellix_legacy_gpu=true`（默认关闭），用于实�
 `disable_cuda_graph=True`、`disable_custom_all_reduce=True`，并在 scheduler 进程禁用
 Dynamo、替换标准模型算子。已测模型与配置见[验收记录](p40-validation-20261115.md)。
 
-`autellix_retain_running=true` 默认在选中的 prefill、decode 及剩余输出全部能放入
-KV 预算时保留已选中的 decode，避免一次无必要的换出/恢复；不足时仍按优先级释放。
+`autellix_attention_score_elements` 控制 P40 前缀 attention 的单块 score 元素预算，
+默认 `67108864`。三卡 32B 服务使用 `16777216`，将每个 FP32 score 块上限从
+256 MiB 降到 64 MiB；同时设置 KV=8192、`max_prefill_tokens=4096`，供长输入运行。
+原生与 Autellix 两条路径都支持这个参数，性能回放双方使用相同值。
+
+`autellix_retain_running=true` 默认在选中的 prefill 与当前 N 步解码窗口能放入
+KV 预算时保留已选中的 decode；不足时按优先级释放。
 设为 false 可运行旧接纳方式的消融。`compare_sglang.py` 的 `--quantum-scale` 与
 `--boundary-scale` 分别缩放时间片和服务历史区间，后者缺省时沿用前者。
 
@@ -96,6 +104,9 @@ autellix-serve --backend vllm --model /absolute/path/to/model --devices 0,1
 # 两张 GPU 共同执行一个 TP=2 副本；该路径仍需实际硬件验证。
 autellix-serve --backend vllm --model /absolute/path/to/model \
   --device-groups '0,1' --engine-args '{"tensor_parallel_size":2}'
+
+# 三张 P40 共同执行 Qwen3-32B，包含完整的精度、缓存及分层配置。
+bash scripts/serve_p40_three_gpu.sh
 ```
 
 前者能把不同请求分配给不同副本，后者是单个模型副本跨 GPU。`--device-groups '0,1;2,3'` 是两个 TP=2 副本，需要四个可用设备。设备组通过工作进程的 `CUDA_VISIBLE_DEVICES` 控制可见性。
@@ -110,6 +121,7 @@ autellix-serve --backend vllm --model /absolute/path/to/model \
 | `AUTELLIX_GPU_BACKEND`、`AUTELLIX_TEST_MODEL` | GPU unittest | 启用指定后端和模型的真实推理测试 |
 | `AUTELLIX_TEST_STEPS`、`AUTELLIX_TEST_RESERVE` | GPU unittest | 特定生成测试的 N、K，测试默认 1、0，与服务默认 8、1 不同 |
 | `AUTELLIX_TEST_REPLICAS`、`AUTELLIX_TEST_CUDA_SWAP`、`AUTELLIX_TEST_TP` | GPU unittest | 可选双副本、CUDA KV、TP 测试开关 |
+| `AUTELLIX_TEST_PP_MODEL` | GPU unittest | 三卡流水线回归使用的模型目录 |
 | `AUTELLIX_TEST_IMPLEMENTATION` | GPU unittest | `paper` 或 `compat` |
 | `AUTELLIX_TEST_LEGACY_GPU` | SGLang GPU unittest | 严格等于 `1` 时启用原生算子兼容模式及 2048 KV token 测试预算 |
 | `AUTELLIX_MODEL`、`AUTELLIX_DEVICES`、`AUTELLIX_PORT` | `scripts/serve_p40.sh` | 模型目录、设备列表、端口；默认模型为持久盘 SmolLM2-135M，设备 `0`、端口 `8000` |

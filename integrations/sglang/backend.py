@@ -22,6 +22,7 @@ class SGLangBackend:
             raise ValueError("native SGLang baseline requires overprovision=0")
         legacy_gpu = engine_args.pop("autellix_legacy_gpu", False)
         prefix_attention = engine_args.pop("autellix_prefix_attention", True)
+        score_elements = engine_args.pop("autellix_attention_score_elements", 2**26)
         retain_running = engine_args.pop("autellix_retain_running", True)
         if legacy_gpu:
             # Explicit compatibility mode: native PyTorch ops, no CUDA JIT.
@@ -29,8 +30,8 @@ class SGLangBackend:
             engine_args.update(attention_backend="torch_native", sampling_backend="pytorch",
                                disable_cuda_graph=True,
                                disable_custom_all_reduce=True)
-        for key in ("tp_size", "pp_size", "dp_size"):
-            if engine_args.get(key, 1) != 1:
+        for key in ("tp_size", "dp_size"):
+            if engine_args.get(key, 1) != 1 and (not self.native or key == "dp_size"):
                 raise ValueError(f"{key} must be 1; use independent replicas")
         incompatible = ("speculative_algorithm", "enable_hierarchical_cache", "disable_radix_cache",
                         "enable_lora", "enable_dp_attention")
@@ -45,12 +46,13 @@ class SGLangBackend:
             raise ValueError("autellix_swap_space must be positive GiB")
         options = dict(table_path=table_path, config=asdict(config), trace=trace,
                        host_bytes=host_bytes, legacy_gpu=legacy_gpu, prefix_attention=prefix_attention,
-                       retain_running=retain_running)
+                       retain_running=retain_running, attention_score_elements=score_elements)
         target = entry.run_scheduler_process
         if self.native:
             if legacy_gpu:
                 from .legacy_gpu import run_native_scheduler_process
-                entry.run_scheduler_process = partial(run_native_scheduler_process, prefix_attention=prefix_attention)
+                entry.run_scheduler_process = partial(run_native_scheduler_process, prefix_attention=prefix_attention,
+                                                      attention_score_elements=score_elements)
         else:
             entry.run_scheduler_process = partial(run_scheduler_process, autellix_options=options)
         args = dict(disable_overlap_schedule=True, disable_cuda_graph=True,
@@ -59,8 +61,13 @@ class SGLangBackend:
         args.update(engine_args)
         args.update(disable_overlap_schedule=True, chunked_prefill_size=-1, page_size=1)
         options["capacity"] = args["max_running_requests"]
+        pp = args.get("pp_size", 1)
+        if pp > 1:
+            if options["capacity"] % pp:
+                raise ValueError("max_running_requests must be divisible by pp_size")
+            args["max_micro_batch_size"] = options["capacity"] // pp + config.overprovision
         if config.overprovision:
-            args["max_running_requests"] += config.overprovision
+            args["max_running_requests"] += config.overprovision * pp
         try:
             self.engine = entry.Engine(model_path=model, **args)
         finally:

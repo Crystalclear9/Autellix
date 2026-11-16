@@ -41,3 +41,23 @@ class DecodePressureTests(unittest.TestCase):
         scheduler.decode_mem_cache_buf_multiplier = 1
         make_decode_room(scheduler, NS(check_decode_mem=lambda _: True))
         self.assertEqual(scheduler._autellix_reserve, {"reserve": "cache"})
+
+    def test_pipeline_can_yield_its_last_request_to_another_microbatch(self):
+        req = NS(rid="a", req_pool_idx=0, origin_input_ids=[1], output_ids=[2],
+                 prefix_indices=[], last_node="cache", reset_for_retract=Mock())
+        class Slots:
+            def __getitem__(self, key):
+                return [0, 1][key[1]]
+        batch = NS(reqs=[req], seq_lens=NS(cpu=lambda: NS(tolist=lambda: [2])),
+                   req_to_token_pool=NS(req_to_token=Slots(), free=Mock()),
+                   token_to_kv_pool_allocator=NS(free=Mock()), tree_cache=NS(dec_lock_ref=Mock()),
+                   check_decode_mem=lambda _: False)
+        batch.filter_batch = lambda keep_indices: setattr(batch, "reqs", [])
+        window = NS(cohort=["a"], drop_reserve=Mock(), retain_prefix=Mock())
+        scheduler = NS(autellix=NS(emit=Mock()), _autellix_window=window, _autellix_reserve={},
+                       waiting_queue=[], _autellix_host=NS(save=Mock()), decode_mem_cache_buf_multiplier=1,
+                       _extend_requests_to_queue=Mock(),
+                       running_mbs=[batch, NS(reqs=[NS(finished=lambda: False)])])
+        make_decode_room(scheduler, batch)
+        self.assertEqual(batch.reqs, [])
+        scheduler._extend_requests_to_queue.assert_called_once_with([req], is_retracted=True)

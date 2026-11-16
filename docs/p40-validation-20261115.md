@@ -1,6 +1,7 @@
 # P40 初次部署与验证（2026-11-15）
 
 本页保存初次部署记录；后续源码修正、原模型实验与性能分析见[论文复现实验报告](autellix-paper-audit.md)。
+三卡运行与当前部署配置见[三卡大模型实验](three-gpu-experiment.md)。
 
 已在 3 张 Tesla P40 的服务器上完成真实 SGLang 推理验证。当时常驻服务使用
 GPU 2、ATLAS、SmolLM2-135M-Instruct，监听 `127.0.0.1:8000`，显存约 845 MiB。

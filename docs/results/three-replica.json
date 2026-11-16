@@ -1,0 +1,1515 @@
+{
+  "trials": [
+    {
+      "condition": "native-replicas3",
+      "arm": "sglang-native",
+      "seed": 100,
+      "rate": 0.24,
+      "repeat": 0,
+      "model": "/mnt/masfiles/models/Meta-Llama-3.1-8B-Instruct",
+      "device_groups": [
+        "0",
+        "1",
+        "2"
+      ],
+      "routing": "program",
+      "trace_sha256": "9b3dc5d270fa774fc16700da626c8eb319519f59e46991d852dcbd73af8a358c",
+      "programs": 24,
+      "calls": 137,
+      "output_tokens": 41616,
+      "output_tokens_per_second": 12.320143310696857,
+      "program_latency_seconds": {
+        "mean": 446.61610198953474,
+        "p95": 1624.959371641299,
+        "p99": 3314.905383564975,
+        "count": 24
+      },
+      "paper_sequential_token_latency": {
+        "mean": 0.31276455405899695,
+        "p95": 0.6696962871819908,
+        "p99": 0.7394871953455419,
+        "count": 24
+      },
+      "calls_by_engine": {
+        "0": 28,
+        "1": 48,
+        "2": 61
+      },
+      "gpu": {
+        "0": {
+          "peak_memory_mib": 20993,
+          "total_mib": 23040,
+          "mean_utilization": 20.110972568578553,
+          "peak_utilization": 100,
+          "samples": 1604
+        },
+        "1": {
+          "peak_memory_mib": 21601,
+          "total_mib": 24576,
+          "mean_utilization": 45.52431421446384,
+          "peak_utilization": 100,
+          "samples": 1604
+        },
+        "2": {
+          "peak_memory_mib": 21617,
+          "total_mib": 24576,
+          "mean_utilization": 95.9781795511222,
+          "peak_utilization": 100,
+          "samples": 1604
+        }
+      },
+      "per_program": {
+        "LMOMNTH-7": {
+          "response_seconds": 21.21694945483856,
+          "arrival_seconds": 18.281374976640418,
+          "output_tokens": 89,
+          "calls": 1,
+          "calls_by_engine": {
+            "1": 1
+          },
+          "input_tokens": 16
+        },
+        "hz2QTT2-1": {
+          "response_seconds": 49.251939916405,
+          "arrival_seconds": 2.5284814859003655,
+          "output_tokens": 271,
+          "calls": 1,
+          "calls_by_engine": {
+            "1": 1
+          },
+          "input_tokens": 201
+        },
+        "lf2wdJZ-3": {
+          "response_seconds": 43.89929789514963,
+          "arrival_seconds": 11.186107171459756,
+          "output_tokens": 152,
+          "calls": 2,
+          "calls_by_engine": {
+            "0": 2
+          },
+          "input_tokens": 732
+        },
+        "TPc4ZKv-4": {
+          "response_seconds": 46.669578456643514,
+          "arrival_seconds": 12.459992429849216,
+          "output_tokens": 191,
+          "calls": 1,
+          "calls_by_engine": {
+            "1": 1
+          },
+          "input_tokens": 23
+        },
+        "qe5Xmha-13": {
+          "response_seconds": 70.99987558640612,
+          "arrival_seconds": 53.637377258463964,
+          "output_tokens": 269,
+          "calls": 3,
+          "calls_by_engine": {
+            "1": 3
+          },
+          "input_tokens": 341
+        },
+        "fgphoH9-11": {
+          "response_seconds": 93.00666163790271,
+          "arrival_seconds": 38.245482721149465,
+          "output_tokens": 289,
+          "calls": 4,
+          "calls_by_engine": {
+            "2": 1,
+            "1": 3
+          },
+          "input_tokens": 533
+        },
+        "Il7wN89-14": {
+          "response_seconds": 76.37422958673996,
+          "arrival_seconds": 57.711656008790314,
+          "output_tokens": 312,
+          "calls": 1,
+          "calls_by_engine": {
+            "2": 1
+          },
+          "input_tokens": 25
+        },
+        "WFZOFeF-5": {
+          "response_seconds": 131.6317343386628,
+          "arrival_seconds": 13.547417438515268,
+          "output_tokens": 558,
+          "calls": 1,
+          "calls_by_engine": {
+            "2": 1
+          },
+          "input_tokens": 197
+        },
+        "ECFGar1-23": {
+          "response_seconds": 69.64841386692704,
+          "arrival_seconds": 116.68611173314868,
+          "output_tokens": 104,
+          "calls": 1,
+          "calls_by_engine": {
+            "1": 1
+          },
+          "input_tokens": 17
+        },
+        "2mt8SNq-21": {
+          "response_seconds": 108.28495043709752,
+          "arrival_seconds": 111.18075905919197,
+          "output_tokens": 271,
+          "calls": 2,
+          "calls_by_engine": {
+            "2": 2
+          },
+          "input_tokens": 196
+        },
+        "OjbxTDD-2": {
+          "response_seconds": 264.271853926281,
+          "arrival_seconds": 8.01437825461242,
+          "output_tokens": 1104,
+          "calls": 3,
+          "calls_by_engine": {
+            "2": 3
+          },
+          "input_tokens": 1979
+        },
+        "GjmvqLi-18": {
+          "response_seconds": 201.89750592066105,
+          "arrival_seconds": 100.0533679907197,
+          "output_tokens": 605,
+          "calls": 2,
+          "calls_by_engine": {
+            "2": 2
+          },
+          "input_tokens": 371
+        },
+        "tO66MX1-22": {
+          "response_seconds": 191.52718359449534,
+          "arrival_seconds": 111.41464313274592,
+          "output_tokens": 259,
+          "calls": 2,
+          "calls_by_engine": {
+            "0": 2
+          },
+          "input_tokens": 214
+        },
+        "Waicrl6-0": {
+          "response_seconds": 361.21527460962534,
+          "arrival_seconds": 0.0,
+          "output_tokens": 1089,
+          "calls": 3,
+          "calls_by_engine": {
+            "0": 3
+          },
+          "input_tokens": 1027
+        },
+        "DqcWUPa-19": {
+          "response_seconds": 307.525949741578,
+          "arrival_seconds": 101.2661388638855,
+          "output_tokens": 783,
+          "calls": 4,
+          "calls_by_engine": {
+            "0": 4
+          },
+          "input_tokens": 2262
+        },
+        "TDkGXSx-6": {
+          "response_seconds": 410.83933766633726,
+          "arrival_seconds": 14.17987560405872,
+          "output_tokens": 1360,
+          "calls": 5,
+          "calls_by_engine": {
+            "0": 2,
+            "1": 3
+          },
+          "input_tokens": 2484
+        },
+        "BGBDHk2-17": {
+          "response_seconds": 369.0093067795305,
+          "arrival_seconds": 93.04906284210398,
+          "output_tokens": 1161,
+          "calls": 3,
+          "calls_by_engine": {
+            "1": 2,
+            "0": 1
+          },
+          "input_tokens": 1145
+        },
+        "TGvlVPa-12": {
+          "response_seconds": 496.7512364085777,
+          "arrival_seconds": 39.00689585544034,
+          "output_tokens": 1796,
+          "calls": 4,
+          "calls_by_engine": {
+            "0": 1,
+            "2": 3
+          },
+          "input_tokens": 3353
+        },
+        "oxgUmNs-10": {
+          "response_seconds": 577.3171043420097,
+          "arrival_seconds": 32.05792674553791,
+          "output_tokens": 2185,
+          "calls": 4,
+          "calls_by_engine": {
+            "1": 2,
+            "2": 2
+          },
+          "input_tokens": 3782
+        },
+        "woHE37L-8": {
+          "response_seconds": 630.7984208615926,
+          "arrival_seconds": 31.30577363050909,
+          "output_tokens": 2616,
+          "calls": 13,
+          "calls_by_engine": {
+            "2": 13
+          },
+          "input_tokens": 18242
+        },
+        "oxgUmNs-20": {
+          "response_seconds": 570.6087811172168,
+          "arrival_seconds": 110.93083069918939,
+          "output_tokens": 2185,
+          "calls": 4,
+          "calls_by_engine": {
+            "1": 4
+          },
+          "input_tokens": 3782
+        },
+        "kVTXuqJ-16": {
+          "response_seconds": 686.1761063978818,
+          "arrival_seconds": 66.10557074390387,
+          "output_tokens": 2594,
+          "calls": 7,
+          "calls_by_engine": {
+            "0": 5,
+            "1": 2
+          },
+          "input_tokens": 8811
+        },
+        "3CEPAv7-9": {
+          "response_seconds": 1624.959371641299,
+          "arrival_seconds": 32.034338913837225,
+          "output_tokens": 7775,
+          "calls": 28,
+          "calls_by_engine": {
+            "0": 6,
+            "2": 1,
+            "1": 21
+          },
+          "input_tokens": 116990
+        },
+        "ZcBNrg6-15": {
+          "response_seconds": 3314.905383564975,
+          "arrival_seconds": 62.97575367197743,
+          "output_tokens": 13598,
+          "calls": 38,
+          "calls_by_engine": {
+            "1": 4,
+            "0": 2,
+            "2": 32
+          },
+          "input_tokens": 279697
+        }
+      },
+      "peak_total_gpu_memory_mib": 64211,
+      "trace_events": {},
+      "admission_queues": {},
+      "swapped_tokens": 0,
+      "model_input_tokens": null,
+      "mean_call_ttft_seconds": 6.575975664014364,
+      "summed_gpu_service_seconds": 0,
+      "mean_executed_batch_size": null,
+      "elapsed_seconds": 3377.882785167545,
+      "arrival_horizon_seconds": 116.68611173314868,
+      "drain_seconds": 3261.1966734343964,
+      "completions_during_arrivals": 4,
+      "pipeline_stage_checks": [],
+      "versions": {
+        "sglang": "0.4.9.post6",
+        "torch": "2.7.1",
+        "transformers": "4.54.0"
+      },
+      "engine_args": {
+        "autellix_legacy_gpu": true,
+        "dtype": "float16",
+        "context_length": 32768,
+        "max_running_requests": 4,
+        "max_total_tokens": 32768,
+        "mem_fraction_static": 0.9,
+        "random_seed": 0,
+        "autellix_swap_space": 8,
+        "max_prefill_tokens": 32768,
+        "autellix_native_baseline": true
+      }
+    },
+    {
+      "condition": "plas-replicas3-program",
+      "arm": "plas",
+      "seed": 100,
+      "rate": 0.24,
+      "repeat": 0,
+      "model": "/mnt/masfiles/models/Meta-Llama-3.1-8B-Instruct",
+      "device_groups": [
+        "0",
+        "1",
+        "2"
+      ],
+      "routing": "program",
+      "trace_sha256": "9b3dc5d270fa774fc16700da626c8eb319519f59e46991d852dcbd73af8a358c",
+      "programs": 24,
+      "calls": 137,
+      "output_tokens": 41616,
+      "output_tokens_per_second": 9.201535452401085,
+      "program_latency_seconds": {
+        "mean": 552.8503575961538,
+        "p95": 2800.6597381420643,
+        "p99": 4459.74583242878,
+        "count": 24
+      },
+      "paper_sequential_token_latency": {
+        "mean": 0.2944880174165885,
+        "p95": 0.3693542854999554,
+        "p99": 0.3738949184774746,
+        "count": 24
+      },
+      "calls_by_engine": {
+        "0": 28,
+        "1": 30,
+        "2": 79
+      },
+      "gpu": {
+        "0": {
+          "peak_memory_mib": 21177,
+          "total_mib": 23040,
+          "mean_utilization": 15.917209302325581,
+          "peak_utilization": 100,
+          "samples": 2150
+        },
+        "1": {
+          "peak_memory_mib": 20817,
+          "total_mib": 24576,
+          "mean_utilization": 13.603720930232559,
+          "peak_utilization": 100,
+          "samples": 2150
+        },
+        "2": {
+          "peak_memory_mib": 22311,
+          "total_mib": 24576,
+          "mean_utilization": 95.63488372093023,
+          "peak_utilization": 100,
+          "samples": 2150
+        }
+      },
+      "per_program": {
+        "LMOMNTH-7": {
+          "response_seconds": 21.569370909923837,
+          "arrival_seconds": 18.281374976640418,
+          "output_tokens": 89,
+          "calls": 1,
+          "calls_by_engine": {
+            "1": 1
+          },
+          "input_tokens": 16
+        },
+        "hz2QTT2-1": {
+          "response_seconds": 47.667387185040035,
+          "arrival_seconds": 2.5284814859003655,
+          "output_tokens": 271,
+          "calls": 1,
+          "calls_by_engine": {
+            "1": 1
+          },
+          "input_tokens": 201
+        },
+        "TPc4ZKv-4": {
+          "response_seconds": 43.44991089156597,
+          "arrival_seconds": 12.459992429849216,
+          "output_tokens": 191,
+          "calls": 1,
+          "calls_by_engine": {
+            "1": 1
+          },
+          "input_tokens": 23
+        },
+        "lf2wdJZ-3": {
+          "response_seconds": 55.85949770571415,
+          "arrival_seconds": 11.186107171459756,
+          "output_tokens": 152,
+          "calls": 2,
+          "calls_by_engine": {
+            "0": 2
+          },
+          "input_tokens": 732
+        },
+        "fgphoH9-11": {
+          "response_seconds": 83.74024761396691,
+          "arrival_seconds": 38.245482721149465,
+          "output_tokens": 289,
+          "calls": 4,
+          "calls_by_engine": {
+            "2": 1,
+            "1": 1,
+            "0": 2
+          },
+          "input_tokens": 533
+        },
+        "qe5Xmha-13": {
+          "response_seconds": 69.3766669071473,
+          "arrival_seconds": 53.637377258463964,
+          "output_tokens": 269,
+          "calls": 3,
+          "calls_by_engine": {
+            "1": 3
+          },
+          "input_tokens": 341
+        },
+        "ECFGar1-23": {
+          "response_seconds": 25.95499080808939,
+          "arrival_seconds": 116.68611173314868,
+          "output_tokens": 104,
+          "calls": 1,
+          "calls_by_engine": {
+            "1": 1
+          },
+          "input_tokens": 17
+        },
+        "Il7wN89-14": {
+          "response_seconds": 115.23853707598609,
+          "arrival_seconds": 57.711656008790314,
+          "output_tokens": 312,
+          "calls": 1,
+          "calls_by_engine": {
+            "1": 1
+          },
+          "input_tokens": 25
+        },
+        "2mt8SNq-21": {
+          "response_seconds": 69.77993403941271,
+          "arrival_seconds": 111.18075905919197,
+          "output_tokens": 271,
+          "calls": 2,
+          "calls_by_engine": {
+            "2": 2
+          },
+          "input_tokens": 196
+        },
+        "WFZOFeF-5": {
+          "response_seconds": 175.30367593195217,
+          "arrival_seconds": 13.547417438515268,
+          "output_tokens": 558,
+          "calls": 1,
+          "calls_by_engine": {
+            "2": 1
+          },
+          "input_tokens": 197
+        },
+        "tO66MX1-22": {
+          "response_seconds": 78.38200355911285,
+          "arrival_seconds": 111.41464313274592,
+          "output_tokens": 259,
+          "calls": 2,
+          "calls_by_engine": {
+            "0": 2
+          },
+          "input_tokens": 214
+        },
+        "GjmvqLi-18": {
+          "response_seconds": 186.93091412661727,
+          "arrival_seconds": 100.0533679907197,
+          "output_tokens": 605,
+          "calls": 2,
+          "calls_by_engine": {
+            "2": 2
+          },
+          "input_tokens": 371
+        },
+        "OjbxTDD-2": {
+          "response_seconds": 283.4195678705969,
+          "arrival_seconds": 8.01437825461242,
+          "output_tokens": 1104,
+          "calls": 3,
+          "calls_by_engine": {
+            "2": 3
+          },
+          "input_tokens": 1979
+        },
+        "DqcWUPa-19": {
+          "response_seconds": 235.01913052690617,
+          "arrival_seconds": 101.2661388638855,
+          "output_tokens": 783,
+          "calls": 4,
+          "calls_by_engine": {
+            "0": 1,
+            "1": 3
+          },
+          "input_tokens": 2262
+        },
+        "Waicrl6-0": {
+          "response_seconds": 386.8176526129246,
+          "arrival_seconds": 0.0,
+          "output_tokens": 1089,
+          "calls": 3,
+          "calls_by_engine": {
+            "0": 3
+          },
+          "input_tokens": 1027
+        },
+        "BGBDHk2-17": {
+          "response_seconds": 299.14068748283074,
+          "arrival_seconds": 93.04906284210398,
+          "output_tokens": 1161,
+          "calls": 3,
+          "calls_by_engine": {
+            "1": 3
+          },
+          "input_tokens": 1145
+        },
+        "TDkGXSx-6": {
+          "response_seconds": 470.13999300897575,
+          "arrival_seconds": 14.17987560405872,
+          "output_tokens": 1360,
+          "calls": 5,
+          "calls_by_engine": {
+            "0": 5
+          },
+          "input_tokens": 2484
+        },
+        "oxgUmNs-20": {
+          "response_seconds": 562.8366703868072,
+          "arrival_seconds": 110.93083069918939,
+          "output_tokens": 2185,
+          "calls": 4,
+          "calls_by_engine": {
+            "1": 4
+          },
+          "input_tokens": 3782
+        },
+        "woHE37L-8": {
+          "response_seconds": 673.7813143881467,
+          "arrival_seconds": 31.30577363050909,
+          "output_tokens": 2616,
+          "calls": 13,
+          "calls_by_engine": {
+            "2": 7,
+            "1": 6
+          },
+          "input_tokens": 18242
+        },
+        "TGvlVPa-12": {
+          "response_seconds": 671.5152735855444,
+          "arrival_seconds": 39.00689585544034,
+          "output_tokens": 1796,
+          "calls": 4,
+          "calls_by_engine": {
+            "0": 4
+          },
+          "input_tokens": 3353
+        },
+        "oxgUmNs-10": {
+          "response_seconds": 723.239124650683,
+          "arrival_seconds": 32.05792674553791,
+          "output_tokens": 2185,
+          "calls": 4,
+          "calls_by_engine": {
+            "1": 1,
+            "0": 3
+          },
+          "input_tokens": 3782
+        },
+        "kVTXuqJ-16": {
+          "response_seconds": 728.8404604689028,
+          "arrival_seconds": 66.10557074390387,
+          "output_tokens": 2594,
+          "calls": 7,
+          "calls_by_engine": {
+            "1": 4,
+            "0": 3
+          },
+          "input_tokens": 8811
+        },
+        "3CEPAv7-9": {
+          "response_seconds": 2800.6597381420643,
+          "arrival_seconds": 32.034338913837225,
+          "output_tokens": 7775,
+          "calls": 28,
+          "calls_by_engine": {
+            "0": 3,
+            "2": 25
+          },
+          "input_tokens": 116990
+        },
+        "ZcBNrg6-15": {
+          "response_seconds": 4459.74583242878,
+          "arrival_seconds": 62.97575367197743,
+          "output_tokens": 13598,
+          "calls": 38,
+          "calls_by_engine": {
+            "2": 38
+          },
+          "input_tokens": 279697
+        }
+      },
+      "peak_total_gpu_memory_mib": 64305,
+      "trace_events": {
+        "admit": 137,
+        "schedule_window": 2498,
+        "batch": 19942,
+        "execute": 19942,
+        "plan_step": 19942,
+        "continue_plan": 17362,
+        "demote": 444,
+        "retain_running": 86,
+        "finished": 137,
+        "reserve": 59,
+        "retract": 94,
+        "swap_out": 39,
+        "resume_cached": 55,
+        "swap_in": 39,
+        "refill": 21
+      },
+      "admission_queues": {
+        "0": 27,
+        "1": 6,
+        "2": 7,
+        "3": 11,
+        "4": 17,
+        "5": 21,
+        "6": 48
+      },
+      "swapped_tokens": 17847,
+      "model_input_tokens": 84343,
+      "mean_call_ttft_seconds": 1.9653397902683185,
+      "summed_gpu_service_seconds": 5932.48544940184,
+      "mean_executed_batch_size": 2.0868518704242303,
+      "elapsed_seconds": 4522.723431896418,
+      "arrival_horizon_seconds": 116.68611173314868,
+      "drain_seconds": 4406.037320163269,
+      "completions_during_arrivals": 4,
+      "pipeline_stage_checks": [],
+      "versions": {
+        "sglang": "0.4.9.post6",
+        "torch": "2.7.1",
+        "transformers": "4.54.0"
+      },
+      "engine_args": {
+        "autellix_legacy_gpu": true,
+        "dtype": "float16",
+        "context_length": 32768,
+        "max_running_requests": 4,
+        "max_total_tokens": 32768,
+        "mem_fraction_static": 0.9,
+        "random_seed": 0,
+        "autellix_swap_space": 8,
+        "max_prefill_tokens": 32768,
+        "autellix_native_baseline": false
+      }
+    },
+    {
+      "condition": "plas-replicas3-least-used",
+      "arm": "plas",
+      "seed": 100,
+      "rate": 0.24,
+      "repeat": 0,
+      "model": "/mnt/masfiles/models/Meta-Llama-3.1-8B-Instruct",
+      "device_groups": [
+        "0",
+        "1",
+        "2"
+      ],
+      "routing": "least-used",
+      "trace_sha256": "9b3dc5d270fa774fc16700da626c8eb319519f59e46991d852dcbd73af8a358c",
+      "programs": 24,
+      "calls": 137,
+      "output_tokens": 41616,
+      "output_tokens_per_second": 10.536917673347972,
+      "program_latency_seconds": {
+        "mean": 474.5756176654371,
+        "p95": 1646.2428821958808,
+        "p99": 3886.5644430522584,
+        "count": 24
+      },
+      "paper_sequential_token_latency": {
+        "mean": 0.2805063502228127,
+        "p95": 0.3590624850185571,
+        "p99": 0.36038542505168897,
+        "count": 24
+      },
+      "calls_by_engine": {
+        "0": 58,
+        "1": 51,
+        "2": 28
+      },
+      "gpu": {
+        "0": {
+          "peak_memory_mib": 22583,
+          "total_mib": 23040,
+          "mean_utilization": 95.4408315565032,
+          "peak_utilization": 100,
+          "samples": 1876
+        },
+        "1": {
+          "peak_memory_mib": 21299,
+          "total_mib": 24576,
+          "mean_utilization": 38.70682302771855,
+          "peak_utilization": 100,
+          "samples": 1876
+        },
+        "2": {
+          "peak_memory_mib": 20797,
+          "total_mib": 24576,
+          "mean_utilization": 18.291044776119403,
+          "peak_utilization": 100,
+          "samples": 1876
+        }
+      },
+      "per_program": {
+        "LMOMNTH-7": {
+          "response_seconds": 20.87917680233173,
+          "arrival_seconds": 18.281374976640418,
+          "output_tokens": 89,
+          "calls": 1,
+          "calls_by_engine": {
+            "1": 1
+          },
+          "input_tokens": 16
+        },
+        "hz2QTT2-1": {
+          "response_seconds": 48.78830405453137,
+          "arrival_seconds": 2.5284814859003655,
+          "output_tokens": 271,
+          "calls": 1,
+          "calls_by_engine": {
+            "1": 1
+          },
+          "input_tokens": 201
+        },
+        "TPc4ZKv-4": {
+          "response_seconds": 44.56537426016062,
+          "arrival_seconds": 12.459992429849216,
+          "output_tokens": 191,
+          "calls": 1,
+          "calls_by_engine": {
+            "1": 1
+          },
+          "input_tokens": 23
+        },
+        "lf2wdJZ-3": {
+          "response_seconds": 54.57749772282068,
+          "arrival_seconds": 11.186107171459756,
+          "output_tokens": 152,
+          "calls": 2,
+          "calls_by_engine": {
+            "0": 2
+          },
+          "input_tokens": 732
+        },
+        "fgphoH9-11": {
+          "response_seconds": 75.85919324982211,
+          "arrival_seconds": 38.245482721149465,
+          "output_tokens": 289,
+          "calls": 4,
+          "calls_by_engine": {
+            "2": 1,
+            "1": 3
+          },
+          "input_tokens": 533
+        },
+        "qe5Xmha-13": {
+          "response_seconds": 70.83394220091475,
+          "arrival_seconds": 53.637377258463964,
+          "output_tokens": 269,
+          "calls": 3,
+          "calls_by_engine": {
+            "1": 3
+          },
+          "input_tokens": 341
+        },
+        "ECFGar1-23": {
+          "response_seconds": 28.072229046543256,
+          "arrival_seconds": 116.68611173314868,
+          "output_tokens": 104,
+          "calls": 1,
+          "calls_by_engine": {
+            "1": 1
+          },
+          "input_tokens": 17
+        },
+        "Il7wN89-14": {
+          "response_seconds": 112.44025261612695,
+          "arrival_seconds": 57.711656008790314,
+          "output_tokens": 312,
+          "calls": 1,
+          "calls_by_engine": {
+            "1": 1
+          },
+          "input_tokens": 25
+        },
+        "2mt8SNq-21": {
+          "response_seconds": 70.69386320009706,
+          "arrival_seconds": 111.18075905919197,
+          "output_tokens": 271,
+          "calls": 2,
+          "calls_by_engine": {
+            "2": 1,
+            "1": 1
+          },
+          "input_tokens": 196
+        },
+        "tO66MX1-22": {
+          "response_seconds": 71.69537498274475,
+          "arrival_seconds": 111.41464313274592,
+          "output_tokens": 259,
+          "calls": 2,
+          "calls_by_engine": {
+            "0": 1,
+            "1": 1
+          },
+          "input_tokens": 214
+        },
+        "WFZOFeF-5": {
+          "response_seconds": 173.48242836173551,
+          "arrival_seconds": 13.547417438515268,
+          "output_tokens": 558,
+          "calls": 1,
+          "calls_by_engine": {
+            "2": 1
+          },
+          "input_tokens": 197
+        },
+        "GjmvqLi-18": {
+          "response_seconds": 159.37568855313714,
+          "arrival_seconds": 100.0533679907197,
+          "output_tokens": 605,
+          "calls": 2,
+          "calls_by_engine": {
+            "2": 2
+          },
+          "input_tokens": 371
+        },
+        "OjbxTDD-2": {
+          "response_seconds": 280.73871874685074,
+          "arrival_seconds": 8.01437825461242,
+          "output_tokens": 1104,
+          "calls": 3,
+          "calls_by_engine": {
+            "2": 1,
+            "1": 2
+          },
+          "input_tokens": 1979
+        },
+        "Waicrl6-0": {
+          "response_seconds": 325.9489622823894,
+          "arrival_seconds": 0.0,
+          "output_tokens": 1089,
+          "calls": 3,
+          "calls_by_engine": {
+            "0": 2,
+            "2": 1
+          },
+          "input_tokens": 1027
+        },
+        "DqcWUPa-19": {
+          "response_seconds": 267.6691853728651,
+          "arrival_seconds": 101.2661388638855,
+          "output_tokens": 783,
+          "calls": 4,
+          "calls_by_engine": {
+            "0": 4
+          },
+          "input_tokens": 2262
+        },
+        "BGBDHk2-17": {
+          "response_seconds": 330.8737424932687,
+          "arrival_seconds": 93.04906284210398,
+          "output_tokens": 1161,
+          "calls": 3,
+          "calls_by_engine": {
+            "1": 3
+          },
+          "input_tokens": 1145
+        },
+        "TDkGXSx-6": {
+          "response_seconds": 424.51326940283633,
+          "arrival_seconds": 14.17987560405872,
+          "output_tokens": 1360,
+          "calls": 5,
+          "calls_by_engine": {
+            "0": 3,
+            "2": 2
+          },
+          "input_tokens": 2484
+        },
+        "oxgUmNs-10": {
+          "response_seconds": 595.7658822299799,
+          "arrival_seconds": 32.05792674553791,
+          "output_tokens": 2185,
+          "calls": 4,
+          "calls_by_engine": {
+            "1": 3,
+            "2": 1
+          },
+          "input_tokens": 3782
+        },
+        "TGvlVPa-12": {
+          "response_seconds": 631.1992559839053,
+          "arrival_seconds": 39.00689585544034,
+          "output_tokens": 1796,
+          "calls": 4,
+          "calls_by_engine": {
+            "0": 4
+          },
+          "input_tokens": 3353
+        },
+        "woHE37L-8": {
+          "response_seconds": 701.7690013202337,
+          "arrival_seconds": 31.30577363050909,
+          "output_tokens": 2616,
+          "calls": 13,
+          "calls_by_engine": {
+            "2": 7,
+            "1": 6
+          },
+          "input_tokens": 18242
+        },
+        "oxgUmNs-20": {
+          "response_seconds": 656.9345147565167,
+          "arrival_seconds": 110.93083069918939,
+          "output_tokens": 2185,
+          "calls": 4,
+          "calls_by_engine": {
+            "1": 2,
+            "0": 2
+          },
+          "input_tokens": 3782
+        },
+        "kVTXuqJ-16": {
+          "response_seconds": 710.3316410825398,
+          "arrival_seconds": 66.10557074390387,
+          "output_tokens": 2594,
+          "calls": 7,
+          "calls_by_engine": {
+            "0": 3,
+            "2": 4
+          },
+          "input_tokens": 8811
+        },
+        "3CEPAv7-9": {
+          "response_seconds": 1646.2428821958808,
+          "arrival_seconds": 32.034338913837225,
+          "output_tokens": 7775,
+          "calls": 28,
+          "calls_by_engine": {
+            "0": 7,
+            "2": 4,
+            "1": 17
+          },
+          "input_tokens": 116990
+        },
+        "ZcBNrg6-15": {
+          "response_seconds": 3886.5644430522584,
+          "arrival_seconds": 62.97575367197743,
+          "output_tokens": 13598,
+          "calls": 38,
+          "calls_by_engine": {
+            "2": 3,
+            "1": 5,
+            "0": 30
+          },
+          "input_tokens": 279697
+        }
+      },
+      "peak_total_gpu_memory_mib": 64679,
+      "trace_events": {
+        "admit": 137,
+        "schedule_window": 3207,
+        "batch": 25525,
+        "execute": 25525,
+        "plan_step": 25525,
+        "continue_plan": 22245,
+        "demote": 403,
+        "retain_running": 80,
+        "finished": 137,
+        "reserve": 54,
+        "retract": 84,
+        "swap_out": 36,
+        "resume_cached": 48,
+        "swap_in": 36,
+        "refill": 17
+      },
+      "admission_queues": {
+        "0": 27,
+        "1": 6,
+        "2": 7,
+        "3": 10,
+        "4": 18,
+        "5": 21,
+        "6": 48
+      },
+      "swapped_tokens": 13397,
+      "model_input_tokens": 94561,
+      "mean_call_ttft_seconds": 1.9639952772562086,
+      "summed_gpu_service_seconds": 6307.796468078649,
+      "mean_executed_batch_size": 1.6304015670910872,
+      "elapsed_seconds": 3949.5421042591333,
+      "arrival_horizon_seconds": 116.68611173314868,
+      "drain_seconds": 3832.8559925259847,
+      "completions_during_arrivals": 5,
+      "pipeline_stage_checks": [],
+      "versions": {
+        "sglang": "0.4.9.post6",
+        "torch": "2.7.1",
+        "transformers": "4.54.0"
+      },
+      "engine_args": {
+        "autellix_legacy_gpu": true,
+        "dtype": "float16",
+        "context_length": 32768,
+        "max_running_requests": 4,
+        "max_total_tokens": 32768,
+        "mem_fraction_static": 0.9,
+        "random_seed": 0,
+        "autellix_swap_space": 8,
+        "max_prefill_tokens": 32768,
+        "autellix_native_baseline": false
+      }
+    },
+    {
+      "condition": "plas-replicas3-round-robin",
+      "arm": "plas",
+      "seed": 100,
+      "rate": 0.24,
+      "repeat": 0,
+      "model": "/mnt/masfiles/models/Meta-Llama-3.1-8B-Instruct",
+      "device_groups": [
+        "0",
+        "1",
+        "2"
+      ],
+      "routing": "round-robin",
+      "trace_sha256": "9b3dc5d270fa774fc16700da626c8eb319519f59e46991d852dcbd73af8a358c",
+      "programs": 24,
+      "calls": 137,
+      "output_tokens": 41616,
+      "output_tokens_per_second": 10.75283799998538,
+      "program_latency_seconds": {
+        "mean": 500.05855773281905,
+        "p95": 1830.0449347049205,
+        "p99": 3807.2566198785566,
+        "count": 24
+      },
+      "paper_sequential_token_latency": {
+        "mean": 0.30719433564345194,
+        "p95": 0.4522630994469849,
+        "p99": 0.4683330330355807,
+        "count": 24
+      },
+      "calls_by_engine": {
+        "0": 46,
+        "2": 45,
+        "1": 46
+      },
+      "gpu": {
+        "0": {
+          "peak_memory_mib": 21439,
+          "total_mib": 23040,
+          "mean_utilization": 57.86242523110386,
+          "peak_utilization": 100,
+          "samples": 1839
+        },
+        "1": {
+          "peak_memory_mib": 22091,
+          "total_mib": 24576,
+          "mean_utilization": 52.5410549211528,
+          "peak_utilization": 100,
+          "samples": 1839
+        },
+        "2": {
+          "peak_memory_mib": 21717,
+          "total_mib": 24576,
+          "mean_utilization": 44.55519303969549,
+          "peak_utilization": 100,
+          "samples": 1839
+        }
+      },
+      "per_program": {
+        "LMOMNTH-7": {
+          "response_seconds": 20.92773978352003,
+          "arrival_seconds": 18.281374976640418,
+          "output_tokens": 89,
+          "calls": 1,
+          "calls_by_engine": {
+            "2": 1
+          },
+          "input_tokens": 16
+        },
+        "hz2QTT2-1": {
+          "response_seconds": 49.977355898711004,
+          "arrival_seconds": 2.5284814859003655,
+          "output_tokens": 271,
+          "calls": 1,
+          "calls_by_engine": {
+            "1": 1
+          },
+          "input_tokens": 201
+        },
+        "lf2wdJZ-3": {
+          "response_seconds": 42.68545603962366,
+          "arrival_seconds": 11.186107171459756,
+          "output_tokens": 152,
+          "calls": 2,
+          "calls_by_engine": {
+            "0": 1,
+            "1": 1
+          },
+          "input_tokens": 732
+        },
+        "TPc4ZKv-4": {
+          "response_seconds": 48.863613230499915,
+          "arrival_seconds": 12.459992429849216,
+          "output_tokens": 191,
+          "calls": 1,
+          "calls_by_engine": {
+            "1": 1
+          },
+          "input_tokens": 23
+        },
+        "fgphoH9-11": {
+          "response_seconds": 77.57261796596691,
+          "arrival_seconds": 38.245482721149465,
+          "output_tokens": 289,
+          "calls": 4,
+          "calls_by_engine": {
+            "1": 1,
+            "0": 1,
+            "2": 2
+          },
+          "input_tokens": 533
+        },
+        "qe5Xmha-13": {
+          "response_seconds": 70.43126429610027,
+          "arrival_seconds": 53.637377258463964,
+          "output_tokens": 269,
+          "calls": 3,
+          "calls_by_engine": {
+            "1": 2,
+            "0": 1
+          },
+          "input_tokens": 341
+        },
+        "ECFGar1-23": {
+          "response_seconds": 30.097594667394773,
+          "arrival_seconds": 116.68611173314868,
+          "output_tokens": 104,
+          "calls": 1,
+          "calls_by_engine": {
+            "0": 1
+          },
+          "input_tokens": 17
+        },
+        "2mt8SNq-21": {
+          "response_seconds": 72.80156813010451,
+          "arrival_seconds": 111.18075905919197,
+          "output_tokens": 271,
+          "calls": 2,
+          "calls_by_engine": {
+            "1": 1,
+            "2": 1
+          },
+          "input_tokens": 196
+        },
+        "tO66MX1-22": {
+          "response_seconds": 72.6502158589068,
+          "arrival_seconds": 111.41464313274592,
+          "output_tokens": 259,
+          "calls": 2,
+          "calls_by_engine": {
+            "2": 1,
+            "0": 1
+          },
+          "input_tokens": 214
+        },
+        "Il7wN89-14": {
+          "response_seconds": 130.05488446267407,
+          "arrival_seconds": 57.711656008790314,
+          "output_tokens": 312,
+          "calls": 1,
+          "calls_by_engine": {
+            "0": 1
+          },
+          "input_tokens": 25
+        },
+        "WFZOFeF-5": {
+          "response_seconds": 252.36280949141758,
+          "arrival_seconds": 13.547417438515268,
+          "output_tokens": 558,
+          "calls": 1,
+          "calls_by_engine": {
+            "2": 1
+          },
+          "input_tokens": 197
+        },
+        "DqcWUPa-19": {
+          "response_seconds": 248.9217710149049,
+          "arrival_seconds": 101.2661388638855,
+          "output_tokens": 783,
+          "calls": 4,
+          "calls_by_engine": {
+            "1": 2,
+            "0": 1,
+            "2": 1
+          },
+          "input_tokens": 2262
+        },
+        "GjmvqLi-18": {
+          "response_seconds": 283.3414849865263,
+          "arrival_seconds": 100.0533679907197,
+          "output_tokens": 605,
+          "calls": 2,
+          "calls_by_engine": {
+            "0": 2
+          },
+          "input_tokens": 371
+        },
+        "OjbxTDD-2": {
+          "response_seconds": 396.3667084674039,
+          "arrival_seconds": 8.01437825461242,
+          "output_tokens": 1104,
+          "calls": 3,
+          "calls_by_engine": {
+            "2": 2,
+            "0": 1
+          },
+          "input_tokens": 1979
+        },
+        "BGBDHk2-17": {
+          "response_seconds": 336.04365018608854,
+          "arrival_seconds": 93.04906284210398,
+          "output_tokens": 1161,
+          "calls": 3,
+          "calls_by_engine": {
+            "1": 2,
+            "2": 1
+          },
+          "input_tokens": 1145
+        },
+        "Waicrl6-0": {
+          "response_seconds": 441.5330204963684,
+          "arrival_seconds": 0.0,
+          "output_tokens": 1089,
+          "calls": 3,
+          "calls_by_engine": {
+            "0": 3
+          },
+          "input_tokens": 1027
+        },
+        "TDkGXSx-6": {
+          "response_seconds": 482.0401637524412,
+          "arrival_seconds": 14.17987560405872,
+          "output_tokens": 1360,
+          "calls": 5,
+          "calls_by_engine": {
+            "0": 2,
+            "2": 3
+          },
+          "input_tokens": 2484
+        },
+        "TGvlVPa-12": {
+          "response_seconds": 537.0587910596295,
+          "arrival_seconds": 39.00689585544034,
+          "output_tokens": 1796,
+          "calls": 4,
+          "calls_by_engine": {
+            "2": 3,
+            "0": 1
+          },
+          "input_tokens": 3353
+        },
+        "woHE37L-8": {
+          "response_seconds": 566.0613047110346,
+          "arrival_seconds": 31.30577363050909,
+          "output_tokens": 2616,
+          "calls": 13,
+          "calls_by_engine": {
+            "1": 8,
+            "2": 2,
+            "0": 3
+          },
+          "input_tokens": 18242
+        },
+        "oxgUmNs-10": {
+          "response_seconds": 751.8530379930397,
+          "arrival_seconds": 32.05792674553791,
+          "output_tokens": 2185,
+          "calls": 4,
+          "calls_by_engine": {
+            "0": 1,
+            "1": 3
+          },
+          "input_tokens": 3782
+        },
+        "oxgUmNs-20": {
+          "response_seconds": 681.0962038330894,
+          "arrival_seconds": 110.93083069918939,
+          "output_tokens": 2185,
+          "calls": 4,
+          "calls_by_engine": {
+            "0": 3,
+            "2": 1
+          },
+          "input_tokens": 3782
+        },
+        "kVTXuqJ-16": {
+          "response_seconds": 771.3625746787336,
+          "arrival_seconds": 66.10557074390387,
+          "output_tokens": 2594,
+          "calls": 7,
+          "calls_by_engine": {
+            "0": 4,
+            "1": 2,
+            "2": 1
+          },
+          "input_tokens": 8811
+        },
+        "3CEPAv7-9": {
+          "response_seconds": 1830.0449347049205,
+          "arrival_seconds": 32.034338913837225,
+          "output_tokens": 7775,
+          "calls": 28,
+          "calls_by_engine": {
+            "2": 12,
+            "1": 10,
+            "0": 6
+          },
+          "input_tokens": 116990
+        },
+        "ZcBNrg6-15": {
+          "response_seconds": 3807.2566198785566,
+          "arrival_seconds": 62.97575367197743,
+          "output_tokens": 13598,
+          "calls": 38,
+          "calls_by_engine": {
+            "2": 13,
+            "1": 12,
+            "0": 13
+          },
+          "input_tokens": 279697
+        }
+      },
+      "peak_total_gpu_memory_mib": 65247,
+      "trace_events": {
+        "admit": 137,
+        "schedule_window": 3344,
+        "batch": 26621,
+        "execute": 26621,
+        "plan_step": 26621,
+        "continue_plan": 23194,
+        "demote": 395,
+        "retain_running": 78,
+        "finished": 137,
+        "reserve": 79,
+        "retract": 122,
+        "refill": 28,
+        "resume_cached": 66,
+        "swap_out": 56,
+        "swap_in": 56
+      },
+      "admission_queues": {
+        "0": 27,
+        "1": 7,
+        "3": 13,
+        "4": 20,
+        "5": 16,
+        "6": 49,
+        "2": 5
+      },
+      "swapped_tokens": 30996,
+      "model_input_tokens": 139710,
+      "mean_call_ttft_seconds": 3.3352699886708366,
+      "summed_gpu_service_seconds": 6276.984961181649,
+      "mean_executed_batch_size": 1.5632771120543931,
+      "elapsed_seconds": 3870.234072163701,
+      "arrival_horizon_seconds": 116.68611173314868,
+      "drain_seconds": 3753.5479604305524,
+      "completions_during_arrivals": 5,
+      "pipeline_stage_checks": [],
+      "versions": {
+        "sglang": "0.4.9.post6",
+        "torch": "2.7.1",
+        "transformers": "4.54.0"
+      },
+      "engine_args": {
+        "autellix_legacy_gpu": true,
+        "dtype": "float16",
+        "context_length": 32768,
+        "max_running_requests": 4,
+        "max_total_tokens": 32768,
+        "mem_fraction_static": 0.9,
+        "random_seed": 0,
+        "autellix_swap_space": 8,
+        "max_prefill_tokens": 32768,
+        "autellix_native_baseline": false
+      }
+    }
+  ],
+  "comparisons": [
+    {
+      "condition": "plas-replicas3-program",
+      "baseline": "native-replicas3",
+      "model": "/mnt/masfiles/models/Meta-Llama-3.1-8B-Instruct",
+      "seed": 100,
+      "rate": 0.24,
+      "mean_program_latency_change_pct": 23.78648130539378,
+      "paper_token_latency_change_pct": -5.843544738436368,
+      "throughput_change_pct": -25.313081022264306,
+      "matching_output_hashes": 110,
+      "calls": 137
+    },
+    {
+      "condition": "plas-replicas3-program",
+      "baseline": "plas-replicas3-least-used",
+      "model": "/mnt/masfiles/models/Meta-Llama-3.1-8B-Instruct",
+      "seed": 100,
+      "rate": 0.24,
+      "mean_program_latency_change_pct": 16.493628626723567,
+      "paper_token_latency_change_pct": 4.984438741821662,
+      "throughput_change_pct": -12.673366750549796,
+      "matching_output_hashes": 118,
+      "calls": 137
+    },
+    {
+      "condition": "plas-replicas3-program",
+      "baseline": "plas-replicas3-round-robin",
+      "model": "/mnt/masfiles/models/Meta-Llama-3.1-8B-Instruct",
+      "seed": 100,
+      "rate": 0.24,
+      "mean_program_latency_change_pct": 10.557123570224224,
+      "paper_token_latency_change_pct": -4.13624756467228,
+      "throughput_change_pct": -14.42691266795244,
+      "matching_output_hashes": 116,
+      "calls": 137
+    },
+    {
+      "condition": "plas-replicas3-least-used",
+      "baseline": "native-replicas3",
+      "model": "/mnt/masfiles/models/Meta-Llama-3.1-8B-Instruct",
+      "seed": 100,
+      "rate": 0.24,
+      "mean_program_latency_change_pct": 6.260301756105857,
+      "paper_token_latency_change_pct": -10.313893763709359,
+      "throughput_change_pct": -14.474065701821948,
+      "matching_output_hashes": 110,
+      "calls": 137
+    },
+    {
+      "condition": "plas-replicas3-round-robin",
+      "baseline": "native-replicas3",
+      "model": "/mnt/masfiles/models/Meta-Llama-3.1-8B-Instruct",
+      "seed": 100,
+      "rate": 0.24,
+      "mean_program_latency_change_pct": 11.966083512263648,
+      "paper_token_latency_change_pct": -1.780962178500023,
+      "throughput_change_pct": -12.721486034587581,
+      "matching_output_hashes": 107,
+      "calls": 137
+    }
+  ]
+}

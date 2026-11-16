@@ -1,0 +1,115 @@
+{
+  "deployment": {
+    "pid": 68310,
+    "model": "/mnt/masfiles/models/Qwen3-32B",
+    "device_groups": "0,1,2",
+    "layer_partition": "20,23,21",
+    "engine_args": {
+      "autellix_legacy_gpu": true,
+      "autellix_attention_score_elements": 16777216,
+      "dtype": "float16",
+      "pp_size": 3,
+      "context_length": 4096,
+      "max_running_requests": 6,
+      "max_total_tokens": 8192,
+      "max_prefill_tokens": 4096,
+      "mem_fraction_static": 0.96,
+      "random_seed": 0,
+      "autellix_swap_space": 2
+    }
+  },
+  "source_sync": {
+    "files": 103,
+    "mismatches": []
+  },
+  "windows_cpu": {
+    "passed": 128,
+    "skipped": 8
+  },
+  "linux_cpu": {
+    "passed": 129,
+    "skipped": 7
+  },
+  "pipeline_gpu": {
+    "pp_size": 3,
+    "greedy_resume_matches": true,
+    "inherited": 2.8342332668304437,
+    "trace_events": {
+      "admit": 12,
+      "schedule_window": 109,
+      "batch": 300,
+      "plan_step": 300,
+      "execute": 300,
+      "continue_plan": 196,
+      "demote": 156,
+      "swap_out": 80,
+      "retract": 80,
+      "swap_in": 80,
+      "finished": 9,
+      "cancelled": 3
+    },
+    "all_stage_traces_match": true,
+    "cancelled": 3
+  },
+  "http": {
+    "concurrent_completed": 6,
+    "streaming_matches": true,
+    "inherited": 4.647583892822266,
+    "long_prompt_usage": [
+      {
+        "prompt_tokens": 3920,
+        "completion_tokens": 14,
+        "total_tokens": 3934
+      },
+      {
+        "prompt_tokens": 3920,
+        "completion_tokens": 17,
+        "total_tokens": 3937
+      }
+    ],
+    "sessions_empty": true,
+    "final_health": {
+      "status": "ok",
+      "backend": [
+        "sglang"
+      ],
+      "policy": "atlas",
+      "loads": [
+        0
+      ],
+      "device_groups": [
+        "0,1,2"
+      ]
+    },
+    "elapsed_seconds": 193.68536284565926,
+    "short_answer": "The capital of France is Paris.",
+    "math_answer": "2 plus 3 is **5**.",
+    "long_answers": [
+      "The river continuously flows through the green valley.",
+      "The mountain looms over the quiet village, repeated endlessly."
+    ],
+    "peak_total_gpu_memory_mib": 70791,
+    "per_gpu_peak_memory_mib": {
+      "0": 22685,
+      "1": 24263,
+      "2": 23843
+    },
+    "gpu_samples": 92,
+    "gpu_sampling_errors": []
+  },
+  "vllm_probe": [
+    {
+      "vllm": "0.6.1",
+      "torch": "2.4.0+cu121",
+      "device": "Tesla P40",
+      "capability": [
+        6,
+        1
+      ]
+    },
+    {
+      "operator": "rms_norm",
+      "error": "CUDA error: no kernel image is available for execution on the device\nCompile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.\n"
+    }
+  ]
+}

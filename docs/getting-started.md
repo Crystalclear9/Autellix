@@ -41,7 +41,7 @@ python -c 'import torch; print(torch.__version__, torch.cuda.is_available())'
 python -c 'from importlib.metadata import version; print(version("vllm"))'
 ```
 
-SGLang 环境将最后一行的 `vllm` 改为 `sglang`。不要仅根据终端提示符判断环境。锁文件是固定版本依赖清单，不包含模型权重、操作系统、驱动、下载源或包文件哈希，因此不能单独保证所有机器上完全一致的安装结果。
+SGLang 环境将最后一行的 `vllm` 改为 `sglang`。锁文件固定 Python 依赖；实验记录另保存模型版本、系统、驱动和启动参数。
 
 只开发模拟器、策略或 HTTP 协议时，可以创建独立 CPU 环境：
 
@@ -78,7 +78,7 @@ autellix-serve --backend sglang --model HuggingFaceTB/SmolLM2-135M-Instruct \
   --engine-args '{"context_length":512,"max_running_requests":4,"mem_fraction_static":0.35}'
 ```
 
-`--devices 0,1` 表示两个独立单 GPU 副本。vLLM 张量并行的配置和限制见其后端说明。共享 SQLite 状态应放在 Linux 本地文件系统，不要放在网络盘或 WSL 的 Windows 挂载路径。
+`--devices 0,1` 表示两个独立单 GPU 副本。SGLang 使用 `--device-groups '0,1,2'`、`pp_size=3` 运行三卡流水线；当前 P40 的 Qwen3-32B 完整启动命令封装在 `bash scripts/serve_p40_three_gpu.sh`。vLLM 张量并行配置见其后端说明。共享 SQLite 状态放在 Linux 本地文件系统。
 
 ## 客户端
 

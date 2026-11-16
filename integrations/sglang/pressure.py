@@ -1,6 +1,11 @@
 """Recover decode capacity without replacing program priority with length order."""
 
 
+def other_pipeline_requests(scheduler, batch):
+    return any(other is not batch and any(not req.finished() for req in other.reqs)
+               for other in getattr(scheduler, "running_mbs", ()))
+
+
 def make_decode_room(scheduler, batch):
     from .reserve import release_reserves
     if batch.check_decode_mem(scheduler.decode_mem_cache_buf_multiplier):
@@ -10,7 +15,7 @@ def make_decode_room(scheduler, batch):
     if window is not None:
         window.drop_reserve()
     while not batch.check_decode_mem(scheduler.decode_mem_cache_buf_multiplier):
-        if len(batch.reqs) <= 1:
+        if len(batch.reqs) <= 1 and not other_pipeline_requests(scheduler, batch):
             raise RuntimeError("one request exceeds available GPU KV capacity even after releasing reserves")
         # Preserve the frozen plan's priority, including FIFO tie ordering.
         order = {rid: i for i, rid in enumerate(window.cohort)} if window is not None else None
@@ -33,3 +38,5 @@ def make_decode_room(scheduler, batch):
         ctl.emit("retract", rid=req.rid, reason="decode_capacity")
         if window is not None:
             window.retain_prefix(order[req.rid])
+        if not batch.reqs:
+            return

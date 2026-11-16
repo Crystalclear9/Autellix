@@ -1,5 +1,8 @@
 # Autellix 论文复现尝试：完整对话、调度实现与负载实验
 
+本页保留单卡实验记录。后续三卡模型并行、32B 模型与多副本对照见
+[三卡大模型实验](three-gpu-experiment.md)。
+
 本轮接续[上一轮源码与 GPU 核对](autellix-paper-audit.md)，重新检查源代码、输入构造、
 指标和 SGLang 对照条件。依据为 [Autellix 论文 v1](https://arxiv.org/html/2502.13965v1)
 的算法 1/2、实现章节与实验章节。

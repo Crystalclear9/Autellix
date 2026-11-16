@@ -17,7 +17,7 @@ class ProtocolEngine:
     closed = False
     failed = {}
     loads = [0]
-    replicas = [SimpleNamespace(backend="test")]
+    replicas = [SimpleNamespace(backend="test", device="0")]
     policy = SimpleNamespace(policy="atlas")
 
     def __init__(self):

@@ -1,0 +1,67 @@
+{
+  "python": "3.10.12",
+  "versions": {
+    "torch": "2.7.1",
+    "sglang": "0.4.9.post6",
+    "transformers": "4.54.0",
+    "triton": "3.3.1"
+  },
+  "gpu": "index, name, compute_cap, memory.total [MiB], driver_version\n0, Tesla P40, 6.1, 23040 MiB, 550.120\n1, Tesla P40, 6.1, 24576 MiB, 550.120\n2, Tesla P40, 6.1, 24576 MiB, 550.120\n",
+  "topology": "\tGPU0\tGPU1\tGPU2\tNIC0\tNIC1\tCPU Affinity\tNUMA Affinity\tGPU NUMA ID\nGPU0\t X \tPHB\tPHB\tSYS\tSYS\t13,41\t0\t\tN/A\nGPU1\tPHB\t X \tPIX\tSYS\tSYS\t13,41\t0\t\tN/A\nGPU2\tPHB\tPIX\t X \tSYS\tSYS\t13,41\t0\t\tN/A\nNIC0\tSYS\tSYS\tSYS\t X \tPIX\t\t\t\t\nNIC1\tSYS\tSYS\tSYS\tPIX\t X \t\t\t\t\n\nLegend:\n\n  X    = Self\n  SYS  = Connection traversing PCIe as well as the SMP interconnect between NUMA nodes (e.g., QPI/UPI)\n  NODE = Connection traversing PCIe as well as the interconnect between PCIe Host Bridges within a NUMA node\n  PHB  = Connection traversing PCIe as well as a PCIe Host Bridge (typically the CPU)\n  PXB  = Connection traversing multiple PCIe bridges (without traversing the PCIe Host Bridge)\n  PIX  = Connection traversing at most a single PCIe bridge\n  NV#  = Connection traversing a bonded set of # NVLinks\n\nNIC Legend:\n\n  NIC0: mlx5_0\n  NIC1: mlx5_1\n\n",
+  "models": {
+    "Qwen3-32B": {
+      "architectures": [
+        "Qwen3ForCausalLM"
+      ],
+      "model_type": "qwen3",
+      "torch_dtype": "bfloat16",
+      "num_hidden_layers": 64,
+      "hidden_size": 5120,
+      "num_attention_heads": 64,
+      "num_key_value_heads": 8,
+      "head_dim": 128,
+      "vocab_size": 151936,
+      "tie_word_embeddings": false,
+      "revision": null,
+      "safetensors_bytes": 65524328560,
+      "runtime_dtype": "float16",
+      "file_sha256": {
+        "config.json": "97e295b63283935788fac5e4f8860862a56d4089538cafc93f0431f2ebe483bb",
+        "model.safetensors.index.json": "bed42c6c55274bc08a1f616bceb3bcb84b3f02cb6584c573bd18c6519291ecd0",
+        "tokenizer.json": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4",
+        "tokenizer_config.json": "d5d09f07b48c3086c508b30d1c9114bd1189145b74e982a265350c923acd8101"
+      }
+    },
+    "Meta-Llama-3.1-8B-Instruct": {
+      "architectures": [
+        "LlamaForCausalLM"
+      ],
+      "model_type": "llama",
+      "torch_dtype": "bfloat16",
+      "num_hidden_layers": 32,
+      "hidden_size": 4096,
+      "num_attention_heads": 32,
+      "num_key_value_heads": 8,
+      "head_dim": null,
+      "vocab_size": 128256,
+      "tie_word_embeddings": false,
+      "revision": null,
+      "safetensors_bytes": 16060556376,
+      "runtime_dtype": "float16",
+      "file_sha256": {
+        "config.json": "29e4c210b0d6ac178b16b2a255a568bdb23b581e50ca1ef6a6d071dd85704e6e",
+        "model.safetensors.index.json": "146776fce3f6db1103aa6f249e65ee5544c5923ce6f971b092eee79aa6e5d37b",
+        "tokenizer.json": "79e3e522635f3171300913bb421464a87de6222182a0570b9b2ccba2a964b2b4",
+        "tokenizer_config.json": "24e8a6dc2547164b7002e3125f10b415105644fcf02bf9ad8b674c87b1eaaed6"
+      }
+    }
+  },
+  "cpu_quota": "1800000 100000",
+  "cpu_set": "13-18,22-24,41-46,50-52",
+  "ram_bytes": 77309411328,
+  "ecc_mode": {
+    "0": "enabled",
+    "1": "disabled",
+    "2": "disabled"
+  }
+}

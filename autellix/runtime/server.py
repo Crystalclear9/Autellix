@@ -34,7 +34,8 @@ def create_app(engine):
         if engine.closed or len(engine.failed) == len(engine.replicas):
             raise HTTPException(503, "no healthy inference replicas")
         return {"status": "ok", "backend": [r.backend for r in engine.replicas],
-                "policy": engine.policy.policy, "loads": list(engine.loads)}
+                "policy": engine.policy.policy, "loads": list(engine.loads),
+                "device_groups": [r.device for r in engine.replicas]}
 
     @app.get("/v1/models")
     async def models():
@@ -204,8 +205,9 @@ def main(argv=None):
     parser.add_argument("--backend", choices=("vllm", "sglang"), default="vllm")
     parser.add_argument("--model", required=True)
     parser.add_argument("--devices", default="0", help="comma separated GPU IDs, one replica per entry")
-    parser.add_argument("--device-groups", help="semicolon-separated TP replica groups, e.g. 0,1;2,3")
+    parser.add_argument("--device-groups", help="semicolon-separated TP/PP replica groups, e.g. 0,1,2")
     parser.add_argument("--policy", choices=("fcfs", "mlfq", "plas", "atlas"), default="atlas")
+    parser.add_argument("--routing", choices=("program", "least-used", "round-robin"), default="program")
     parser.add_argument("--engine-args", default="{}", help="JSON arguments for the pinned backend")
     parser.add_argument("--state-dir")
     parser.add_argument("--schedule-interval", type=int, default=8)
@@ -221,7 +223,7 @@ def main(argv=None):
                 for d in groups]
     defaults = PolicyConfig()
     boundary_scale = args.quantum_scale if args.boundary_scale is None else args.boundary_scale
-    engine = InferenceEngine(replicas, state_dir=args.state_dir,
+    engine = InferenceEngine(replicas, state_dir=args.state_dir, routing=args.routing,
                              policy=PolicyConfig(policy=args.policy, schedule_interval=args.schedule_interval,
                                                  boundaries=tuple(x * boundary_scale for x in defaults.boundaries),
                                                  quanta=tuple(x * args.quantum_scale for x in defaults.quanta),

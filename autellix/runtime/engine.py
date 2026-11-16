@@ -48,11 +48,13 @@ class ReplicaConfig:
         if self.backend not in {"vllm", "sglang"}:
             raise ValueError("backend must be vllm or sglang")
         devices = [d.strip() for d in self.device.split(",")]
-        tp = self.engine_args.get("tensor_parallel_size", 1)
+        tp_key, pp_key = (("tensor_parallel_size", "pipeline_parallel_size")
+                          if self.backend == "vllm" else ("tp_size", "pp_size"))
+        tp, pp = self.engine_args.get(tp_key, 1), self.engine_args.get(pp_key, 1)
         if not all(devices) or len(set(devices)) != len(devices):
             raise ValueError("replica GPU IDs must be nonempty and unique")
-        if self.backend == "vllm" and len(devices) != tp:
-            raise ValueError("provide exactly tensor_parallel_size GPUs in each replica device group")
+        if len(devices) != tp * pp:
+            raise ValueError("provide exactly TP × PP GPUs in each replica device group")
 
 
 def _worker(index, replica, policy, table_path, trace, commands, events):
@@ -115,13 +117,15 @@ class InferenceEngine:
     """
 
     def __init__(self, replicas: list[ReplicaConfig], *, policy: PolicyConfig | None = None,
-                 state_dir: str | None = None, locality_threshold=2048):
+                 state_dir: str | None = None, locality_threshold=2048, routing="program"):
         if not replicas:
             raise ValueError("at least one replica is required")
         if len({r.model for r in replicas}) != 1:
             raise ValueError("replicas must serve the same model and tokenizer")
         if locality_threshold < 0:
             raise ValueError("locality_threshold must be nonnegative")
+        if routing not in {"program", "least-used", "round-robin"}:
+            raise ValueError("routing must be program, least-used, or round-robin")
         self.replicas = replicas
         self.model = replicas[0].model
         self.policy = policy or PolicyConfig()
@@ -129,6 +133,8 @@ class InferenceEngine:
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self.table = ProgramTable(str(self.state_dir / "programs.sqlite"))
         self.threshold = locality_threshold
+        self.routing = routing
+        self.routing_cursor = 0
         self.lock = threading.RLock()
         self.idle = threading.Condition(self.lock)
         self.sessions = {}
@@ -219,12 +225,7 @@ class InferenceEngine:
             available = [i for i in range(len(self.replicas)) if i not in self.failed]
             if not available:
                 raise RuntimeError("no healthy replicas")
-            index = min(available, key=lambda i: (self.loads[i], i))
-            if len(tokens) > self.threshold:
-                if session["engine"] in available:
-                    index = session["engine"]
-                else:
-                    session["engine"] = index
+            index = self._route(session, len(tokens), available)
             rid = uuid.uuid4().hex
             context = dict(call_id=call_id, thread_id=thread_id or str(threading.get_ident()),
                            request_id=rid, engine_id=index, metadata=metadata or {})
@@ -241,6 +242,19 @@ class InferenceEngine:
                     self.commands[index].put(("cancel", rid, {}))
             future.add_done_callback(on_done)
             return future
+
+    def _route(self, session, input_tokens, available):
+        if self.routing == "round-robin":
+            index = available[self.routing_cursor % len(available)]
+            self.routing_cursor += 1
+            return index
+        index = min(available, key=lambda i: (self.loads[i], i))
+        if self.routing == "program" and input_tokens > self.threshold:
+            if session["engine"] in available:
+                index = session["engine"]
+            else:
+                session["engine"] = index
+        return index
 
     def _resolve(self, rid, event, payload):
         if event == "progress":

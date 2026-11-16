@@ -326,9 +326,9 @@ class RuntimeScheduler:
         call = self.calls[rid]
         return call.queue, call.order
 
-    def begin(self, rids):
+    def begin(self, rids, active_rids=()):
         now = self.clock()
-        selected = set(rids)
+        selected = set(rids) | set(active_rids)
         for call in self.calls.values():
             self._wait_until(call, now)
             call.scheduled = call.rid in selected

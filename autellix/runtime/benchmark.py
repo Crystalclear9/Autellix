@@ -210,6 +210,7 @@ def main(argv=None):
     parser.add_argument("--policies", default="fcfs,mlfq,plas,atlas")
     parser.add_argument("--engine-args", default="{}")
     parser.add_argument("--devices", default="0")
+    parser.add_argument("--routing", choices=("program", "least-used", "round-robin"), default="program")
     parser.add_argument("--device-groups", help="semicolon-separated replica GPU groups, e.g. 0,1;2,3")
     parser.add_argument("--output", default="outputs/real/results.json")
     parser.add_argument("--arrival-rates", help="comma-separated Poisson program arrival rates per second")
@@ -245,13 +246,13 @@ def main(argv=None):
             config = PolicyConfig(policy="fcfs" if native or native_sglang else policy, schedule_interval=interval,
                                   overprovision=0 if native or native_sglang else args.overprovision,
                                   implementation=args.implementation)
-            with InferenceEngine(replicas, policy=config) as engine:
+            with InferenceEngine(replicas, policy=config, routing=args.routing) as engine:
                 sid = engine.start_session()
                 engine.submit(sid, prompt="Hello", sampling=dict(max_tokens=2, temperature=0)).result(120)
                 engine.end_session(sid)
                 record = run_workload(engine, trace)
                 record.update(policy=policy, arrival_rate=rate, seed=args.seed,
-                              engine_args=engine_args, schedule_interval=interval,
+                              engine_args=engine_args, schedule_interval=interval, routing=args.routing,
                               overprovision=config.overprovision,
                               implementation=config.implementation,
                               workload_sha256=hashlib.sha256(json.dumps(trace, sort_keys=True).encode()).hexdigest())

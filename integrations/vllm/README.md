@@ -35,6 +35,6 @@
 | `vllm-opt` | 前缀缓存和分块 prefill |
 | `vllm-opt-multistep` | 前缀缓存和原生多步执行 |
 
-vLLM 0.6.1 不允许同时开启分块 prefill 与原生多步执行，因此后两者分开提供，不声称等于论文中的组合优化基准。`--native-opt-steps` 配置原生多步长度。
+vLLM 0.6.1 的分块 prefill 与原生多步执行使用两个独立配置，分别测试。`--native-opt-steps` 配置原生多步长度。
 
 `autellix_adapter.py` 保留旧元数据接口，其 `create_backend()` 可构造真实后端。回归测试包括抢占前后贪心结果一致、程序历史继承和无效输入隔离；双副本及张量并行测试需显式启用，见[开发与验证](../../docs/development.md)。

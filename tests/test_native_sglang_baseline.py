@@ -15,8 +15,9 @@ class NativeBaselineTests(unittest.TestCase):
         with patch.dict(sys.modules, {module.__name__: module}), \
              patch("integrations.sglang.legacy_gpu.install_native_ops") as kernels, \
              patch("integrations.sglang.scheduler.install") as hooks:
-            self.assertEqual(run_native_scheduler_process(1, token=2), "native-result")
-        kernels.assert_called_once_with(prefix_attention=True)
+            self.assertEqual(run_native_scheduler_process(1, token=2, attention_score_elements=2**24),
+                             "native-result")
+        kernels.assert_called_once_with(prefix_attention=True, attention_score_elements=2**24)
         hooks.assert_not_called()
         module.run_scheduler_process.assert_called_once_with(1, token=2)
 

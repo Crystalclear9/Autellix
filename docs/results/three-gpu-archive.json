@@ -1,0 +1,12 @@
+{
+  "server_path": "/mnt/masfiles/runs/autellix/three-gpu-results-20261116.tar.gz",
+  "sha256": "8bbc832e67821ef503ef0f7a9005f7ae708cb7d3567707f00d193fb88a15a81f",
+  "bytes": 10605137,
+  "files_verified": 71,
+  "completed_trials": 6,
+  "workloads": {
+    "/mnt/masfiles/runs/autellix/design-review/sharegpt-whole128.json": "inputs/sharegpt-whole128.json",
+    "/mnt/masfiles/runs/autellix/three-gpu/sharegpt-qwen.json": "inputs/sharegpt-qwen.json"
+  },
+  "rebuilt_summary_matches": true
+}

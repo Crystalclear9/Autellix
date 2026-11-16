@@ -5,7 +5,7 @@ Only dense text models using the standard RMSNorm/rotary/activation ops are targ
 """
 
 
-def install_native_ops(prefix_attention=True):
+def install_native_ops(prefix_attention=True, attention_score_elements=2**26):
     import ast
     import inspect
     import logging
@@ -42,17 +42,47 @@ def install_native_ops(prefix_attention=True):
     ModelRunner.load_model = namespace[original.__name__]
     if prefix_attention:
         from sglang.srt.layers.attention.torch_native_backend import TorchNativeAttnBackend
-        from .attention import prefix_attention as attend_suffix
-        TorchNativeAttnBackend._run_sdpa_forward_extend = attend_suffix
+        from . import attention
+        attention.MAX_SCORE_ELEMENTS = attention_score_elements
+        TorchNativeAttnBackend._run_sdpa_forward_extend = attention.prefix_attention
+    install_pipeline_embeddings()
     logging.getLogger(__name__).warning(
         "Autellix legacy GPU mode: native PyTorch operations; "
         "optimized SGLang GPU kernels are bypassed for dense text models."
     )
 
 
-def run_native_scheduler_process(*args, prefix_attention=True, **kwargs):
+def install_pipeline_embeddings():
+    """Load tied Llama output embeddings on the pipeline's last stage."""
+    from sglang.srt.models.llama import LlamaForCausalLM, ParallelLMHead
+    from sglang.srt.model_loader.weight_utils import default_weight_loader
+
+    original_init = LlamaForCausalLM.__init__
+    original_load = LlamaForCausalLM.load_weights
+
+    def init(self, config, quant_config=None, prefix=""):
+        original_init(self, config, quant_config, prefix)
+        self._autellix_tied_pp_head = (self.pp_group.world_size > 1
+                                      and self.pp_group.is_last_rank and config.tie_word_embeddings)
+        if self._autellix_tied_pp_head:
+            self.lm_head = ParallelLMHead(config.vocab_size, config.hidden_size,
+                                          quant_config=quant_config, prefix="lm_head")
+
+    def load(self, weights):
+        def with_tied_head():
+            for name, weight in weights:
+                if self._autellix_tied_pp_head and name == "model.embed_tokens.weight":
+                    parameter = self.lm_head.weight
+                    getattr(parameter, "weight_loader", default_weight_loader)(parameter, weight)
+                yield name, weight
+        return original_load(self, with_tied_head())
+
+    LlamaForCausalLM.__init__, LlamaForCausalLM.load_weights = init, load
+
+
+def run_native_scheduler_process(*args, prefix_attention=True, attention_score_elements=2**26, **kwargs):
     """P40 kernels only; leave SGLang's scheduling and KV management untouched."""
-    install_native_ops(prefix_attention=prefix_attention)
+    install_native_ops(prefix_attention=prefix_attention, attention_score_elements=attention_score_elements)
     from importlib import import_module
     module = import_module("sglang.srt.managers.scheduler")
     from .profiling import install
