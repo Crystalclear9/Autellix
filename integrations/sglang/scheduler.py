@@ -116,7 +116,7 @@ def install(cls, options):
             self.waiting_queue.extend(held)
             # Native admission has acquired its own locks for accepted requests.
             # Others retain their host backup and must remain evictable on retry.
-            for node in reversed(restored_nodes):
+            for _, node in reversed(restored_nodes):
                 self.tree_cache.dec_lock_ref(node)
 
     def prefill_plan(self, restored_nodes):
@@ -220,8 +220,11 @@ def install(cls, options):
             if self._autellix_host is not None and req.rid in self._autellix_host.saved:
                 restored = self._autellix_host.restore(req.rid)
                 if not restored and self._autellix_reserve:
-                    inactive = (self._autellix_window.reserve & self._autellix_reserve.keys()
-                                if self._autellix_window is not None else self._autellix_reserve.keys())
+                    if self._autellix_window is not None:
+                        order = {rid: i for i, rid in enumerate(self._autellix_window.cohort)}
+                        inactive = [rid for rid in self._autellix_reserve if order[rid] > order[req.rid]]
+                    else:
+                        inactive = list(self._autellix_reserve)
                     release_reserves(self, inactive)
                     if self._autellix_window is not None:
                         self._autellix_window.drop_reserve()
@@ -235,7 +238,7 @@ def install(cls, options):
                     if len(matched.device_indices) != len(tokens):
                         raise RuntimeError("restored KV prefix is incomplete before admission")
                     self.tree_cache.inc_lock_ref(matched.last_device_node)
-                    restored_nodes.append(matched.last_device_node)
+                    restored_nodes.append((req.rid, matched.last_device_node))
                     ctl.emit("swap_in", rid=req.rid)
                 else:
                     from .pressure import other_pipeline_requests
@@ -246,13 +249,26 @@ def install(cls, options):
                     # restoration. A successfully prepared prefix can still run.
                     blocked.update(r.rid for r in ready[ready_index:])
                     break
+            elif self._autellix_host is not None:
+                # A new call can already have a long cached prefix. Preserve it
+                # while lower-priority host copies are restored below.
+                req.init_next_round_input(self.tree_cache)
+                self.tree_cache.inc_lock_ref(req.last_node)
+                restored_nodes.append((req.rid, req.last_node))
             # Keep a promoted reserve pinned until native admission acquires
             # its own prefix lock; restoring another request must not evict it.
         held = [r for r in self.waiting_queue if (selected is not None and r.rid not in selected) or r.rid in blocked]
         self.waiting_queue = [r for r in self.waiting_queue if r not in held]
+        def release_prepared(rid):
+            for entry in restored_nodes[:]:
+                if entry[0] == rid:
+                    self.tree_cache.dec_lock_ref(entry[1])
+                    restored_nodes.remove(entry)
         def hold_released_reserves():
             if self._autellix_paper and self._autellix_window is not None:
                 released = [r for r in self.waiting_queue if r.rid not in self._autellix_window.cohort]
+                for req in released:
+                    release_prepared(req.rid)
                 held.extend(released)
                 self.waiting_queue = [r for r in self.waiting_queue if r not in released]
         try:
@@ -271,6 +287,16 @@ def install(cls, options):
                 if self._autellix_window is not None:
                     self._autellix_window.drop_reserve()
                 hold_released_reserves()
+                self.running_batch.batch_is_full = False
+                result = original_prefill(self)
+            # Restored lower prefixes must not occupy space needed for a new
+            # higher call's uncached tokens. Release the lower suffix and let
+            # native admission evict it, keeping its host backup for later.
+            while result is None and slots and len(self.waiting_queue) > 1 and restored_nodes:
+                victim = self.waiting_queue.pop()
+                held.append(victim)
+                release_prepared(victim.rid)
+                ctl.emit("defer_prefill", rid=victim.rid, reason="higher_prefill_capacity")
                 self.running_batch.batch_is_full = False
                 result = original_prefill(self)
         finally:

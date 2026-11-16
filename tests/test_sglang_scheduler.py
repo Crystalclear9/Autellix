@@ -9,6 +9,111 @@ from integrations.sglang.scheduler import encode_request, install
 
 
 class CompletedDecodeTests(unittest.TestCase):
+    def test_promoted_lower_reserve_yields_to_highest_restore(self):
+        with tempfile.TemporaryDirectory() as directory:
+            locks = {"lower"}
+            class Native:
+                def __init__(self):
+                    self.policy = SimpleNamespace()
+                    self.server_args = SimpleNamespace(max_running_requests=2)
+                    self.waiting_queue = []
+                _add_request_to_queue = Mock()
+                _extend_requests_to_queue = Mock()
+                run_batch = Mock()
+                process_batch_result = Mock()
+                abort_request = Mock()
+                check_memory = Mock()
+                def get_new_batch_prefill(self):
+                    result = SimpleNamespace(reqs=list(self.waiting_queue))
+                    self.waiting_queue = []
+                    return result
+            with patch.dict("sys.modules", {"torch": Mock()}):
+                install(Native, {"table_path": str(Path(directory, "state.sqlite")), "config": {}, "capacity": 2})
+            scheduler = Native()
+            try:
+                scheduler.autellix.table.open("p")
+                for rid in ("higher", "lower"):
+                    scheduler.autellix.admit(rid, "p")
+                scheduler.running_batch = SimpleNamespace(reqs=[], filter_batch=lambda: None)
+                scheduler.waiting_queue = [SimpleNamespace(rid="higher"),
+                    SimpleNamespace(rid="lower", _autellix_reserved_tokens=["lower"])]
+                scheduler._autellix_reserve["lower"] = "lower"
+                saved = {"higher": (["higher"], None)}
+                scheduler._autellix_host = SimpleNamespace(saved=saved,
+                    save=lambda rid, tokens, indices: saved.update({rid: (tokens, None)}),
+                    restore=lambda rid: rid == "higher" and "lower" not in locks,
+                    discard=lambda rid: saved.pop(rid))
+                scheduler.tree_cache = SimpleNamespace(
+                    match_prefix=lambda tokens: SimpleNamespace(device_indices=tokens, last_device_node=tokens[0]),
+                    inc_lock_ref=locks.add, dec_lock_ref=locks.remove)
+                result = scheduler.get_new_batch_prefill()
+                self.assertEqual([r.rid for r in result.reqs], ["higher"])
+                self.assertEqual(scheduler._autellix_window.cohort, ["higher"])
+                self.assertEqual(scheduler._autellix_reserve, {})
+                self.assertEqual(set(saved), {"lower"})
+                self.assertEqual(locks, set())
+            finally:
+                scheduler.autellix.table.close()
+
+    def test_lower_restoration_cannot_block_new_higher_prefill(self):
+        for cached in (0, 3):
+            with self.subTest(cached=cached), tempfile.TemporaryDirectory() as directory:
+                locks, resident, attempts = set(), {"higher"}, []
+                lengths = {"higher": cached, "lower": 5}
+                class Native:
+                    def __init__(self):
+                        self.policy = SimpleNamespace()
+                        self.server_args = SimpleNamespace(max_running_requests=2)
+                        self.waiting_queue = []
+                    _add_request_to_queue = Mock()
+                    _extend_requests_to_queue = Mock()
+                    run_batch = Mock()
+                    process_batch_result = Mock()
+                    abort_request = Mock()
+                    check_memory = Mock()
+                    def get_new_batch_prefill(self):
+                        attempts.append([r.rid for r in self.waiting_queue])
+                        self.assert_prefix = "higher" in resident and "higher" in locks
+                        if not self.assert_prefix:
+                            raise AssertionError("new higher call lost its cached prefix")
+                        available = 10 - sum(lengths[r] for r in locks)
+                        if 8 - cached >= available:
+                            return None
+                        result = SimpleNamespace(reqs=list(self.waiting_queue))
+                        self.waiting_queue = []
+                        return result
+                with patch.dict("sys.modules", {"torch": Mock()}):
+                    install(Native, {"table_path": str(Path(directory, "state.sqlite")),
+                                     "config": {"overprovision": 0}, "capacity": 2})
+                scheduler = Native()
+                try:
+                    scheduler.autellix.table.open("p")
+                    for rid in ("higher", "lower"):
+                        scheduler.autellix.admit(rid, "p")
+                    scheduler.running_batch = SimpleNamespace(reqs=[], filter_batch=lambda: None)
+                    scheduler.waiting_queue = [SimpleNamespace(rid="higher", last_node="higher",
+                        init_next_round_input=lambda tree: None), SimpleNamespace(rid="lower")]
+                    saved = {"lower": (["lower"]*5, None)}
+                    def restore(rid):
+                        if "higher" not in locks:
+                            resident.discard("higher")
+                        resident.add(rid)
+                        return True
+                    scheduler._autellix_host = SimpleNamespace(saved=saved, restore=restore,
+                                                               discard=lambda rid: saved.pop(rid, None))
+                    scheduler.tree_cache = SimpleNamespace(
+                        match_prefix=lambda tokens: SimpleNamespace(device_indices=tokens, last_device_node=tokens[0]),
+                        inc_lock_ref=locks.add, dec_lock_ref=locks.remove)
+                    result = scheduler.get_new_batch_prefill()
+                    self.assertEqual([r.rid for r in result.reqs], ["higher"])
+                    self.assertEqual(attempts, [["higher", "lower"], ["higher"]])
+                    self.assertEqual([r.rid for r in scheduler.waiting_queue], ["lower"])
+                    self.assertEqual(scheduler._autellix_window.cohort, ["higher"])
+                    self.assertEqual(set(saved), {"lower"})
+                    self.assertEqual(locks, set())
+                finally:
+                    scheduler.autellix.table.close()
+
     def test_selected_decode_stays_resident_when_higher_prefill_fits(self):
         with tempfile.TemporaryDirectory() as directory:
             class Native:
