@@ -42,6 +42,10 @@ P40 路径同时修复了固定版本 Llama 模型在 PP 下的 tied embedding �
 
 抢占保留输出 token，将已计算 KV 打包到锁页 CPU 内存后释放 GPU 槽位。`--engine-args` 中的 `autellix_swap_space` 控制主机 KV 预算，单位 GiB，默认 1。预算不足会明确报错。
 
+换入、换出按层和 token 分块，每块最多 16 MiB；每块传输完成即释放临时 GPU
+张量。长对话的整段 KV 保存在锁页 CPU 内存，GPU 无需额外容纳所有层的副本。
+`scripts/check_host_swap_gpu.py` 验证大于 2 GiB 的 KV 往返及临时显存峰值。
+
 恢复时锁住已有共享前缀，仅分配和传输缺失后缀。恢复成功的前缀会保持锁定到原生接纳取得自己的锁，避免后续恢复逐出前面的请求。接纳失败时释放临时锁，并保留 CPU 副本供重试。
 
 预备请求离开窗口或因显存压力被释放时，先保存 CPU 副本再解锁。备份失败保留原有 GPU 锁；替换主机备份失败也保留旧副本。成功接纳或取消后回收主机副本。
@@ -68,7 +72,7 @@ Graph、自定义 all-reduce 和 Dynamo 编译。调度子进程内将标准 RMS
 
 持久盘部署示例：`bash scripts/serve_p40.sh`。通过 `AUTELLIX_PYTHON`、
 `AUTELLIX_MODEL`、`AUTELLIX_DEVICES`、`AUTELLIX_PORT`、`AUTELLIX_ENGINE_ARGS` 覆盖配置；SQLite
-状态默认保存在新建的本地 `/tmp/autellix-p40-XXXXXX` 目录，可通过
+状态默认保存在统一入口 `/mnt/masfiles/autellix/tmp/` 下的新建目录，可通过
 `AUTELLIX_STATE_DIR` 显式指定；每个服务使用独立的本地状态目录。
 GPU 回归使用 `AUTELLIX_TEST_LEGACY_GPU=1`；仍需设置后端和模型环境变量。
 

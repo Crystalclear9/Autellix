@@ -1,0 +1,213 @@
+"""Collect real LATS calls with a local LLM and HotpotQA's supplied documents."""
+import argparse
+import hashlib
+import importlib.util
+import json
+import logging
+import random
+import re
+import shutil
+import string
+import sys
+import time
+import types
+from pathlib import Path
+
+REVISION = "853d81614607dd27433faf17c7b0a7d660f95d22"
+
+
+def normalize(text):
+    text = text.lower().translate(str.maketrans("", "", string.punctuation))
+    return " ".join(re.sub(r"\b(a|an|the)\b", " ", text).split())
+
+
+class DocumentEnv:
+    """Search/lookup/finish over a question's unmodified HotpotQA documents."""
+    def __init__(self, rows):
+        self.rows = rows
+
+    def reset(self, idx):
+        self.row = self.rows[idx]
+        self.pages = dict(zip(self.row["context"]["title"], self.row["context"]["sentences"]))
+        self.page, self.lookup_key, self.lookup_index = [], None, 0
+        return "Question: " + self.row["question"]
+
+    def step(self, action):
+        kind, _, argument = action.partition("[")
+        argument = argument.rstrip("]")
+        if kind == "finish":
+            em = float(normalize(argument) == normalize(self.row["answer"]))
+            return "Episode finished.", em, True, {"em": em, "answer": argument}
+        if kind == "search":
+            exact = next((t for t in self.pages if normalize(t) == normalize(argument)), None)
+            if exact is None:
+                matches = sorted(self.pages, key=lambda t: -len(set(normalize(t).split()) &
+                                                                set(normalize(argument).split())))[:5]
+                return "Could not find that page. Similar titles: " + str(matches), 0, False, {}
+            self.page, self.lookup_key, self.lookup_index = self.pages[exact], None, 0
+            return " ".join(self.page[:5]), 0, False, {}
+        if kind == "lookup":
+            if self.lookup_key != argument:
+                self.lookup_key, self.lookup_index = argument, 0
+            matches = [s for s in self.page if argument.lower() in s.lower()]
+            index = self.lookup_index
+            self.lookup_index += 1
+            result = f"(Result {index+1}/{len(matches)}) {matches[index]}" if index < len(matches) else "No more results."
+            return result, 0, False, {}
+        return "Invalid action. Use Search[title], Lookup[keyword], or Finish[answer].", 0, False, {}
+
+
+class SearchBudget(Exception):
+    pass
+
+
+class SearchExhausted(Exception):
+    pass
+
+
+class Recorder:
+    def __init__(self, engine, tokenizer, max_calls):
+        self.engine, self.tokenizer, self.max_calls = engine, tokenizer, max_calls
+
+    def begin(self):
+        self.session = self.engine.start_session()
+        self.calls, self.parents = [], []
+        self.last_finished = time.monotonic()
+
+    def gpt(self, prompt, model=None, temperature=1., max_tokens=100, n=1, stop=None):
+        if len(self.calls) + n > self.max_calls:
+            raise SearchBudget()
+        ids = self.tokenizer.apply_chat_template([dict(role="user", content=prompt)],
+                                                  tokenize=True, add_generation_prompt=True)
+        think_time = time.monotonic() - self.last_finished
+        group, futures = [], []
+        for _ in range(n):
+            cid = str(len(self.calls) + len(group))
+            sampling = dict(temperature=temperature, max_tokens=max_tokens)
+            if stop:
+                sampling["stop"] = stop
+            futures.append(self.engine.submit(self.session, input_ids=ids, call_id=cid, sampling=sampling))
+            group.append(dict(call_id=cid, prompt=prompt, input_ids=ids, input_tokens=len(ids),
+                              parents=list(self.parents), think_time=think_time, append_parent_outputs=False))
+        outputs = []
+        for call, future in zip(group, futures):
+            result = future.result(1800)
+            count = result["completion_tokens"]
+            if count == 0:
+                raise RuntimeError("LATS collection returned an empty token sequence")
+            call.update(max_tokens=count, reference_output_tokens=count,
+                        reference_output=result["text"], sampling={"ignore_eos": True})
+            outputs.append(result["text"])
+        self.calls.extend(group)
+        self.parents = [c["call_id"] for c in group]
+        print(f"CAPTURE calls={len(self.calls)} group_outputs={len(outputs)}", flush=True)
+        self.last_finished = time.monotonic()
+        return outputs
+
+
+def load_official(source, recorder, env, tokenizer):
+    sys.path.insert(0, str(source))
+    models = types.ModuleType("models")
+    models.gpt = recorder.gpt
+    sys.modules["models"] = models
+    wiki = types.ModuleType("wikienv")
+    wiki.WikiEnv = lambda: env
+    sys.modules["wikienv"] = wiki
+    wrappers = types.ModuleType("wrappers")
+    wrappers.HotPotQAWrapper = lambda instance, **kwargs: instance
+    wrappers.LoggingWrapper = lambda instance: instance
+    sys.modules["wrappers"] = wrappers
+    # Keep the original prompts and tree search. Use the serving tokenizer for
+    # prompt-length selection instead of downloading an unrelated GPT-2 model.
+    spec = importlib.util.spec_from_file_location("hotpotqa", source / "hotpotqa.py")
+    task_module = importlib.util.module_from_spec(spec)
+    task_module.__dict__["_serving_tokenizer"] = tokenizer
+    text = (source / "hotpotqa.py").read_text().replace(
+        'GPT2Tokenizer.from_pretrained("gpt2")', "_serving_tokenizer")
+    exec(compile(text, str(source / "hotpotqa.py"), "exec"), task_module.__dict__)
+    import lats
+    original_select = lats.select_node
+    def select_node(node):
+        selected = original_select(node)
+        if selected is None:
+            raise SearchExhausted()
+        return selected
+    lats.select_node = select_node
+    return lats, task_module.HotPotQATask
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--source", required=True)
+    p.add_argument("--data", required=True)
+    p.add_argument("--model", required=True)
+    p.add_argument("--device", default="2")
+    p.add_argument("--output", required=True)
+    p.add_argument("--programs", type=int, default=6)
+    p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--max-calls", type=int, default=400)
+    args = p.parse_args()
+    import pyarrow.parquet as pq
+    from transformers import AutoTokenizer
+    from autellix.runtime import InferenceEngine, ReplicaConfig, PolicyConfig
+    rows = pq.read_table(args.data).to_pylist()
+    indices = random.Random(args.seed).sample(range(len(rows)), args.programs)
+    tokenizer = AutoTokenizer.from_pretrained(args.model, local_files_only=True)
+    source, out = Path(args.source).resolve(), Path(args.output)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    programs, outcomes = [], []
+    options = dict(autellix_legacy_gpu=True, autellix_native_baseline=True, dtype="float16",
+                   context_length=32768, max_running_requests=4, max_total_tokens=32768,
+                   max_prefill_tokens=32768, mem_fraction_static=.9, random_seed=args.seed)
+    with InferenceEngine([ReplicaConfig("sglang", args.model, args.device, options)],
+                         policy=PolicyConfig(policy="fcfs")) as engine:
+        recorder = Recorder(engine, tokenizer, args.max_calls)
+        lats, task_class = load_official(source, recorder, DocumentEnv(rows), tokenizer)
+        search_log = engine.state_dir / "lats-search.log"
+        logging.basicConfig(filename=search_log, level=logging.INFO, force=True,
+                            format="%(asctime)s - %(levelname)s - %(message)s")
+        config = types.SimpleNamespace(backend="local-llama", temperature=1., n_generate_sample=5,
+                                       n_evaluate_sample=1, prompt_sample="cot", log=str(search_log))
+        for index in indices:
+            random.seed(args.seed + index)
+            recorder.begin()
+            lats.gpt = recorder.gpt
+            status, reward = "completed", None
+            try:
+                result = lats.lats_search(config, task_class(), index, iterations=30, to_print=False)
+                reward = result[3]
+            except SearchBudget:
+                status = f"{args.max_calls}-call search budget"
+            except SearchExhausted:
+                status = "tree exhausted"
+            finally:
+                engine.end_session(recorder.session)
+            item = dict(program_id="hotpot-" + rows[index]["id"], dataset="lats", calls=recorder.calls)
+            programs.append(item)
+            outcomes.append(dict(id=item["program_id"], index=index, status=status, reward=reward,
+                                 calls=len(recorder.calls), output_tokens=sum(c["max_tokens"] for c in recorder.calls)))
+            out.write_text(json.dumps(programs, ensure_ascii=False, indent=2))
+            for handler in logging.getLogger().handlers:
+                handler.flush()
+            shutil.copy2(search_log, out.with_suffix(".search.log"))
+            print(json.dumps(outcomes[-1]), flush=True)
+            manifest = dict(source="https://github.com/andyz245/LanguageAgentTreeSearch", revision=REVISION,
+                            model=args.model, seed=args.seed, indices=indices, outcomes=outcomes,
+                            search=dict(iterations=30, expansion_width=5, evaluation_samples=1,
+                                        temperature=1., max_output_tokens=100, max_calls=args.max_calls),
+                            environment="HotpotQA supplied distractor documents; local Search/Lookup/Finish",
+                            adaptations=["local Llama replaces hosted GPT",
+                                         "serving tokenizer selects original long/short prompt templates",
+                                         "Search/Lookup use the question's supplied documents",
+                                         "exhausted tree terminates instead of repeatedly selecting None"],
+                            source_sha256={f.name: hashlib.sha256(f.read_bytes()).hexdigest()
+                                           for f in source.glob("*.py")},
+                            data_sha256={f.name: hashlib.sha256(f.read_bytes()).hexdigest() for f in
+                                         (sorted(Path(args.data).glob("*.parquet")) if Path(args.data).is_dir() else [Path(args.data)])},
+                            replay_sha256=hashlib.sha256(out.read_bytes()).hexdigest(),
+                            protocol="Actual local-model tree search capture; each n-sample group runs concurrently; fixed prompts, generated lengths and group barriers in replay.")
+            out.with_suffix(".manifest.json").write_text(json.dumps(manifest, indent=2))
+
+
+if __name__ == "__main__":
+    main()

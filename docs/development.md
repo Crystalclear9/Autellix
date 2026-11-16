@@ -25,7 +25,7 @@ SGLang 将后端变量改为 `sglang`。可选项：`AUTELLIX_TEST_REPLICAS=1` �
 三张 P40 的流水线回归：
 
 ```bash
-AUTELLIX_TEST_PP_MODEL=/mnt/masfiles/models/SmolLM2-135M-Instruct \
+AUTELLIX_TEST_PP_MODEL=/mnt/masfiles/autellix/models/SmolLM2-135M-Instruct \
   python -m unittest discover -s tests -p test_pipeline_gpu.py -v
 ```
 

@@ -32,10 +32,10 @@ GPU 2、ATLAS、SmolLM2-135M-Instruct，监听 `127.0.0.1:8000`，显存约 845 
 
 ## 路径与环境
 
-- 源码：`/mnt/masfiles/code/autellix-20261115`
-- 独立环境：`/mnt/masfiles/env/autellix-sglang-py310`
-- 模型：`/mnt/masfiles/models/SmolLM2-135M-Instruct`
-- 原始日志/JSON：`/mnt/masfiles/runs/autellix/20261115`
+- 源码：`/mnt/masfiles/autellix/code`
+- 独立环境：`/mnt/masfiles/autellix/env/sglang`
+- 模型：`/mnt/masfiles/autellix/models/SmolLM2-135M-Instruct`
+- 原始日志/JSON：`/mnt/masfiles/autellix/runs/20261115`
 - 服务日志/PID：上述目录中的 `server.log` / `server.pid`
 - 当前运行实例 SQLite：`/tmp/autellix-p40`，避开网络持久盘；更新后的启动脚本
   在下次启动默认新建 `/tmp/autellix-p40-XXXXXX`，不影响当前进程
@@ -135,10 +135,10 @@ with InferenceClient("http://127.0.0.1:18000") as client:
 服务停止后，在服务器执行：
 
 ```bash
-cd /mnt/masfiles/code/autellix-20261115
+cd /mnt/masfiles/autellix/code
 AUTELLIX_DEVICES=2 nohup bash scripts/serve_p40.sh \
-  > /mnt/masfiles/runs/autellix/20261115/server.log 2>&1 < /dev/null &
-echo $! > /mnt/masfiles/runs/autellix/20261115/server.pid
+  > /mnt/masfiles/autellix/runs/20261115/server.log 2>&1 < /dev/null &
+echo $! > /mnt/masfiles/autellix/runs/20261115/server.pid
 ```
 
 不要在已有服务运行时重复启动。本轮已增加 Llama-3.1-8B FP16 和长回放；最新运行配置见[实验报告](autellix-paper-audit.md)。

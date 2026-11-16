@@ -330,7 +330,7 @@ python scripts/run_sglang_matrix.py \
 bash scripts/serve_p40_three_gpu.sh
 ```
 
-正式回放结果位于服务器 `/mnt/masfiles/runs/autellix/three-gpu`。
+正式回放结果位于服务器 `/mnt/masfiles/autellix/runs/three-gpu`。
 服务使用新的本地 `/tmp/autellix-pp3-*` 状态目录，模型、代码和实验归档保存在
 `/mnt/masfiles` 持久盘。
 
@@ -345,7 +345,7 @@ ssh -p 46644 -L 8000:127.0.0.1:8000 root@cn-north-b.ssh.damodel.com
 
 六个已完成 trial、原始工作负载、调度 trace、版本清单、测试与显存定位日志保存在：
 
-`/mnt/masfiles/runs/autellix/three-gpu-results-20261116.tar.gz`
+`/mnt/masfiles/autellix/runs/three-gpu-results-20261116.tar.gz`
 
 归档已下载到本地 `outputs/three-gpu/`，逐文件校验通过；大小和 SHA256 见
 [归档记录](results/three-gpu-archive.json)。解压后的 `three-gpu/manifest.json`
@@ -355,7 +355,7 @@ ssh -p 46644 -L 8000:127.0.0.1:8000 root@cn-north-b.ssh.damodel.com
 
 ```bash
 mkdir -p outputs/archived
-tar -xzf /mnt/masfiles/runs/autellix/three-gpu-results-20261116.tar.gz -C outputs/archived
+tar -xzf /mnt/masfiles/autellix/runs/three-gpu-results-20261116.tar.gz -C outputs/archived
 python scripts/summarize_three_gpu.py \
   --input outputs/archived/three-gpu/comparison-32b.json \
   --input outputs/archived/three-gpu/comparison-replicas.json \

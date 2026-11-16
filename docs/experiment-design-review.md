@@ -174,7 +174,7 @@ SmolLM2-135M FP32，12 程序、48 调用、1532 输出 token，B=2、N=8、K=0�
 
 本地和 Linux 各 126 项测试：120 通过、6 项 GPU 条件测试跳过。另在 P40 完成真实生成/抢占/继承、双 GPU 副本路由与取消、KV 往返、FP16/FP32 分块 attention 四项 GPU 检查，以及 K=1 补位检查。三个实验任务均正常退出。
 
-完整参数、P95、文本一致数、到达窗口、排空耗时和队列计数见[机器可读结果](results/design-review.json)。原始日志与结果保存在服务器 `/mnt/masfiles/runs/autellix/design-review`。
+完整参数、P95、文本一致数、到达窗口、排空耗时和队列计数见[机器可读结果](results/design-review.json)。原始日志与结果保存在服务器 `/mnt/masfiles/autellix/runs/design-review`。
 
 
 ## Figure 2 的核对
@@ -202,5 +202,5 @@ FCFS/MLFQ/PLAS 等待总和为 18/19/14，图注为 18/18/12。另检查图中�
 三个并发请求均返回非空生成，巴黎与 2+3 回答正确；完成后 loads=[0]、会话表为空。
 服务配置为交互使用，负载曲线使用前述 B=4/32768 配置。
 
-共完成 20 组 GPU 回放。原始归档为 `/mnt/masfiles/runs/autellix/design-review-results.tar.gz`，
+共完成 20 组 GPU 回放。原始归档为 `/mnt/masfiles/autellix/runs/design-review-results.tar.gz`，
 SHA256 为 `90e78c958622eda6f223644a1205fe3cfb473986644f2040e6fe357417254b95`，本地保存于 `outputs/design-review-results.tar.gz`。

@@ -1,5 +1,5 @@
 {
-  "model": "/mnt/masfiles/models/Meta-Llama-3.1-8B-Instruct",
+  "model": "/mnt/masfiles/autellix/models/Meta-Llama-3.1-8B-Instruct",
   "device": "1",
   "workload": "outputs/sharegpt-whole128.json",
   "rates": [

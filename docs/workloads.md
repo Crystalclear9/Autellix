@@ -96,8 +96,8 @@ ShareGPT 原始文件的 `<对话ID>_<数字>` 后缀是消息偏移。准备脚
 
 ```bash
 python scripts/prepare_sharegpt_replay.py \
-  --source /mnt/masfiles/datasets/autellix-paper-20261115/sharegpt.json \
-  --model /mnt/masfiles/models/Meta-Llama-3.1-8B-Instruct \
+  --source /mnt/masfiles/autellix/datasets/paper/sharegpt.json \
+  --model /mnt/masfiles/autellix/models/Meta-Llama-3.1-8B-Instruct \
   --programs 128 --seed 42 --output outputs/sharegpt-whole128.json
 python scripts/run_sglang_matrix.py --plan examples/p40-sharegpt-plan.json \
   --output outputs/load-curve.json
@@ -114,3 +114,16 @@ token 随程序到达率的变化；`output_tokens_per_second` 包含到达间�
 CPU 合成负载按论文表校准平均调用数和 token 数，用于检查策略与参数。
 对数正态分布的均值使用 `mu=-sigma²/2` 校正；sigma、裁剪阈值和模拟执行成本
 由项目设定。其输出标记为 `measurement=simulation`，真实 GPU 输出为 `real_backend`。
+
+## BFCL、LATS 与混合工作负载
+
+`fetch_paper_sources.py` 固定 BFCL v3、LATS 源码及 HotpotQA 数据版本。
+`collect_bfcl.py` 使用官方 Llama 工具提示和状态式模拟器，运行本地模型的多轮
+工具循环；`collect_lats.py` 执行官方 MCTS，将每组并行采样和后续评价的依赖保存为 DAG。
+两者记录实际提示、生成长度、工具/控制延迟和程序结束原因。
+
+回放使用这些固定输入与长度，输出文本不改变后续工作量。混合采样先等概率选择
+数据集，再在该数据集中选取完整程序。`summarize_paper_suite.py` 汇总配对结果、
+到达窗口内完成量、排空时间和固定延迟目标对应的实测到达率。
+参数与运行结果见[原始工作负载实验](paper-workload-experiment.md)，准备及重跑命令见
+[服务器目录](server-layout.md)。

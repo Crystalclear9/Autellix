@@ -19,6 +19,8 @@
 | [论文核对与 SGLang 对照](autellix-paper-audit.md) | 方法与实验复现差距、原生调度基线、ShareGPT 配对协议 | 评估收益 |
 | [完整对话与负载实验](experiment-design-review.md) | 单卡源码核对、输入修正、策略消融和完整对话负载曲线 | 复现与调参 |
 | [三卡大模型实验](three-gpu-experiment.md) | Qwen3-32B PP=3、跨阶段调度与原生 SGLang 对照 | 多卡部署与评估 |
+| [原始工作负载与 SGLang 对照](paper-workload-experiment.md) | 固定版本 BFCL/LATS、完整 ShareGPT、Mixed、负载曲线和策略消融 | 论文实验复现 |
+| [服务器目录](server-layout.md) | 统一持久化目录、模型/环境迁移、三卡服务与实验入口 | 运行维护 |
 
 后端特有的 KV 所有权和限制见 [vLLM](../integrations/vllm/README.md)、[SGLang](../integrations/sglang/README.md)。GPU 传输测量见 [KV 传输微基准](../cuda/README.md)。
 

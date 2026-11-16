@@ -8,11 +8,24 @@ import tempfile
 from pathlib import Path
 
 
+def relocated(path, layout):
+    path = Path(path)
+    if path.exists():
+        return path
+    mappings = {**layout.get("moves", {}), **layout.get("legacy_tmp", {})}
+    for old, new in sorted(mappings.items(), key=lambda item: -len(item[0])):
+        if str(path) == old or str(path).startswith(old + "/"):
+            return Path(new + str(path)[len(old):])
+    return path
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--run-dir", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--layout-manifest", help="server layout-migration.json for historical paths")
     args = parser.parse_args()
+    layout = json.loads(Path(args.layout_manifest).read_text()) if args.layout_manifest else {}
     run = Path(args.run_dir).resolve()
     destination = Path(args.output).resolve()
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -39,14 +52,14 @@ def main():
         inputs.mkdir()
         workloads = {}
         for name in sorted({row["plan"]["workload"] for row in rows}):
-            source = Path(name)
+            source = relocated(name, layout)
             target = inputs / source.name
             shutil.copy2(source, target)
             workloads[name] = str(target.relative_to(root))
         traces = root / "traces"
         traces.mkdir()
         for name in sorted({row["state_dir"] for row in rows}):
-            source = Path(name)
+            source = relocated(name, layout)
             shutil.copytree(source, traces / source.name)
         manifest = dict(workloads=workloads, files={})
         for path in sorted(root.rglob("*")):

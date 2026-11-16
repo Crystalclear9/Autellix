@@ -156,12 +156,12 @@ overlap、CUDA Graph 与 chunked prefill 关闭。外层客户端、IPC 与会�
 | 1.0 程序/秒 | +42.41% | +53.45% | -20.20% |
 
 K=1 的单组补测：程序响应 +48.19%，吞吐 -16.24%。上述结果使用旧 attention。
-原始结果保存在服务器 `/mnt/masfiles/runs/autellix/paper-20261115/`，
+原始结果保存在服务器 `/mnt/masfiles/autellix/runs/paper-20261115/`，
 本地副本为 `outputs/paper-sglang-20261115/`。
 
 ## 本轮结果与后续修改
 
-本轮结果保存在服务器 `/mnt/masfiles/runs/autellix/audit-rerun/`，本地副本为
+本轮结果保存在服务器 `/mnt/masfiles/autellix/runs/audit-rerun/`，本地副本为
 `outputs/audit-rerun/`。短回放结果如下，延迟变化为正表示更慢，吞吐变化为正表示更快。
 
 | 实验 | 配对数 | 平均程序响应变化 | 程序级秒/token 变化 | 吞吐变化 |
@@ -236,16 +236,16 @@ python scripts/benchmark_prefix_attention.py --output /path/to/attention.json
 启动论文 8B 模型的服务：
 
 ```bash
-cd /mnt/masfiles/code/autellix-20261115
+cd /mnt/masfiles/autellix/code
 AUTELLIX_DEVICES=2 \
-AUTELLIX_MODEL=/mnt/masfiles/models/Meta-Llama-3.1-8B-Instruct \
+AUTELLIX_MODEL=/mnt/masfiles/autellix/models/Meta-Llama-3.1-8B-Instruct \
 AUTELLIX_ENGINE_ARGS='{"autellix_legacy_gpu":true,"dtype":"float16","context_length":4096,"max_running_requests":2,"max_total_tokens":8192,"mem_fraction_static":0.9,"random_seed":0}' \
 bash scripts/serve_p40.sh
 ```
 
 当前常驻服务为 **GPU 2 / Llama-3.1-8B-Instruct / FP16 / ATLAS / N=8 / K=1**，
 PID 为 `22496`，状态目录 `/tmp/autellix-p40-Sk7dM2`，日志为
-`/mnt/masfiles/runs/autellix/audit-rerun/server.log`。
+`/mnt/masfiles/autellix/runs/audit-rerun/server.log`。
 三路并发 HTTP 请求完成并回收会话，法国首都与加法问题分别返回 `Paris` 和 `5`。
 
 服务监听 `127.0.0.1:8000`。本机使用 `ssh -p 46644 -L 18000:127.0.0.1:8000 root@cn-north-b.ssh.damodel.com`
