@@ -160,7 +160,7 @@ def main():
                    context_length=32768, max_running_requests=4, max_total_tokens=32768,
                    max_prefill_tokens=32768, mem_fraction_static=.9, random_seed=args.seed)
     with InferenceEngine([ReplicaConfig("sglang", args.model, args.device, options)],
-                         policy=PolicyConfig(policy="fcfs")) as engine:
+                         policy=PolicyConfig(policy="fcfs", overprovision=0)) as engine:
         recorder = Recorder(engine, tokenizer, args.max_calls)
         lats, task_class = load_official(source, recorder, DocumentEnv(rows), tokenizer)
         search_log = engine.state_dir / "lats-search.log"

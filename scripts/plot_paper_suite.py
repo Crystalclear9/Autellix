@@ -21,12 +21,17 @@ def main():
             path = output / f"{name}.{suffix}"
             fig.savefig(path, dpi=180, facecolor="white")
             if suffix == "svg":
-                path.write_text("\n".join(line.rstrip() for line in path.read_text().splitlines()) + "\n")
+                path.write_text("\n".join(line.rstrip() for line in path.read_text(encoding="utf-8").splitlines()) + "\n", encoding="utf-8")
         plt.close(fig)
 
     fig, axes = plt.subplots(2, 2, figsize=(10, 8), layout="constrained")
     for ax, workload in zip(axes.flat, ("sharegpt", "bfcl", "lats", "mixed")):
         selected = [t for t in result["trials"] if t["workload"] == workload]
+        if not selected:
+            ax.set(title=workload.upper())
+            ax.text(.5, .5, "Pending completed pairs", ha="center", va="center", transform=ax.transAxes)
+            ax.set_axis_off()
+            continue
         for condition in dict.fromkeys(t["condition"] for t in selected):
             rows = sorted((t for t in selected if t["condition"] == condition), key=lambda t: t["rate"])
             x = [t["rate"] for t in rows]

@@ -126,7 +126,7 @@ def main():
     programs, outcomes = [], []
     out.parent.mkdir(parents=True, exist_ok=True)
     with InferenceEngine([ReplicaConfig("sglang", args.model, args.device, options)],
-                         policy=PolicyConfig(policy="fcfs")) as engine:
+                         policy=PolicyConfig(policy="fcfs", overprovision=0)) as engine:
         for task in tasks:
             random.seed(args.seed)
             sid = engine.start_session()
