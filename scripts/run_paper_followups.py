@@ -12,6 +12,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", default="/mnt/masfiles/autellix")
     parser.add_argument("--gpu", type=int, choices=(0, 1, 2), required=True)
+    parser.add_argument("--device", help="physical GPU after a server migration; --gpu identifies the workflow")
     parser.add_argument("--run-dir")
     parser.add_argument("--plans-dir")
     args = parser.parse_args()
@@ -26,6 +27,8 @@ def main():
     os.environ.update(HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1", TORCHDYNAMO_DISABLE="1",
                       OMP_NUM_THREADS="4", TOKENIZERS_PARALLELISM="false", TMPDIR=str(root / "tmp"))
     base = json.loads((plans / f"sharegpt-gpu{gpu}.json").read_text())
+    device = args.device if args.device is not None else str(gpu)
+    base["device"] = device
     base["cases"] = sorted(base["cases"], key=lambda c: c["name"])
 
     def run_plan(name, workload, rates, count, policy="plas", seed=2026, extra_policies=()):
@@ -53,8 +56,8 @@ def main():
         workload = root / "datasets/bfcl-captured64.json"
         with (run / "bfcl-collection.log").open("w") as log:
             result = subprocess.run([sys.executable, "scripts/collect_bfcl.py", "--source", str(root / "datasets/bfcl-v3-source"),
-                                     "--model", base["model"], "--device", str(gpu), "--output", str(workload),
-                                     "--programs", "64"], stdout=log, stderr=subprocess.STDOUT)
+                                     "--model", base["model"], "--device", device, "--output", str(workload),
+                                     "--programs", "64", "--resume"], stdout=log, stderr=subprocess.STDOUT)
         (run / "bfcl-collection.exit").write_text(str(result.returncode))
         result.check_returncode()
         subprocess.run([sys.executable, "scripts/evaluate_bfcl_capture.py", "--source",
@@ -66,7 +69,7 @@ def main():
         with (run / "lats-collection.log").open("w") as log:
             result = subprocess.run([sys.executable, "scripts/collect_lats.py", "--source", str(root / "datasets/lats-source"),
                                      "--data", str(root / "datasets/hotpot-train"), "--model", base["model"],
-                                     "--device", str(gpu), "--output", str(workload), "--programs", "6"],
+                                     "--device", device, "--output", str(workload), "--programs", "6", "--resume"],
                                     stdout=log, stderr=subprocess.STDOUT)
         (run / "lats-collection.exit").write_text(str(result.returncode))
         result.check_returncode()

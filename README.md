@@ -37,7 +37,8 @@ Llama-3.1-8B 高负载下，扩大服务历史区间后，程序响应/输出 to
 三卡大 KV 配对吞吐提高 8.96%、平均程序响应下降 3.02%；BFCL/LATS/Mixed 实验继续执行。
 长上下文 KV 交换和接纳顺序的修复已通过 P40 验证；
 论文专用 CUDA 聚合交换内核仍待实现。服务器文件统一在
-`/mnt/masfiles/autellix/`，目录和复跑入口见[服务器目录](docs/server-layout.md)。
+`autellix/`；新实例入口为 `/root/workspace/autellix/`，连接端口为 47541，
+迁移与续跑见[服务器迁移](docs/server-migration-20261117.md)。目录和复跑入口见[服务器目录](docs/server-layout.md)。
 
 [三卡大模型实验](docs/three-gpu-experiment.md)增加了 SGLang PP=3：Qwen3-32B
 的性能回放按 20/22/22 层分布在全部三张 P40 上，程序调度、GPU 计时和 KV 交换在各阶段同步。

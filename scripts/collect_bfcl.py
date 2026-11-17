@@ -105,6 +105,7 @@ def main():
     parser.add_argument("--programs", type=int, default=16)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--steps-per-turn", type=int, default=21)
+    parser.add_argument("--resume", action="store_true")
     args = parser.parse_args()
     source, out = Path(args.source).resolve(), Path(args.output)
     sys.path.insert(0, str(source))
@@ -125,9 +126,15 @@ def main():
                    max_prefill_tokens=32768, mem_fraction_static=.9, random_seed=args.seed)
     programs, outcomes = [], []
     out.parent.mkdir(parents=True, exist_ok=True)
+    if args.resume and out.exists():
+        programs = json.loads(out.read_text())
+        outcomes = json.loads(out.with_suffix(".manifest.json").read_text())["outcomes"]
+    completed = {p["program_id"] for p in programs}
     with InferenceEngine([ReplicaConfig("sglang", args.model, args.device, options)],
                          policy=PolicyConfig(policy="fcfs", overprovision=0)) as engine:
         for task in tasks:
+            if task["id"] in completed:
+                continue
             random.seed(args.seed)
             sid = engine.start_session()
             functions = copy.deepcopy([f for name in task["involved_classes"] for f in docs[name]])

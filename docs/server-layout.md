@@ -1,5 +1,9 @@
 # 服务器目录
 
+2026-11-17 的新实例使用 `/root/workspace/autellix/` 为统一入口，连接端口为 47541。
+完整迁移与存储映射见[新 P40 服务器迁移](server-migration-20261117.md)。下文记录
+原三卡服务器的组织方式；新实例保留 `/mnt/masfiles/autellix` 链接以解析历史计划。
+
 Autellix 的持久化根目录为 `/mnt/masfiles/autellix/`。
 
 ```text

@@ -146,6 +146,7 @@ def main():
     p.add_argument("--programs", type=int, default=6)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--max-calls", type=int, default=400)
+    p.add_argument("--resume", action="store_true")
     args = p.parse_args()
     import pyarrow.parquet as pq
     from transformers import AutoTokenizer
@@ -156,6 +157,10 @@ def main():
     source, out = Path(args.source).resolve(), Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
     programs, outcomes = [], []
+    if args.resume and out.exists():
+        programs = json.loads(out.read_text())
+        outcomes = json.loads(out.with_suffix(".manifest.json").read_text())["outcomes"]
+    completed = {p["program_id"] for p in programs}
     options = dict(autellix_legacy_gpu=True, autellix_native_baseline=True, dtype="float16",
                    context_length=32768, max_running_requests=4, max_total_tokens=32768,
                    max_prefill_tokens=32768, mem_fraction_static=.9, random_seed=args.seed)
@@ -169,6 +174,8 @@ def main():
         config = types.SimpleNamespace(backend="local-llama", temperature=1., n_generate_sample=5,
                                        n_evaluate_sample=1, prompt_sample="cot", log=str(search_log))
         for index in indices:
+            if "hotpot-" + rows[index]["id"] in completed:
+                continue
             random.seed(args.seed + index)
             recorder.begin()
             lats.gpt = recorder.gpt
