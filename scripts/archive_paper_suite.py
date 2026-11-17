@@ -21,7 +21,7 @@ def main():
             raise ValueError(f"unfinished trial: {name}")
     rows = [row for name in names for row in json.loads((run / (name + ".json")).read_text())]
     output.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="paper-archive-", dir=run.parent) as temporary:
+    with tempfile.TemporaryDirectory(prefix="paper-archive-", dir=server / "tmp") as temporary:
         root = Path(temporary) / "paper-suite"
         root.mkdir()
         for source in run.iterdir():
@@ -65,10 +65,12 @@ def main():
                 shutil.copytree(failure, root / "startup-failures" / name)
         code = root / "source"
         code.mkdir()
-        for folder in ["autellix", "integrations", "scripts", "tests", "requirements"]:
+        for folder in ["autellix", "integrations", "scripts", "tests", "requirements",
+                       "cuda", "examples", "docs"]:
             shutil.copytree(server / "code" / folder, code / folder,
                             ignore=shutil.ignore_patterns("__pycache__"))
-        shutil.copy2(server / "code/pyproject.toml", code / "pyproject.toml")
+        for name in ["pyproject.toml", "README.md", ".gitattributes", ".gitignore"]:
+            shutil.copy2(server / "code" / name, code / name)
         manifest = dict(workloads=workloads, trials=len(rows), files={})
         for path in sorted(root.rglob("*")):
             if path.is_file():
