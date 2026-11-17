@@ -2,7 +2,8 @@
 
 本轮围绕 [Autellix v1 §6](https://arxiv.org/html/2502.13965v1) 的实验方法，
 使用完整程序、Poisson 到达和程序级 token 延迟，比较现有 PLAS/ATLAS 与原生
-SGLang 调度。推理在三张 P40 上执行；每个配对点的两种策略使用同一张物理卡。
+SGLang 调度。ShareGPT 在旧实例的三张 P40 上完成；BFCL、LATS 和 Mixed
+在迁移后的两张 P40 上继续。每个配对点的两种策略使用同一张物理卡。
 
 ## 数据与工作流
 
@@ -48,7 +49,10 @@ ShareGPT 固定参考对话历史；BFCL/LATS 固定实际采集的输入、输�
 - 时间片为 0.64、1.28、2.56、5.12、10.24、20.48、40.96 秒；
   历史分箱边界为 0、20.48、40.96、81.92、163.84、327.68、655.36、∞ 秒。
 - 每组重启引擎并预热；比较输入 trace、逐调用长度、模型、软件版本和资源参数。
-- 三张卡同时承担独立实验。GPU 0 的 ECC 开启，GPU 1/2 关闭，配对时不换卡。
+- 旧实例三张卡同时承担 ShareGPT 独立实验：GPU 0 的 ECC 开启，GPU 1/2 关闭。
+  新实例的两张 P40 均开启 ECC，GPU 0 运行 BFCL，GPU 1 运行 LATS/Mixed，配对时不换卡。
+- BFCL/Mixed 设置 `autellix_mlp_chunk_size=512`，按 token 分块计算稠密 MLP；
+  两种策略使用相同分块参数。LATS 已开始的配对保留原参数。
 
 论文要求各策略使用相同最大 batch size；P40 上主实验固定 B=4，另外进行 B=8
 对照。论文的硬件为 A100，模型还包括 70B 和 180B；本轮复现其 8B 模型系列、
@@ -62,9 +66,9 @@ ShareGPT 固定参考对话历史；BFCL/LATS 固定实际采集的输入、输�
 | ShareGPT 第二种子，seed=2027 | 24 | 0.008 | 0 | native、PLAS |
 | ShareGPT 策略消融，seed=2027 | 8 | 0.016 | 0 | native、PLAS、内部 FCFS、MLFQ |
 | ShareGPT B=8，seed=2027 | 8 | 0.016 | 0 | native、PLAS |
-| BFCL，seed=2026 | 每点 48 | 0.02 / 0.05 / 0.1 | 2 | native、PLAS |
-| LATS，seed=2026 | 6 | 0.004 | 1 | native、ATLAS |
-| Mixed，seed=2026 | 12 | 0.008 | 1 | native、ATLAS |
+| BFCL，seed=2026 | 每点 48 | 0.005 / 0.01 / 0.02 | 新实例 0 | native、PLAS |
+| LATS，seed=2026 | 6 | 0.004 | 新实例 1 | native、ATLAS |
+| Mixed，seed=2026 | 12 | 0.008 | 新实例 1 | native、ATLAS |
 | ShareGPT 三卡共享模型，seed=2026 | 48 | 0.048 | 0、1、2，PP=3 | native、PLAS |
 
 ShareGPT 主曲线每组均为 297 次调用、83,455 个输出 token；三个到达窗口分别
@@ -124,8 +128,23 @@ P40 上 17,408 token、64 个 K/V buffer、共 2.125 GiB 的往返逐块相等�
 300 token 的输入，实际触发换出、恢复和接纳重试，恢复后的生成与连续生成一致。
 失败与中断日志保存在 `paper-suite-prefill-capacity/`。
 
-`run_sglang_matrix.py --resume` 保留同一计划、后端版本和输入 trace 的已完成项。
+`run_sglang_matrix.py --resume` 校验资源、工作负载、后端版本、已完成策略参数
+和输入 trace 后复用已完成项；可调整未运行的到达率与策略参数。
 高负载原生 SGLang 的完整结果保留；受影响的 PLAS 项从头重跑。
+
+BFCL 首次原生回放在约 4.5 小时后遇到 MLP 临时张量显存溢出：激活计算申请
+500 MiB 时，仅剩约 250 MiB。原生模式也会触发这次溢出。新增稠密 MLP token
+分块，保持每个 token 的线性层和激活计算，限制中间张量大小。P40 FP16 检查使用
+16,000 token、4096 hidden、14336 intermediate，512-token 分块将临时峰值从
+1,845,624,832 降到 190,840,832 字节；最大绝对差 0.0078125，通过 FP16 数值比较。
+检查代码为 `scripts/check_mlp_chunks_gpu.py`，结果见
+[MLP 分块检查](results/p40-mlp-chunks-20261117.json)。失败日志与原计划保存在
+`paper-suite/pre-bfcl-mlp-oom/`，BFCL 两种策略均使用分块后从头运行。
+
+BFCL 原计划的最低到达率 0.02/s 已积压：48 个程序在 2922.9 秒内到达，
+到达结束时约 3 个程序完成。后续曲线改为 0.005/0.01/0.02/s；程序、采样种子、
+533 次调用和 27,118 个输出 token 保持配对一致。各点到达窗口分别为
+11,691.5/5,845.8/2,922.9 秒，继续记录到达期间完成量和排空时间。
 
 2026-11-17，ShareGPT 单卡与三卡实验全部完成：16 次策略运行、9 个配对比较。
 BFCL/LATS 首次采集在模型加载前因默认 K=1 与原生模式冲突退出，采集器现已显式

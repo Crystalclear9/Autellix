@@ -27,6 +27,8 @@ def main():
         for source in run.iterdir():
             if source.is_file():
                 shutil.copy2(source, root / source.name)
+            elif source.is_dir() and source.name.startswith("pre-"):
+                shutil.copytree(source, root / source.name)
         inputs = root / "inputs"
         inputs.mkdir()
         workloads = {}

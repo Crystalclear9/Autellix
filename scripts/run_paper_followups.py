@@ -63,7 +63,8 @@ def main():
         subprocess.run([sys.executable, "scripts/evaluate_bfcl_capture.py", "--source",
                         str(root / "datasets/bfcl-v3-source"), "--capture", str(workload),
                         "--output", str(run / "bfcl-capture-quality.json")], check=True)
-        run_plan("bfcl", workload, [.02, .05, .1], 48)
+        base["engine_args"] = dict(base["engine_args"], autellix_mlp_chunk_size=512)
+        run_plan("bfcl", workload, [.005, .01, .02], 48)
     else:
         workload = root / "datasets/lats-captured6.json"
         with (run / "lats-collection.log").open("w") as log:
@@ -84,6 +85,7 @@ def main():
             mixed.extend(json.loads(path.read_text()))
         mixed_path = root / "datasets/mixed-paper.json"
         mixed_path.write_text(json.dumps(mixed, ensure_ascii=False))
+        base["engine_args"] = dict(base["engine_args"], autellix_mlp_chunk_size=512)
         run_plan("mixed", mixed_path, [.008], 12, policy="atlas")
 
 

@@ -5,7 +5,20 @@ Only dense text models using the standard RMSNorm/rotary/activation ops are targ
 """
 
 
-def install_native_ops(prefix_attention=True, attention_score_elements=2**26):
+def token_chunked_forward(forward, chunk_size):
+    """Bound dense MLP intermediates while preserving token-independent work."""
+    def chunked(self, x, *args, **kwargs):
+        if x.shape[0] <= chunk_size:
+            return forward(self, x, *args, **kwargs)
+        import torch
+        output = torch.empty_like(x)
+        for start in range(0, x.shape[0], chunk_size):
+            output[start:start + chunk_size] = forward(self, x[start:start + chunk_size], *args, **kwargs)
+        return output
+    return chunked
+
+
+def install_native_ops(prefix_attention=True, attention_score_elements=2**26, mlp_chunk_size=0):
     import ast
     import inspect
     import logging
@@ -46,6 +59,11 @@ def install_native_ops(prefix_attention=True, attention_score_elements=2**26):
         attention.MAX_SCORE_ELEMENTS = attention_score_elements
         TorchNativeAttnBackend._run_sdpa_forward_extend = attention.prefix_attention
     install_pipeline_embeddings()
+    if mlp_chunk_size:
+        from sglang.srt.models.llama import LlamaMLP
+        from sglang.srt.models.qwen2 import Qwen2MLP
+        for cls in (LlamaMLP, Qwen2MLP):
+            cls.forward = token_chunked_forward(cls.forward, mlp_chunk_size)
     logging.getLogger(__name__).warning(
         "Autellix legacy GPU mode: native PyTorch operations; "
         "optimized SGLang GPU kernels are bypassed for dense text models."
@@ -80,9 +98,11 @@ def install_pipeline_embeddings():
     LlamaForCausalLM.__init__, LlamaForCausalLM.load_weights = init, load
 
 
-def run_native_scheduler_process(*args, prefix_attention=True, attention_score_elements=2**26, **kwargs):
+def run_native_scheduler_process(*args, prefix_attention=True, attention_score_elements=2**26,
+                                 mlp_chunk_size=0, **kwargs):
     """P40 kernels only; leave SGLang's scheduling and KV management untouched."""
-    install_native_ops(prefix_attention=prefix_attention, attention_score_elements=attention_score_elements)
+    install_native_ops(prefix_attention=prefix_attention, attention_score_elements=attention_score_elements,
+                       mlp_chunk_size=mlp_chunk_size)
     from importlib import import_module
     module = import_module("sglang.srt.managers.scheduler")
     from .profiling import install

@@ -20,7 +20,8 @@ def run_scheduler_process(*args, autellix_options, **kwargs):
     if autellix_options.get("legacy_gpu"):
         from .legacy_gpu import install_native_ops
         install_native_ops(prefix_attention=autellix_options.get("prefix_attention", True),
-                           attention_score_elements=autellix_options.get("attention_score_elements", 2**26))
+                           attention_score_elements=autellix_options.get("attention_score_elements", 2**26),
+                           mlp_chunk_size=autellix_options.get("mlp_chunk_size", 0))
     import sglang.srt.managers.scheduler as module
     if autellix_options["config"].get("implementation", "paper") == "paper":
         from sglang.srt.managers import schedule_policy

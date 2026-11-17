@@ -23,6 +23,7 @@ class SGLangBackend:
         legacy_gpu = engine_args.pop("autellix_legacy_gpu", False)
         prefix_attention = engine_args.pop("autellix_prefix_attention", True)
         score_elements = engine_args.pop("autellix_attention_score_elements", 2**26)
+        mlp_chunk_size = engine_args.pop("autellix_mlp_chunk_size", 0)
         retain_running = engine_args.pop("autellix_retain_running", True)
         if legacy_gpu:
             # Explicit compatibility mode: native PyTorch ops, no CUDA JIT.
@@ -46,13 +47,15 @@ class SGLangBackend:
             raise ValueError("autellix_swap_space must be positive GiB")
         options = dict(table_path=table_path, config=asdict(config), trace=trace,
                        host_bytes=host_bytes, legacy_gpu=legacy_gpu, prefix_attention=prefix_attention,
-                       retain_running=retain_running, attention_score_elements=score_elements)
+                       retain_running=retain_running, attention_score_elements=score_elements,
+                       mlp_chunk_size=mlp_chunk_size)
         target = entry.run_scheduler_process
         if self.native:
             if legacy_gpu:
                 from .legacy_gpu import run_native_scheduler_process
                 entry.run_scheduler_process = partial(run_native_scheduler_process, prefix_attention=prefix_attention,
-                                                      attention_score_elements=score_elements)
+                                                      attention_score_elements=score_elements,
+                                                      mlp_chunk_size=mlp_chunk_size)
         else:
             entry.run_scheduler_process = partial(run_scheduler_process, autellix_options=options)
         args = dict(disable_overlap_schedule=True, disable_cuda_graph=True,

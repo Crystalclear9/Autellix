@@ -1,0 +1,15 @@
+{
+  "full": {
+    "temporary_peak_bytes": 1845624832
+  },
+  "chunked": {
+    "temporary_peak_bytes": 190840832
+  },
+  "max_absolute_error": 0.0078125,
+  "tokens": 16000,
+  "hidden_size": 4096,
+  "intermediate_size": 14336,
+  "chunk_size": 512,
+  "gpu": "Tesla P40",
+  "dtype": "torch.float16"
+}

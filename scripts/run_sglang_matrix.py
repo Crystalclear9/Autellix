@@ -16,8 +16,18 @@ from autellix.runtime.benchmark import load_workloads, poisson_trace
 def completed_trials(records, plan, versions):
     completed = {}
     for row in records:
-        if row["plan"] != plan or row["versions"] != versions:
-            raise ValueError("resume requires the same experiment plan and backend versions")
+        if row["versions"] != versions:
+            raise ValueError("resume requires the same backend versions")
+        if row["plan"] != plan:
+            def common(p):
+                return {k: v for k, v in p.items() if k not in {"cases", "rates"}}
+            def case(p):
+                selected = [c for c in p["cases"] if c["name"] == row["condition"]
+                            and row["rate"] in c.get("rates", p["rates"])]
+                return [{k: v for k, v in c.items() if k != "rates"} for c in selected]
+            if (common(row["plan"]) != common(plan) or row["rate"] not in plan.get("rates", [])
+                    or len(case(plan)) != 1 or case(row["plan"]) != case(plan)):
+                raise ValueError("resume requires unchanged resources, workload and completed case settings")
         key = row["condition"], row["rate"], row["repeat"]
         if key in completed:
             raise ValueError(f"duplicate completed trial: {key}")
@@ -29,7 +39,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--plan", required=True)
     parser.add_argument("--output", required=True)
-    parser.add_argument("--resume", action="store_true", help="reuse completed trials from this exact plan")
+    parser.add_argument("--resume", action="store_true", help="reuse completed trials with unchanged inputs and settings")
     args = parser.parse_args()
     plan = json.loads(Path(args.plan).read_text())
     if "layer_partition" in plan:

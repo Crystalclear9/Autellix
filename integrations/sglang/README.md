@@ -73,6 +73,8 @@ Graph、自定义 all-reduce 和 Dynamo 编译。调度子进程内将标准 RMS
 `autellix_prefix_attention=false` 可复测原来的完整 Query 填充实现。
 `autellix_attention_score_elements` 调整前缀 attention 的分块预算，默认 `67108864`；
 原生基线和 Autellix 使用同一实现及参数传递路径。
+`autellix_mlp_chunk_size=512` 对长 prefill 的稠密 Llama/Qwen2 MLP 按 token 分块，
+降低 gate/up/activation 的临时显存；默认 0 保留整批计算。配对组使用同一参数。
 
 持久盘部署示例：`bash scripts/serve_p40.sh`。通过 `AUTELLIX_PYTHON`、
 `AUTELLIX_MODEL`、`AUTELLIX_DEVICES`、`AUTELLIX_PORT`、`AUTELLIX_ENGINE_ARGS` 覆盖配置；SQLite
