@@ -15,7 +15,7 @@ def main():
     p.add_argument("--output", required=True)
     args = p.parse_args()
     server, run, output = Path(args.root), Path(args.run_dir), Path(args.output)
-    names = [f"sharegpt-gpu{i}" for i in range(3)] + ["sharegpt-repeat", "sharegpt-ablation", "sharegpt-batch8", "bfcl", "lats", "mixed", "sharegpt-pp3"]
+    names = [f"sharegpt-gpu{i}" for i in range(3)] + ["sharegpt-repeat", "sharegpt-ablation", "sharegpt-batch8", "bfcl", "lats", "mixed", "sharegpt-pp3", "bfcl-pp2"]
     for name in names + ["bfcl-collection", "lats-collection"]:
         if (run / (name + ".exit")).read_text().strip() != "0":
             raise ValueError(f"unfinished trial: {name}")

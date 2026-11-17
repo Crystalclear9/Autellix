@@ -11,7 +11,29 @@ for name in bfcl lats mixed; do
   while [[ ! -f "$run_dir/$name.exit" ]]; do sleep 30; done
   [[ $(cat "$run_dir/$name.exit") == 0 ]]
 done
-echo 'All agent workload pairs completed; validating two-stage pipeline.'
+echo 'All single-card agent pairs completed; comparing BFCL with shared two-card KV.'
+"$python_bin" - "$run_dir" <<'PY'
+import json
+import os
+from pathlib import Path
+import sys
+
+root = Path(os.environ["AUTELLIX_HOME"])
+plan = json.loads((root / "plans/bfcl-calibrated.json").read_text())
+plan.update(device="0,1", rates=[.02], workload_kind="bfcl-pp2", layer_partition=[16, 16])
+plan["engine_args"].update(pp_size=2, max_running_requests=8, max_total_tokens=196608,
+                           autellix_attention_score_elements=2**24)
+(Path(sys.argv[1]) / "bfcl-pp2-plan.json").write_text(json.dumps(plan, indent=2))
+PY
+set +e
+"$python_bin" -u scripts/run_sglang_matrix.py --plan "$run_dir/bfcl-pp2-plan.json" \
+  --output "$run_dir/bfcl-pp2.json" --resume > "$run_dir/bfcl-pp2.log" 2>&1
+result=$?
+set -e
+echo "$result" > "$run_dir/bfcl-pp2.exit"
+[[ "$result" == 0 ]]
+
+echo 'BFCL two-card pair completed; validating two-stage pipeline.'
 set +e
 AUTELLIX_TEST_PP_MODEL="$AUTELLIX_HOME/models/SmolLM2-135M-Instruct" \
   AUTELLIX_TEST_PP_DEVICES=0,1 "$python_bin" -m unittest discover -s tests \
