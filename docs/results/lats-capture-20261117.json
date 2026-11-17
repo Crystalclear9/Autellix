@@ -1,0 +1,79 @@
+{
+  "source_revision": "853d81614607dd27433faf17c7b0a7d660f95d22",
+  "model": "/mnt/masfiles/autellix/models/Meta-Llama-3.1-8B-Instruct",
+  "capture_sha256": "a3cd40f77bccf28f06788b133d589348ff2874d499f503ff783adeb5b8fa76a9",
+  "search": {
+    "iterations": 30,
+    "expansion_width": 5,
+    "evaluation_samples": 1,
+    "temperature": 1.0,
+    "max_output_tokens": 100,
+    "max_calls": 400
+  },
+  "programs": 6,
+  "calls": 1920,
+  "output_tokens": 145519,
+  "mean_calls": 320,
+  "mean_input_tokens": 2398.7776041666666,
+  "mean_output_tokens": 75.79114583333333,
+  "solved": 0,
+  "statuses": {
+    "completed": 6
+  },
+  "outcomes": [
+    {
+      "id": "hotpot-5a7bb1315542997c3ec97253",
+      "index": 83810,
+      "status": "completed",
+      "reward": 0,
+      "calls": 362,
+      "output_tokens": 29228
+    },
+    {
+      "id": "hotpot-5ae03a3655429942ec259c50",
+      "index": 14592,
+      "status": "completed",
+      "reward": 0,
+      "calls": 323,
+      "output_tokens": 24898
+    },
+    {
+      "id": "hotpot-5ab77e6655429928e1fe385d",
+      "index": 3278,
+      "status": "completed",
+      "reward": 0,
+      "calls": 305,
+      "output_tokens": 21986
+    },
+    {
+      "id": "hotpot-5ab67b7155429954757d32ef",
+      "index": 36048,
+      "status": "completed",
+      "reward": 0,
+      "calls": 302,
+      "output_tokens": 15733
+    },
+    {
+      "id": "hotpot-5a8234c8554299676cceb22a",
+      "index": 32098,
+      "status": "completed",
+      "reward": 0,
+      "calls": 318,
+      "output_tokens": 26741
+    },
+    {
+      "id": "hotpot-5ab7101e5542995eadef0110",
+      "index": 29256,
+      "status": "completed",
+      "reward": 0,
+      "calls": 310,
+      "output_tokens": 26933
+    }
+  ],
+  "adaptations": [
+    "local Llama replaces hosted GPT",
+    "serving tokenizer selects original long/short prompt templates",
+    "Search/Lookup use the question's supplied documents",
+    "exhausted tree terminates instead of repeatedly selecting None"
+  ]
+}

@@ -31,7 +31,8 @@ Finish 按原始答案判断；采集使用本地 Llama，提示长短版本按�
 
 ShareGPT 固定参考对话历史；BFCL/LATS 固定实际采集的输入、输出长度和依赖关系，
 然后分别回放两种调度。后续提示使用固定历史，实际生成文本差异不会改变下一次调用
-的工作量。调度器在程序到达、调用依赖满足时才接收请求。
+的工作量。性能回放使用温度 0，并按采集长度生成；工具任务正确率取实际采集结果。
+调度器在程序到达、调用依赖满足时才接收请求。
 
 数据与代码来源：[ShareGPT](https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered)、
 [BFCL 固定版本](https://github.com/ShishirPatil/gorilla/tree/8bf675cc5f92e99971ba1f6bbb15bcf1d1d2eb1c/berkeley-function-call-leaderboard)、
@@ -214,3 +215,16 @@ PLAS 的逐卡显存峰值为 22895/24411/24343 MiB，合计各卡峰值为 69.9
 checker 的失败详情包含官方 `Directory` 对象，JSON 导出使用该对象的文本表示。
 在服务器和本地独立重跑 checker，64 项判定与失败详情完全一致；模型输入、生成
 结果和工具执行记录保持不变。对应启动日志保存在 `pre-bfcl-checker-export/`。
+
+## LATS 采集与任务结果
+
+HotpotQA 训练集的 6 个固定问题已完成官方 30 轮搜索，产生 1920 次模型调用和
+145519 个输出 token。每程序平均 320 次调用，平均每调用输出 75.79 token，
+完整输入平均 2398.78 token。6 个程序均自然完成搜索，未触达 400 次调用预算。
+逐问题结果和采集哈希见[LATS 结果](results/lats-capture-20261117.json)。
+
+这 6 个问题的答案均未通过原答案匹配。原始搜索找到正确终结节点时会提前返回；
+本轮搜索均执行完整迭代，形成了更长的程序。论文报告的 LATS 平均为 159.7 次
+调用、72.6 个输出 token/调用。本轮使用本地 Llama 和随题文档执行 Search/Lookup，
+保留官方树搜索、提示模板、五样本并发组及组间依赖。调度回放使用这批实际生成
+轨迹，原生 SGLang 与 ATLAS 接收相同的输入、生成长度和依赖关系。
