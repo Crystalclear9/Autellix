@@ -58,6 +58,23 @@ ShareGPT 固定参考对话历史；BFCL/LATS 固定实际采集的输入、输�
 对照。论文的硬件为 A100，模型还包括 70B 和 180B；本轮复现其 8B 模型系列、
 工作负载与程序级测量方法。P40 的时间尺度、KV 预算和后端算子按上述配置固定。
 
+## 当前源码核对
+
+本轮核对全部 124 个 Python/启动脚本，服务器与本地源码 SHA256 全部一致，见
+[源码清单](results/p40-current-source-inventory.json)。本地 148 项回归中 140 项通过、
+8 项按运行条件跳过；服务器 141 项通过、7 项跳过。
+
+| 论文机制 | 当前实现与验证 |
+| --- | --- |
+| PLAS/ATLAS 与程序表 | `autellix/runtime/policy.py` 实现累计服务、在线最长路径标量、FIFO 分箱、时间片降级与等待/服务比提升；调用完成时更新程序历史 |
+| N 步窗口与 K 个预备请求 | `runtime/window.py` 冻结窗口队列，提前完成由已驻留预备请求补位；真实 GPU 抢占、恢复、继承及 K=0/1 接纳检查已通过 |
+| 实际 GPU batch 与 KV | `integrations/sglang/scheduler.py` 控制 SGLang GPU scheduler 的接纳、running batch 和缓存锁；`swap.py` 完成锁页内存换出/恢复，2.125 GiB KV 往返逐项相等 |
+| 跨引擎路由 | `runtime/engine.py` 按 2048-token 阈值分流短请求，长请求保持程序亲和；此前双副本路由、取消和三卡路由对照已完成 |
+| 同一模型跨多卡 | `sglang/pipeline.py` 将首阶段策略输入、GPU 执行时间及 KV 操作传到各阶段；PP=3 实际生成、取消、恢复和逐阶段调度记录一致性已通过 |
+| 原始工作负载 | ShareGPT 完整对话、固定版本 BFCL 工具执行和 LATS 树搜索均已生成真实轨迹；Mixed 等概率采样三个类别；相同输入与长度用于策略配对 |
+| 交换实现差异 | 当前按请求、按层分块使用 PyTorch gather/copy/scatter；论文的跨请求 CUDA 聚合交换内核是下一项实现工作 |
+| 硬件与基线差异 | 本轮使用 P40、8B 模型系列与原生 SGLang；论文还有 A100 上的 70B/180B、vLLM/vLLM-opt/MLFQ 多模型曲线 |
+
 ## 实验矩阵
 
 | 实验 | 程序数 | 到达率（程序/秒） | GPU | 策略 |
