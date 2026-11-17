@@ -130,6 +130,8 @@ def main():
         programs = json.loads(out.read_text())
         outcomes = json.loads(out.with_suffix(".manifest.json").read_text())["outcomes"]
     completed = {p["program_id"] for p in programs}
+    if completed:
+        print(f"RESUME programs={len(completed)}", flush=True)
     with InferenceEngine([ReplicaConfig("sglang", args.model, args.device, options)],
                          policy=PolicyConfig(policy="fcfs", overprovision=0)) as engine:
         for task in tasks:

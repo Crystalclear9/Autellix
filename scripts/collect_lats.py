@@ -161,6 +161,8 @@ def main():
         programs = json.loads(out.read_text())
         outcomes = json.loads(out.with_suffix(".manifest.json").read_text())["outcomes"]
     completed = {p["program_id"] for p in programs}
+    if completed:
+        print(f"RESUME programs={len(completed)}", flush=True)
     options = dict(autellix_legacy_gpu=True, autellix_native_baseline=True, dtype="float16",
                    context_length=32768, max_running_requests=4, max_total_tokens=32768,
                    max_prefill_tokens=32768, mem_fraction_static=.9, random_seed=args.seed)
@@ -169,6 +171,8 @@ def main():
         recorder = Recorder(engine, tokenizer, args.max_calls)
         lats, task_class = load_official(source, recorder, DocumentEnv(rows), tokenizer)
         search_log = engine.state_dir / "lats-search.log"
+        if args.resume and out.with_suffix(".search.log").exists():
+            shutil.copy2(out.with_suffix(".search.log"), search_log)
         logging.basicConfig(filename=search_log, level=logging.INFO, force=True,
                             format="%(asctime)s - %(levelname)s - %(message)s")
         config = types.SimpleNamespace(backend="local-llama", temperature=1., n_generate_sample=5,
