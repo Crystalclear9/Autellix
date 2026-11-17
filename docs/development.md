@@ -29,7 +29,9 @@ AUTELLIX_TEST_PP_MODEL=/mnt/masfiles/autellix/models/SmolLM2-135M-Instruct \
   python -m unittest discover -s tests -p test_pipeline_gpu.py -v
 ```
 
-该测试运行真实 PP=3，强制 KV 换出和恢复，比较中断与连续生成，检查服务历史继承、取消清理以及三个阶段逐条一致的调度记录。
+该测试默认运行真实 PP=3；设置 `AUTELLIX_TEST_PP_DEVICES=0,1` 使用 PP=2。
+测试强制 KV 换出和恢复，比较中断与连续生成，检查服务历史继承、取消清理以及
+所有流水线阶段逐条一致的调度记录。
 
 完整的小模型验证入口会依次运行测试、真实 HTTP 流程和四策略 DAG 工作负载：
 

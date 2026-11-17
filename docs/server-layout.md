@@ -39,8 +39,10 @@ bash scripts/serve_p40_three_gpu.sh
 ```
 
 `scripts/server_env.sh` 统一配置路径、缓存和临时文件位置。可通过 `AUTELLIX_HOME`、
-`AUTELLIX_PYTHON`、`AUTELLIX_MODEL` 覆盖默认设置。三卡服务使用 Qwen3-32B FP16、
-PP=3；实验期间由测试进程使用 GPU，测试完成后恢复服务。
+`AUTELLIX_PYTHON`、`AUTELLIX_MODEL` 覆盖默认设置。原三卡服务使用 Qwen3-32B FP16、PP=3。迁移后实例为两张 P40，
+双卡启动入口为 `bash scripts/serve_p40_two_gpu.sh`，使用已有 Qwen3-14B FP16、
+PP=2、20/20 层、B=8、KV=65536 和 512-token MLP 分块。论文实验期间两张卡
+分别运行配对回放；双卡服务在实验结束后验收。
 
 ## 准备论文工作负载
 
