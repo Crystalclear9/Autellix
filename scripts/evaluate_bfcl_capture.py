@@ -26,7 +26,7 @@ def main():
     answers = {t["id"]: t["ground_truth"] for t in read_jsonl(
         source / "data/possible_answer/BFCL_v3_multi_turn_base.json")}
     outcomes = []
-    for program in json.loads(capture.read_text()):
+    for program in json.loads(capture.read_text(encoding="utf-8")):
         pid = program["program_id"]
         task, reference = tasks[pid], answers[pid]
         turns = [{} for _ in task["question"]]
@@ -48,7 +48,8 @@ def main():
                   programs=len(outcomes), passed=passed, accuracy=passed/len(outcomes),
                   failures_by_type=dict(Counter(row["error_type"] for row in outcomes if not row["valid"])),
                   outcomes=outcomes)
-    Path(args.output).write_text(json.dumps(result, ensure_ascii=False, indent=2))
+    Path(args.output).write_text(json.dumps(result, ensure_ascii=False, indent=2, default=repr),
+                                 encoding="utf-8")
     print(json.dumps({k: v for k, v in result.items() if k != "outcomes"}))
 
 

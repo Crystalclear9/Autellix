@@ -1,0 +1,353 @@
+{
+  "source_revision": "8bf675cc5f92e99971ba1f6bbb15bcf1d1d2eb1c",
+  "model": "/mnt/masfiles/autellix/models/Meta-Llama-3.1-8B-Instruct",
+  "capture_sha256": "c4488f95a434122c5a479393690cc64afc9b75e1788c473e9e8bf52d60affe15",
+  "programs": 64,
+  "calls": 689,
+  "tool_calls": 589,
+  "tool_execution_error_responses": 235,
+  "output_tokens": 31965,
+  "mean_calls": 10.765625,
+  "max_calls": 26,
+  "mean_full_input_tokens": 7364.130624092888,
+  "mean_output_tokens": 46.3933236574746,
+  "mean_new_tokens_outside_previous_input_prefix": 693.1364296081277,
+  "statuses": {
+    "completed": 57,
+    "per-turn step budget": 7
+  },
+  "quality": {
+    "revision": "8bf675cc5f92e99971ba1f6bbb15bcf1d1d2eb1c",
+    "capture_sha256": "c4488f95a434122c5a479393690cc64afc9b75e1788c473e9e8bf52d60affe15",
+    "checker_sha256": "6eb01e811eaba0c1ac2586ccf66e253a0a8c424bce8670c720db588a4fc94a03",
+    "mode": "captured-model-actions",
+    "programs": 64,
+    "passed": 2,
+    "accuracy": 0.03125,
+    "failures_by_type": {
+      "multi_turn:instance_state_mismatch": 40,
+      "multi_turn:execution_response_mismatch": 22
+    }
+  },
+  "quality_outcomes": [
+    {
+      "id": "multi_turn_base_66",
+      "valid": false,
+      "error_type": "multi_turn:instance_state_mismatch"
+    },
+    {
+      "id": "multi_turn_base_187",
+      "valid": false,
+      "error_type": "multi_turn:instance_state_mismatch"
+    },
+    {
+      "id": "multi_turn_base_101",
+      "valid": false,
+      "error_type": "multi_turn:execution_response_mismatch"
+    },
+    {
+      "id": "multi_turn_base_193",
+      "valid": true
+    },
+    {
+      "id": "multi_turn_base_111",
+      "valid": false,
+      "error_type": "multi_turn:execution_response_mismatch"
+    },
+    {
+      "id": "multi_turn_base_121",
+      "valid": false,
+      "error_type": "multi_turn:instance_state_mismatch"
+    },
+    {
+      "id": "multi_turn_base_13",
+      "valid": false,
+      "error_type": "multi_turn:execution_response_mismatch"
+    },
+    {
+      "id": "multi_turn_base_2",
+      "valid": false,
+      "error_type": "multi_turn:instance_state_mismatch"
+    },
+    {
+      "id": "multi_turn_base_64",
+      "valid": false,
+      "error_type": "multi_turn:instance_state_mismatch"
+    },
+    {
+      "id": "multi_turn_base_44",
+      "valid": false,
+      "error_type": "multi_turn:instance_state_mismatch"
+    },
+    {
+      "id": "multi_turn_base_136",
+      "valid": false,
+      "error_type": "multi_turn:instance_state_mismatch"
+    },
+    {
+      "id": "multi_turn_base_170",
+      "valid": false,
+      "error_type": "multi_turn:instance_state_mismatch"
+    },
+    {
+      "id": "multi_turn_base_128",
+      "valid": false,
+      "error_type": "multi_turn:instance_state_mismatch"
+    },
+    {
+      "id": "multi_turn_base_76",
+      "valid": false,
+      "error_type": "multi_turn:instance_state_mismatch"
+    },
+    {
+      "id": "multi_turn_base_158",
+      "valid": false,
+      "error_type": "multi_turn:instance_state_mismatch"
+    },
+    {
+      "id": "multi_turn_base_167",
+      "valid": false,
+      "error_type": "multi_turn:execution_response_mismatch"
+    },
+    {
+      "id": "multi_turn_base_45",
+      "valid": false,
+      "error_type": "multi_turn:instance_state_mismatch"
+    },
+    {
+      "id": "multi_turn_base_130",
+      "valid": false,
+      "error_type": "multi_turn:execution_response_mismatch"
+    },
+    {
+      "id": "multi_turn_base_30",
+      "valid": false,
+      "error_type": "multi_turn:execution_response_mismatch"
+    },
+    {
+      "id": "multi_turn_base_3",
+      "valid": false,
+      "error_type": "multi_turn:instance_state_mismatch"
+    },
+    {
+      "id": "multi_turn_base_159",
+      "valid": false,
+      "error_type": "multi_turn:execution_response_mismatch"
+    },
+    {
+      "id": "multi_turn_base_15",
+      "valid": false,
+      "error_type": "multi_turn:instance_state_mismatch"
+    },
+    {
+      "id": "multi_turn_base_42",
+      "valid": true
+    },
+    {
+      "id": "multi_turn_base_126",
+      "valid": false,
+      "error_type": "multi_turn:instance_state_mismatch"
+    },
+    {
+      "id": "multi_turn_base_186",
+      "valid": false,
+      "error_type": "multi_turn:execution_response_mismatch"
+    },
+    {
+      "id": "multi_turn_base_162",
+      "valid": false,
+      "error_type": "multi_turn:execution_response_mismatch"
+    },
+    {
+      "id": "multi_turn_base_47",
+      "valid": false,
+      "error_type": "multi_turn:execution_response_mismatch"
+    },
+    {
+      "id": "multi_turn_base_110",
+      "valid": false,
+      "error_type": "multi_turn:instance_state_mismatch"
+    },
+    {
+      "id": "multi_turn_base_5",
+      "valid": false,
+      "error_type": "multi_turn:instance_state_mismatch"
+    },
+    {
+      "id": "multi_turn_base_194",
+      "valid": false,
+      "error_type": "multi_turn:execution_response_mismatch"
+    },
+    {
+      "id": "multi_turn_base_37",
+      "valid": false,
+      "error_type": "multi_turn:execution_response_mismatch"
+    },
+    {
+      "id": "multi_turn_base_122",
+      "valid": false,
+      "error_type": "multi_turn:instance_state_mismatch"
+    },
+    {
+      "id": "multi_turn_base_12",
+      "valid": false,
+      "error_type": "multi_turn:instance_state_mismatch"
+    },
+    {
+      "id": "multi_turn_base_36",
+      "valid": false,
+      "error_type": "multi_turn:instance_state_mismatch"
+    },
+    {
+      "id": "multi_turn_base_153",
+      "valid": false,
+      "error_type": "multi_turn:execution_response_mismatch"
+    },
+    {
+      "id": "multi_turn_base_69",
+      "valid": false,
+      "error_type": "multi_turn:instance_state_mismatch"
+    },
+    {
+      "id": "multi_turn_base_61",
+      "valid": false,
+      "error_type": "multi_turn:execution_response_mismatch"
+    },
+    {
+      "id": "multi_turn_base_195",
+      "valid": false,
+      "error_type": "multi_turn:instance_state_mismatch"
+    },
+    {
+      "id": "multi_turn_base_32",
+      "valid": false,
+      "error_type": "multi_turn:execution_response_mismatch"
+    },
+    {
+      "id": "multi_turn_base_172",
+      "valid": false,
+      "error_type": "multi_turn:instance_state_mismatch"
+    },
+    {
+      "id": "multi_turn_base_171",
+      "valid": false,
+      "error_type": "multi_turn:instance_state_mismatch"
+    },
+    {
+      "id": "multi_turn_base_60",
+      "valid": false,
+      "error_type": "multi_turn:instance_state_mismatch"
+    },
+    {
+      "id": "multi_turn_base_10",
+      "valid": false,
+      "error_type": "multi_turn:instance_state_mismatch"
+    },
+    {
+      "id": "multi_turn_base_144",
+      "valid": false,
+      "error_type": "multi_turn:execution_response_mismatch"
+    },
+    {
+      "id": "multi_turn_base_160",
+      "valid": false,
+      "error_type": "multi_turn:instance_state_mismatch"
+    },
+    {
+      "id": "multi_turn_base_52",
+      "valid": false,
+      "error_type": "multi_turn:instance_state_mismatch"
+    },
+    {
+      "id": "multi_turn_base_125",
+      "valid": false,
+      "error_type": "multi_turn:instance_state_mismatch"
+    },
+    {
+      "id": "multi_turn_base_106",
+      "valid": false,
+      "error_type": "multi_turn:instance_state_mismatch"
+    },
+    {
+      "id": "multi_turn_base_73",
+      "valid": false,
+      "error_type": "multi_turn:instance_state_mismatch"
+    },
+    {
+      "id": "multi_turn_base_113",
+      "valid": false,
+      "error_type": "multi_turn:instance_state_mismatch"
+    },
+    {
+      "id": "multi_turn_base_105",
+      "valid": false,
+      "error_type": "multi_turn:execution_response_mismatch"
+    },
+    {
+      "id": "multi_turn_base_95",
+      "valid": false,
+      "error_type": "multi_turn:instance_state_mismatch"
+    },
+    {
+      "id": "multi_turn_base_103",
+      "valid": false,
+      "error_type": "multi_turn:instance_state_mismatch"
+    },
+    {
+      "id": "multi_turn_base_145",
+      "valid": false,
+      "error_type": "multi_turn:execution_response_mismatch"
+    },
+    {
+      "id": "multi_turn_base_43",
+      "valid": false,
+      "error_type": "multi_turn:execution_response_mismatch"
+    },
+    {
+      "id": "multi_turn_base_0",
+      "valid": false,
+      "error_type": "multi_turn:instance_state_mismatch"
+    },
+    {
+      "id": "multi_turn_base_161",
+      "valid": false,
+      "error_type": "multi_turn:execution_response_mismatch"
+    },
+    {
+      "id": "multi_turn_base_192",
+      "valid": false,
+      "error_type": "multi_turn:instance_state_mismatch"
+    },
+    {
+      "id": "multi_turn_base_16",
+      "valid": false,
+      "error_type": "multi_turn:instance_state_mismatch"
+    },
+    {
+      "id": "multi_turn_base_80",
+      "valid": false,
+      "error_type": "multi_turn:execution_response_mismatch"
+    },
+    {
+      "id": "multi_turn_base_102",
+      "valid": false,
+      "error_type": "multi_turn:execution_response_mismatch"
+    },
+    {
+      "id": "multi_turn_base_38",
+      "valid": false,
+      "error_type": "multi_turn:instance_state_mismatch"
+    },
+    {
+      "id": "multi_turn_base_156",
+      "valid": false,
+      "error_type": "multi_turn:instance_state_mismatch"
+    },
+    {
+      "id": "multi_turn_base_176",
+      "valid": false,
+      "error_type": "multi_turn:instance_state_mismatch"
+    }
+  ],
+  "quality_rebuilt_locally_identical": true
+}
