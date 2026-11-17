@@ -57,6 +57,9 @@ def main():
                                      "--programs", "64"], stdout=log, stderr=subprocess.STDOUT)
         (run / "bfcl-collection.exit").write_text(str(result.returncode))
         result.check_returncode()
+        subprocess.run([sys.executable, "scripts/evaluate_bfcl_capture.py", "--source",
+                        str(root / "datasets/bfcl-v3-source"), "--capture", str(workload),
+                        "--output", str(run / "bfcl-capture-quality.json")], check=True)
         run_plan("bfcl", workload, [.02, .05, .1], 48)
     else:
         workload = root / "datasets/lats-captured6.json"

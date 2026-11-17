@@ -53,7 +53,8 @@ def main():
                             ignore=shutil.ignore_patterns("__pycache__"))
         shutil.copy2(server / "datasets/source-downloads.json", root / "source-downloads.json")
         shutil.copy2(server / "layout-migration.json", root / "layout-migration.json")
-        for name in ["paper-suite-networkfs-start", "paper-suite-swap-oom", "paper-suite-prefill-capacity"]:
+        for name in ["paper-suite-networkfs-start", "paper-suite-swap-oom", "paper-suite-prefill-capacity",
+                     "paper-suite-collection-config"]:
             failure = run.parent / name
             if failure.exists():
                 shutil.copytree(failure, root / "startup-failures" / name)
