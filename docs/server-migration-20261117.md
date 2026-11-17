@@ -4,6 +4,23 @@
 旧服务器的 Autellix 目录约 133 GB，整体迁入新实例；已完成的实验结果保留原始硬件
 记录，新采集和后续配对在新实例上继续。
 
+## 迁移验收
+
+2026-11-17 15:41:22（Asia/Shanghai）完成逐文件校验：主目录 164949 个文件/链接、
+142286847353 字节文件内容，运行状态目录 148 项、379074711 字节，SHA256 比较
+均无差异。完整清单保存在服务器 `logs/migration-47541-*-files.json`，本地副本位于
+`outputs/migration-47541/`；[精简验收结果](results/server-migration-20261117.json)记录
+清单哈希、硬件、检查点及 GPU 验证结果。
+
+新实例补装系统依赖 `libnuma1`，SGLang/Torch 与 vLLM/Torch 两套环境均成功导入。
+146 项回归中 139 项通过、7 项跳过。GPU 0 完成 2.125 GiB KV 精确往返，临时 GPU
+内存峰值 16 MiB；GPU 1 完成 K=0/1 两种抢占恢复检查，恢复生成与连续生成一致，
+程序会话全部回收。
+
+旧实例保存了 25 个 BFCL 程序和 1 个 LATS 程序后停止实验进程。新实例已按下表
+续跑：GPU 0 采集 BFCL，GPU 1 采集 LATS，随后执行配对回放及 Mixed。
+采集前的完整程序哈希保存在 `logs/migration-47541-capture-prefixes.json`。
+
 | 项目 | 新实例 |
 | --- | --- |
 | GPU | 2×Tesla P40，各 23040 MiB，合计 45 GiB 可见显存 |

@@ -1,0 +1,130 @@
+{
+  "ssh_port": 47541,
+  "completed_at": "2026-11-17 15:41:22 Asia/Shanghai",
+  "files": 164949,
+  "bytes": 142286847353,
+  "verification": {
+    "root": "/root/workspace/autellix",
+    "checked": 164949,
+    "mismatches": [],
+    "manifest_sha256": "46cc2df1ea504b54b9f5c0d30a888e9d93202582eeefc8ae970c485d16754217"
+  },
+  "runtime_files": 148,
+  "runtime_bytes": 379074711,
+  "runtime_verification": {
+    "root": "/tmp/autellix-runtime",
+    "checked": 148,
+    "mismatches": [],
+    "manifest_sha256": "c53b215b72672b310b0baa4612b591c41199929c2292607ae0603c8125ba5d62"
+  },
+  "checkpoints": {
+    "stopped_pids": [
+      139947,
+      152705,
+      152706,
+      152708,
+      152710,
+      152720,
+      152721,
+      152756,
+      152757,
+      152707,
+      152709,
+      152739,
+      152740,
+      152778,
+      152779
+    ],
+    "bfcl_completed": 25,
+    "lats_completed": 1
+  },
+  "environment": {
+    "host": "dbtvgkkp420c73d1kiu0-k8isj",
+    "ssh_port": 47541,
+    "project_root": "/root/workspace/autellix",
+    "cpu_max": "1200000 100000",
+    "memory_max_bytes": 51539607552,
+    "versions": {
+      "torch": "2.7.1",
+      "sglang": "0.4.9.post6",
+      "transformers": "4.54.0"
+    },
+    "gpus": [
+      "0, Tesla P40, 23040 MiB, 550.120, Enabled",
+      "1, Tesla P40, 23040 MiB, 550.120, Enabled"
+    ],
+    "workflow_devices": {
+      "bfcl": 0,
+      "lats": 1,
+      "mixed": 1
+    }
+  },
+  "kv_check": {
+    "kv_bytes": 2281701376,
+    "peak_temporary_gpu_bytes": 16777216,
+    "transfer_chunk_bytes": 16777216,
+    "layers": 64,
+    "tokens": 17408,
+    "round_trip_exact": true,
+    "device": "Tesla P40"
+  },
+  "generation_checks": [
+    {
+      "reserve": 0,
+      "state_dir": "/mnt/masfiles/autellix/tmp/autellix-3147z43j",
+      "events": {
+        "admit": 3,
+        "schedule_window": 190,
+        "batch": 208,
+        "execute": 208,
+        "plan_step": 208,
+        "continue_plan": 18,
+        "demote": 187,
+        "swap_out": 15,
+        "retract": 15,
+        "swap_in": 16,
+        "defer_prefill": 1,
+        "capacity_limit": 15,
+        "finished": 3
+      },
+      "resumed_greedy_matches": true,
+      "sessions_empty": true,
+      "completed_tokens": [
+        96,
+        16,
+        96
+      ]
+    },
+    {
+      "reserve": 1,
+      "state_dir": "/mnt/masfiles/autellix/tmp/autellix-_57th6fv",
+      "events": {
+        "admit": 3,
+        "schedule_window": 190,
+        "batch": 208,
+        "execute": 208,
+        "plan_step": 208,
+        "continue_plan": 18,
+        "demote": 187,
+        "swap_out": 15,
+        "retract": 15,
+        "swap_in": 16,
+        "defer_prefill": 1,
+        "capacity_limit": 15,
+        "finished": 3
+      },
+      "resumed_greedy_matches": true,
+      "sessions_empty": true,
+      "completed_tokens": [
+        96,
+        16,
+        96
+      ]
+    }
+  ],
+  "tests": {
+    "total": 146,
+    "passed": 139,
+    "skipped": 7
+  }
+}
