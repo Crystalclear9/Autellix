@@ -13,9 +13,12 @@ def main():
     p.add_argument("--root", default="/mnt/masfiles/autellix")
     p.add_argument("--run-dir", required=True)
     p.add_argument("--output", required=True)
+    p.add_argument("--include-bfcl-pp2", action="store_true", help="require the BFCL two-card comparison")
     args = p.parse_args()
     server, run, output = Path(args.root), Path(args.run_dir), Path(args.output)
-    names = [f"sharegpt-gpu{i}" for i in range(3)] + ["sharegpt-repeat", "sharegpt-ablation", "sharegpt-batch8", "bfcl", "lats", "mixed", "sharegpt-pp3", "bfcl-pp2"]
+    names = [f"sharegpt-gpu{i}" for i in range(3)] + ["sharegpt-repeat", "sharegpt-ablation", "sharegpt-batch8", "bfcl", "lats", "mixed", "sharegpt-pp3"]
+    if args.include_bfcl_pp2:
+        names.append("bfcl-pp2")
     for name in names + ["bfcl-collection", "lats-collection"]:
         if (run / (name + ".exit")).read_text().strip() != "0":
             raise ValueError(f"unfinished trial: {name}")
@@ -60,6 +63,12 @@ def main():
                 target = root / "migration" / path.name
                 target.parent.mkdir(exist_ok=True)
                 shutil.copy2(path, target)
+        checks = root / "validation"
+        for name in ["current-source-manifest.json", "current-source-check.json", "mlp-chunks-tests.log"]:
+            path = server / "logs" / name
+            if path.is_file():
+                checks.mkdir(exist_ok=True)
+                shutil.copy2(path, checks / name)
         for name in ["paper-suite-networkfs-start", "paper-suite-swap-oom", "paper-suite-prefill-capacity",
                      "paper-suite-collection-config"]:
             failure = run.parent / name

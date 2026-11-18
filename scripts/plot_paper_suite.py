@@ -41,7 +41,7 @@ def main():
         ax.set(title=workload.upper(), xlabel="Offered programs / second", ylabel="Program token latency (s/token)")
         ax.grid(alpha=.18)
         ax.legend(frameon=False, fontsize=8)
-    fig.suptitle("Llama-3.1-8B-Instruct / P40 / paired on the same GPU", fontsize=13)
+    fig.suptitle("Llama-3.1-8B-Instruct / P40 / paired on the same card", fontsize=13)
     save(fig, "paper-workload-curves")
 
     rows = result["comparisons"]
