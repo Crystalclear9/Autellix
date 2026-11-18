@@ -76,7 +76,7 @@ def summarize(records):
             def options(r):
                 # Native SGLang does not allocate the Autellix host KV cache.
                 return {k: v for k, v in r["effective_engine_args"].items()
-                        if k not in {"autellix_native_baseline", "autellix_swap_space"}}
+                        if k not in {"autellix_native_baseline", "autellix_swap_space", "autellix_host_kv_recompute"}}
             paired = dict(same_trace=row["trace_sha256"] == native["trace_sha256"],
                           same_lengths=lengths(row) == lengths(native), same_options=options(row) == options(native),
                           same_model=row["model"] == native["model"], same_versions=row["versions"] == native["versions"])

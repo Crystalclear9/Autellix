@@ -1,0 +1,52 @@
+[
+  {
+    "reserve": 0,
+    "state_dir": "/mnt/masfiles/autellix/tmp/autellix-0sr5e9im",
+    "events": {
+      "admit": 3,
+      "schedule_window": 190,
+      "batch": 208,
+      "execute": 208,
+      "plan_step": 208,
+      "continue_plan": 18,
+      "demote": 187,
+      "recompute_retract": 15,
+      "retract": 15,
+      "defer_prefill": 15,
+      "capacity_limit": 15,
+      "finished": 3
+    },
+    "resumed_greedy_matches": true,
+    "sessions_empty": true,
+    "completed_tokens": [
+      96,
+      16,
+      96
+    ]
+  },
+  {
+    "reserve": 1,
+    "state_dir": "/mnt/masfiles/autellix/tmp/autellix-6pt7zbu7",
+    "events": {
+      "admit": 3,
+      "schedule_window": 190,
+      "batch": 208,
+      "execute": 208,
+      "plan_step": 208,
+      "continue_plan": 18,
+      "demote": 187,
+      "recompute_retract": 15,
+      "retract": 15,
+      "defer_prefill": 15,
+      "capacity_limit": 15,
+      "finished": 3
+    },
+    "resumed_greedy_matches": true,
+    "sessions_empty": true,
+    "completed_tokens": [
+      96,
+      16,
+      96
+    ]
+  }
+]

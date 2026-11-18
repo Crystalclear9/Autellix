@@ -75,7 +75,8 @@ def install(cls, options):
             self._autellix_window = SchedulingWindow(self.autellix, options["capacity"])
         if options.get("host_bytes"):
             from .swap import HostKV
-            self._autellix_host = HostKV(self.token_to_kv_pool_allocator, self.tree_cache, options["host_bytes"])
+            self._autellix_host = HostKV(self.token_to_kv_pool_allocator, self.tree_cache, options["host_bytes"],
+                                         recompute_on_full=options.get("host_kv_recompute", False))
         else:
             self._autellix_host = None
         # The underlying FCFS policy must not overwrite Autellix queue ordering.
@@ -192,8 +193,8 @@ def install(cls, options):
                         if self._autellix_host is not None:
                             all_indices = batch.req_to_token_pool.req_to_token[req.req_pool_idx, :lengths[i]]
                             tokens = (req.origin_input_ids + req.output_ids)[:lengths[i]]
-                            self._autellix_host.save(req.rid, tokens, all_indices)
-                            ctl.emit("swap_out", rid=req.rid, tokens=len(tokens))
+                            saved = self._autellix_host.save(req.rid, tokens, all_indices)
+                            ctl.emit("recompute_retract" if saved is False else "swap_out", rid=req.rid, tokens=len(tokens))
                         start = len(req.prefix_indices)
                         indices = batch.req_to_token_pool.req_to_token[req.req_pool_idx, start:lengths[i]]
                         batch.token_to_kv_pool_allocator.free(indices)

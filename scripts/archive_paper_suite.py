@@ -69,9 +69,10 @@ def main():
         traces = root / "traces"
         traces.mkdir()
         state_dirs = {row["state_dir"] for row in rows}
-        check = run / "prefill-priority-gpu-check.json"
-        if check.exists():
-            state_dirs.update(row["state_dir"] for row in json.loads(check.read_text()))
+        for name in ["prefill-priority-gpu-check.json", "host-kv-overflow-gpu.json"]:
+            check = run / name
+            if check.exists():
+                state_dirs.update(row["state_dir"] for row in json.loads(check.read_text()))
         for name in sorted(state_dirs):
             shutil.copytree(name, traces / Path(name).name)
         for name in ["bfcl-v3-source", "lats-source"]:

@@ -25,8 +25,9 @@ def make_decode_room(scheduler, batch):
         length = batch.seq_lens.cpu().tolist()[victim_index]
         indices = batch.req_to_token_pool.req_to_token[req.req_pool_idx, :length]
         tokens = (req.origin_input_ids + req.output_ids)[:length]
-        scheduler._autellix_host.save(req.rid, tokens, indices)
-        ctl.emit("swap_out", rid=req.rid, tokens=len(tokens), reason="decode_capacity")
+        saved = scheduler._autellix_host.save(req.rid, tokens, indices)
+        ctl.emit("recompute_retract" if saved is False else "swap_out", rid=req.rid,
+                 tokens=len(tokens), reason="decode_capacity")
         tail = batch.req_to_token_pool.req_to_token[req.req_pool_idx, len(req.prefix_indices):length]
         batch.token_to_kv_pool_allocator.free(tail)
         batch.req_to_token_pool.free(req.req_pool_idx)

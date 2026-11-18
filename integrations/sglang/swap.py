@@ -2,13 +2,14 @@
 class HostKV:
     transfer_bytes = 16 * 1024 * 1024
 
-    def __init__(self, allocator, tree_cache, limit_bytes):
+    def __init__(self, allocator, tree_cache, limit_bytes, recompute_on_full=False):
         self.allocator, self.tree = allocator, tree_cache
         pool = allocator.get_kvcache()
         if not hasattr(pool, "k_buffer") or not hasattr(pool, "v_buffer"):
             raise ValueError("Autellix host swap requires an MHA KV pool")
         self.layers = list(pool.k_buffer) + list(pool.v_buffer)
         self.limit_bytes = limit_bytes
+        self.recompute_on_full = recompute_on_full
         self.used_bytes = 0
         self.saved = {}
 
@@ -23,6 +24,8 @@ class HostKV:
         old_size = old[1].numel() * old[1].element_size() if old else 0
         size = sum(layer[0].numel() * layer.element_size() for layer in self.layers) * len(indices)
         if self.used_bytes - old_size + size > self.limit_bytes:
+            if self.recompute_on_full:
+                return False
             raise RuntimeError("Autellix SGLang host KV budget exhausted; increase autellix_swap_space")
         layer = self.layers[0]
         host = torch.empty((len(self.layers), len(indices), *layer.shape[1:]),
@@ -40,6 +43,7 @@ class HostKV:
                 del values
         self.saved[rid] = (list(tokens), host)
         self.used_bytes += size - old_size
+        return True
 
     def restore(self, rid):
         """Restore into radix cache; retain the host copy until native admission."""

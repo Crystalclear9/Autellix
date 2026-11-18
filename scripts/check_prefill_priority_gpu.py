@@ -13,12 +13,15 @@ def main():
     parser.add_argument("--model", required=True)
     parser.add_argument("--device", default="1")
     parser.add_argument("--output", required=True)
+    parser.add_argument("--host-kv-recompute", action="store_true")
     args = parser.parse_args()
     results = []
     for reserve in (0, 1):
         options = dict(autellix_legacy_gpu=True, dtype="float32", context_length=512,
                        max_total_tokens=512, max_prefill_tokens=512, max_running_requests=2,
                        mem_fraction_static=.35, random_seed=0, autellix_swap_space=.25)
+        if args.host_kv_recompute:
+            options.update(autellix_swap_space=.00001, autellix_host_kv_recompute=True)
         policy = PolicyConfig(policy="plas", schedule_interval=1, overprovision=reserve,
                               boundaries=(0, .001, .002, math.inf), quanta=(.0001, .0002, .0004), beta=1e12)
         with InferenceEngine([ReplicaConfig("sglang", args.model, args.device, options)], policy=policy) as engine:
@@ -35,8 +38,11 @@ def main():
             assert ra["text"] == rr["text"]
             events = [json.loads(line) for line in (engine.state_dir / "replica-0.jsonl").read_text().splitlines()]
             counts = Counter(e["event"] for e in events)
-            assert counts["defer_prefill"] > 0, counts
-            assert counts["swap_out"] > 0 and counts["swap_in"] > 0, counts
+            if args.host_kv_recompute:
+                assert counts["recompute_retract"] > 0 and counts["swap_out"] == 0, counts
+            else:
+                assert counts["defer_prefill"] > 0, counts
+                assert counts["swap_out"] > 0 and counts["swap_in"] > 0, counts
             for sid in (a, b, reference):
                 engine.end_session(sid)
             engine.wait_idle(30)

@@ -54,6 +54,10 @@ P40 路径同时修复了固定版本 Llama 模型在 PP 下的 tied embedding �
 
 预备请求离开窗口或因显存压力被释放时，先保存 CPU 副本再解锁。备份失败保留原有 GPU 锁；替换主机备份失败也保留旧副本。成功接纳或取消后回收主机副本。
 
+单卡可用 `autellix_host_kv_recompute=true` 处理主机 KV 预算耗尽。达到预算时暂缓保存
+这次换出，保留请求和已生成 token，重新接纳时使用 radix 前缀并补算缺失 KV。
+调度记录用 `recompute_retract` 计数，成功保存的换出仍记为 `swap_out`。
+
 显存不足时先释放预备请求，再按冻结的队列顺序换出低优先级后缀；若单个请求仍无法容纳则报错。实现继续依赖原生 token pool 和 radix cache 的所有权规则。
 
 ## 验证

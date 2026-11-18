@@ -14,7 +14,8 @@ def release_reserves(scheduler, rids=None, *, preserve=True):
             if len(matched.device_indices) != len(tokens):
                 raise RuntimeError("a pinned reserve lost its computed KV prefix")
             # Save first: allocation/copy failure must leave the GPU pin intact.
-            scheduler._autellix_host.save(rid, tokens, matched.device_indices)
-            scheduler.autellix.emit("swap_out", rid=rid, tokens=len(tokens), reason="release_reserve")
+            saved = scheduler._autellix_host.save(rid, tokens, matched.device_indices)
+            scheduler.autellix.emit("recompute_retract" if saved is False else "swap_out", rid=rid,
+                                    tokens=len(tokens), reason="release_reserve")
         scheduler.tree_cache.dec_lock_ref(node)
         del reserves[rid]

@@ -26,6 +26,7 @@ plan["engine_args"].update(pp_size=2, max_running_requests=8, max_total_tokens=1
 for case in plan["cases"]:
     if "autellix_swap_space" in case.get("engine_args", {}):
         case["engine_args"]["autellix_swap_space"] = 12
+        case["engine_args"].pop("autellix_host_kv_recompute", None)
 (Path(sys.argv[1]) / "bfcl-pp2-plan.json").write_text(json.dumps(plan, indent=2))
 PY
 set +e

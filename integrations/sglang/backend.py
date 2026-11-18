@@ -43,10 +43,14 @@ class SGLangBackend:
         asyncio.set_event_loop(self.loop)
         self.table = ProgramTable(table_path)
         host_bytes = int(engine_args.pop("autellix_swap_space", 1) * 1024**3)
+        host_kv_recompute = engine_args.pop("autellix_host_kv_recompute", False)
         if host_bytes <= 0:
             raise ValueError("autellix_swap_space must be positive GiB")
+        if host_kv_recompute and engine_args.get("pp_size", 1) > 1:
+            raise ValueError("host KV overflow recomputation requires pp_size=1")
         options = dict(table_path=table_path, config=asdict(config), trace=trace,
-                       host_bytes=host_bytes, legacy_gpu=legacy_gpu, prefix_attention=prefix_attention,
+                       host_bytes=host_bytes, host_kv_recompute=host_kv_recompute,
+                       legacy_gpu=legacy_gpu, prefix_attention=prefix_attention,
                        retain_running=retain_running, attention_score_elements=score_elements,
                        mlp_chunk_size=mlp_chunk_size)
         target = entry.run_scheduler_process

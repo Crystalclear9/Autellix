@@ -40,7 +40,9 @@ def main():
         if name == "bfcl":
             native, plas = plan["cases"]
             plan["cases"] = [native, dict(plas, rates=[.005]),
-                             dict(plas, rates=[.01, .02], engine_args={"autellix_swap_space": 24})]
+                             dict(plas, rates=[.01], engine_args={"autellix_swap_space": 24}),
+                             dict(plas, rates=[.02], engine_args={"autellix_swap_space": 24,
+                                                                 "autellix_host_kv_recompute": True})]
         path = plans / (name + ".json")
         path.write_text(json.dumps(plan, indent=2))
         with (run / (name + ".log")).open("w") as log:
