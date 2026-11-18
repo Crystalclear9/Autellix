@@ -41,11 +41,12 @@ def metrics(row):
         if samples:
             gpu[device] = dict(mean_utilization=statistics.mean(g["utilization"] for g in samples),
                                peak_memory_mib=max(g["used_mib"] for g in samples))
-    cached = [c.get("cached_prompt_tokens") for c in row["calls"]]
+    cached = [c.get("sglang_cached_tokens", c.get("cached_prompt_tokens")) for c in row["calls"]]
     prompt_tokens = sum(c["prompt_tokens"] for c in row["calls"])
     cache = {}
     if prompt_tokens and all(c is not None for c in cached):
-        cache["reported_cached_prompt_fraction"] = sum(cached) / prompt_tokens
+        cache["sglang_cached_tokens"] = sum(cached)
+        cache["sglang_cached_tokens_per_prompt_token"] = sum(cached) / prompt_tokens
     return dict(workload=kind, condition=row["condition"], rate=row["rate"], seed=row["seed"],
                 model=row["model"], versions=row["versions"], engine_args=row["effective_engine_args"],
                 devices=row["device_groups"], trace_sha256=row["trace_sha256"],

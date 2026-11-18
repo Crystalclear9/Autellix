@@ -30,8 +30,12 @@ def main():
     parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument("--quantum-scale", type=float, default=2)
     parser.add_argument("--boundary-scale", type=float, default=128)
+    parser.add_argument("--host-kv-gib", type=float, help="Autellix host KV budget per engine or pipeline stage")
+    parser.add_argument("--host-kv-recompute", action="store_true", help="recompute KV when the single-stage host budget fills")
     parser.add_argument("--native-default", type=float, nargs="*", metavar="RATE",
                         help="also measure upstream SGLang defaults at the listed rates, or at all rates")
+    parser.add_argument("--fcfs-control", type=float, nargs="+", metavar="RATE",
+                        help="measure Autellix hooks with FCFS at the listed replay rates")
     parser.add_argument("--routing-ablation", action="store_true", help="compare least-used and round-robin routing on multiple replicas")
     parser.add_argument("--label", help="separate a model or resource configuration in the summary")
     args = parser.parse_args()
@@ -52,6 +56,13 @@ def main():
     name = args.label or args.workload
     candidate = dict(name=policy, policy=policy, reserve=1, interval=8,
                      quantum_scale=args.quantum_scale, boundary_scale=args.boundary_scale)
+    host_kv = {}
+    if args.host_kv_gib is not None:
+        host_kv["autellix_swap_space"] = args.host_kv_gib
+    if args.host_kv_recompute:
+        host_kv["autellix_host_kv_recompute"] = True
+    if host_kv:
+        candidate["engine_args"] = host_kv
     cases = [dict(name="native", policy="sglang-native", reserve=0), candidate]
     rates = list(args.rates or default_rates)
     if args.native_default is not None:
@@ -62,6 +73,10 @@ def main():
                 parser.error("upstream SGLang rates must be included in the replay rates")
             upstream["rates"] = args.native_default
         cases.append(upstream)
+    if args.fcfs_control:
+        if not set(args.fcfs_control) <= set(rates):
+            parser.error("FCFS control rates must be included in the replay rates")
+        cases.append(dict(candidate, name="autellix-fcfs", policy="fcfs", rates=args.fcfs_control))
     if args.routing_ablation:
         cases.extend(dict(candidate, name=f"{policy}-{routing}", routing=routing)
                      for routing in ("least-used", "round-robin"))

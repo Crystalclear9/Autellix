@@ -12,10 +12,14 @@ P40 迁移的完整 ShareGPT、BFCL、LATS 及其混合集合。Mixed 默认抽�
 GPU、模型、KV 容量和批次上限；候选组使用 PLAS 或 ATLAS。正式配对在 BF16 下使用
 SGLang 的 Triton attention，保留 radix 缓存。两组关闭 overlap、CUDA Graph 和
 chunked prefill。到达率按 H20 的执行速度设置，结果包含实际积压和排空时间。
-汇总同时记录 SGLang 报告的缓存命中 token 比例，便于对照前缀复用和调度开销。
+汇总记录 SGLang 的累计缓存 token 计数。请求换出后再次接纳会重新累计，因而该计数可
+超过原始输入 token 数。[SGLang 0.4.9.post6 缓存计数实现](https://github.com/sgl-project/sglang/blob/v0.4.9.post6/python/sglang/srt/managers/schedule_batch.py)
 `--native-default` 增加采用 SGLang 上游默认优化的对照，使用相同模型权重、批次和
 KV 上限。`--native-default .48` 只在这个到达率补测。`--device '2;3' --routing-ablation` 在两个单卡副本上，固定调度策略对比
 程序亲和性、最少调用数和轮询。多卡单副本使用 `--device '2,3'`。上述卡号为命令示例。
+`--fcfs-control .48` 使 Autellix 保留相同钩子、窗口和预备槽，以 FCFS 配对测量调度路径开销。
+BFCL 压测的恢复参数为 `--host-kv-gib 32 --host-kv-recompute`，只作用于 Autellix，
+主机缓存满时复用 radix 前缀并重算剩余 KV。
 
 下面的命令在 H20 上执行，`gpu` 使用本次分配且空闲的物理卡号。
 
@@ -72,3 +76,18 @@ Mixed 按程序等量抽取，LATS 在模型调用和生成 token 中仍占较�
 单卡验收使用 GPU 2，退出后该卡显存为 0 MiB。环境包 `decord 0.6.0` 的内部
 wheel 标签为 `cp36`，Python 3.10 上实测可以导入；验收日志保留 `pip check`、
 导入输出和完整依赖列表。
+
+代码、固定回放与历史 P40 证据包在 `fjr` 的项目目录内。72 个迁移文件的大小和
+SHA-256 已核对，记录位于 `data/autellix/import/migration-verification.json`。
+模型直接从 `/data-hdd/opt/models` 读取。
+
+## 论文机制与实现
+
+| 机制 | 实现入口与核对 |
+| --- | --- |
+| PLAS、ATLAS、MLFQ | `autellix/runtime/policy.py` 以实际模型服务时间更新程序历史，按多级 FIFO 队列执行降级和防饥饿；在线 ATLAS 使用论文算法 1 的最长路径标量 |
+| N 步与 K 个预备请求 | `autellix/runtime/window.py` 管理窗口和补位；H20 轨迹记录 `schedule_window`、`continue_plan` 和逐步执行 |
+| GPU 调度 | `integrations/sglang/scheduler.py` 在 SGLang 的 GPU 调度进程中控制请求接纳、运行批次和 KV 锁；CUDA event 计入模型执行时间 |
+| KV 交换 | `integrations/sglang/swap.py` 逐请求执行分块 gather/copy/scatter；论文的跨请求专用 CUDA 聚合交换仍待实现 |
+| 多引擎和会话 | `autellix/runtime/engine.py` 管理每副本进程、异步结果和程序亲和性；短输入优先选择请求最少的副本，长输入沿用程序所在副本 |
+| 论文实验 | 覆盖完整 ShareGPT、BFCL、LATS、Mixed、同到达率配对和程序级 SLO 曲线；论文的 Falcon-180B 和大规模离线批量曲线仍待补齐 |

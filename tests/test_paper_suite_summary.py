@@ -53,7 +53,7 @@ class PaperSuiteSummary(unittest.TestCase):
         with self.assertRaises(ValueError):
             summary.summarize(rows)
 
-    def test_labeled_dag_replay_uses_critical_path_and_records_cache_hits(self):
+    def test_labeled_dag_replay_uses_critical_path_and_records_backend_cache_count(self):
         rows = self.records()
         for row in rows:
             row["plan"].update(workload_kind="lats-h20", workload_family="lats")
@@ -61,7 +61,12 @@ class PaperSuiteSummary(unittest.TestCase):
                 call["cached_prompt_tokens"] = 1
         result = summary.summarize(rows)
         self.assertAlmostEqual(result["comparisons"][0]["mean_paper_latency_change_pct"], -25)
-        self.assertEqual(result["trials"][0]["reported_cached_prompt_fraction"], .5)
+        self.assertEqual(result["trials"][0]["sglang_cached_tokens_per_prompt_token"], .5)
+        for call in rows[1]["calls"]:
+            call["sglang_cached_tokens"] = 3
+        result = summary.summarize(rows)
+        self.assertEqual(result["trials"][1]["sglang_cached_tokens"], 12)
+        self.assertEqual(result["trials"][1]["sglang_cached_tokens_per_prompt_token"], 1.5)
 
     def test_upstream_default_is_listed_against_the_matched_native_baseline(self):
         native, candidate = self.records()
