@@ -11,6 +11,7 @@ P40 迁移的完整 ShareGPT、BFCL、LATS 及其混合集合。每个配对共�
 GPU、模型、KV 容量和批次上限；候选组使用 PLAS 或 ATLAS。正式配对在 BF16 下使用
 SGLang 的 Triton attention，保留 radix 缓存。两组关闭 overlap、CUDA Graph 和
 chunked prefill。到达率按 H20 的执行速度设置，结果包含实际积压和排空时间。
+汇总同时记录 SGLang 报告的缓存命中 token 比例，便于对照前缀复用和调度开销。
 
 下面的命令在 H20 上执行，`gpu` 使用本次分配且空闲的物理卡号。
 

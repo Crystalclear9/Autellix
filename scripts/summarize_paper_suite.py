@@ -6,6 +6,9 @@ from pathlib import Path
 import statistics
 
 
+DEFAULT_SLO_TARGETS = (.1, .25, .5, 1., 2., 4., 8.)
+
+
 def distribution(values):
     values = sorted(values)
     import math
@@ -58,7 +61,7 @@ def metrics(row):
                 calls_by_engine=dict(Counter(c["engine_id"] for c in row["calls"])), gpu=gpu, **cache)
 
 
-def summarize(records):
+def summarize(records, slo_targets=DEFAULT_SLO_TARGETS):
     groups = {}
     for row in records:
         kind = row["plan"].get("workload_kind", "sharegpt")
@@ -109,7 +112,7 @@ def summarize(records):
     slo_points = []
     for workload in sorted({t["workload"] for t in trials}):
         selected = [t for t in trials if t["workload"] == workload]
-        for target in [.1, .25, .5, 1., 2., 4., 8.]:
+        for target in slo_targets:
             rates = {condition: max((t["rate"] for t in selected if t["condition"] == condition
                                       and t["paper_token_latency"]["mean"] <= target), default=None)
                      for condition in sorted({t["condition"] for t in selected})}
@@ -123,9 +126,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("inputs", nargs="+")
     parser.add_argument("--output", required=True)
+    parser.add_argument("--slo", type=float, nargs="+", default=DEFAULT_SLO_TARGETS,
+                        help="mean program seconds per token targets")
     args = parser.parse_args()
     records = [row for file in args.inputs for row in json.loads(Path(file).read_text())]
-    result = summarize(records)
+    result = summarize(records, slo_targets=args.slo)
     Path(args.output).write_text(json.dumps(result, indent=2))
     print(json.dumps(result["comparisons"], indent=2))
 
