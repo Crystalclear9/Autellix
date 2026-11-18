@@ -258,6 +258,13 @@
           "mean_utilization": 65.57140319715808,
           "peak_memory_mib": 22079
         }
+      },
+      "inherited_service_seconds_nonzero": {
+        "count": 485,
+        "mean": 281.9075681707323,
+        "median": 130.3724741821289,
+        "p95": 1338.8990772247314,
+        "p99": 2113.599393295288
       }
     },
     {
@@ -516,6 +523,13 @@
           "mean_utilization": 95.38613147458238,
           "peak_memory_mib": 22875
         }
+      },
+      "inherited_service_seconds_nonzero": {
+        "count": 1914,
+        "mean": 3247.594302842542,
+        "median": 3140.037146392822,
+        "p95": 6722.0405859680195,
+        "p99": 7279.735965225223
       }
     }
   ],
