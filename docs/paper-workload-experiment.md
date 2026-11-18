@@ -320,3 +320,18 @@ Mixed 的平均秒/token 下降主要来自 1-token 程序 `q6Bz7MD-9`，其响�
 
 两组的输入哈希、每次调用的输入输出长度、模型、版本和引擎配置均相互匹配。
 逐程序数据和 GPU 调度事件见[配对结果](results/p40-agent-pairs-20261118.json)。
+
+## KV 传输微基准
+
+在新实例的 GPU 1 上比较 vLLM 0.6.1 编译后的 `swap_blocks` 与仓库的 PyTorch
+聚合传输。32 层、每层 K/V 各 128 个 16 KiB block，256 MiB 往返，预热后取
+10 次测量的中位数。两条路径的随机映射往返逐元素相等。
+
+| 传输路径 | 往返中位数 | 有效带宽 |
+| --- | ---: | ---: |
+| vLLM `swap_blocks` | 149.66 ms | 1.794 GB/s |
+| PyTorch 聚合 | 153.96 ms | 1.744 GB/s |
+
+这次 PyTorch 聚合多花 2.87% 的时间。当前聚合仍有 gather、主机 staging 和 scatter
+成本，后续交换优化优先减少打包、分配和同步的次数。这项测量使用 vLLM 的 block 布局，
+原生 SGLang 配对使用前文的 SGLang token 缓存路径。[传输记录](results/p40-vllm-kv-transfer-20261118.json)

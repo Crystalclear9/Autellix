@@ -46,14 +46,17 @@ set -e
 echo "$result" > "$run_dir/pp2-regression.exit"
 [[ "$result" == 0 ]]
 
-echo 'Measuring KV transfers against compiled vLLM swap_blocks.'
-set +e
-CUDA_VISIBLE_DEVICES=0 "$AUTELLIX_HOME/env/vllm/bin/python" cuda/batched_swap_benchmark.py \
-  --baseline vllm --blocks 128 --layers 32 --iterations 10 \
-  --output "$run_dir/vllm-kv-transfer.json" > "$run_dir/vllm-kv-transfer.log" 2>&1
-result=$?
-set -e
-echo "$result" > "$run_dir/vllm-kv-transfer.exit"
+if [[ ! -s "$run_dir/vllm-kv-transfer.exit" ]]; then
+  echo 'Measuring KV transfers against compiled vLLM swap_blocks.'
+  set +e
+  PYTHONPATH="$project_dir${PYTHONPATH:+:$PYTHONPATH}" CUDA_VISIBLE_DEVICES=0 \
+    "$AUTELLIX_HOME/env/vllm/bin/python" cuda/batched_swap_benchmark.py \
+    --baseline vllm --blocks 128 --layers 32 --iterations 10 \
+    --output "$run_dir/vllm-kv-transfer.json" > "$run_dir/vllm-kv-transfer.log" 2>&1
+  result=$?
+  set -e
+  echo "$result" > "$run_dir/vllm-kv-transfer.exit"
+fi
 
 echo 'Starting existing Qwen3-14B weights across both P40 cards.'
 nohup bash scripts/serve_p40_two_gpu.sh > "$run_dir/service-pp2.log" 2>&1 < /dev/null &

@@ -1,0 +1,17 @@
+{
+  "device": "Tesla P40",
+  "correctness": "exact_roundtrip",
+  "small_roundtrip_seconds": 0.14966269955039024,
+  "batched_roundtrip_seconds": 0.15396028570830822,
+  "small_GBps": 1.793602927158346,
+  "batched_GBps": 1.7435370086840147,
+  "speedup": 0.972086397877566,
+  "config": {
+    "blocks": 128,
+    "block_bytes": 16384,
+    "layers": 32,
+    "iterations": 10,
+    "output": "/root/workspace/autellix/runs/paper-suite/vllm-kv-transfer.json",
+    "baseline": "vllm"
+  }
+}
