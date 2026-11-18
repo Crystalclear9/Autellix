@@ -8,7 +8,7 @@ python_bin="${AUTELLIX_PYTHON:-$AUTELLIX_HOME/env/sglang/bin/python}"
 run_dir="${1:-$AUTELLIX_HOME/runs/paper-suite}"
 mkdir -p "$run_dir"
 for name in bfcl lats mixed; do
-  while [[ ! -f "$run_dir/$name.exit" ]]; do sleep 30; done
+  while [[ ! -s "$run_dir/$name.exit" ]]; do sleep 30; done
   [[ $(cat "$run_dir/$name.exit") == 0 ]]
 done
 echo 'All single-card agent pairs completed; comparing BFCL with shared two-card KV.'
@@ -23,6 +23,9 @@ plan = json.loads((root / "plans/bfcl-calibrated.json").read_text())
 plan.update(device="0,1", rates=[.02], workload_kind="bfcl-pp2", layer_partition=[16, 16])
 plan["engine_args"].update(pp_size=2, max_running_requests=8, max_total_tokens=196608,
                            autellix_attention_score_elements=2**24)
+for case in plan["cases"]:
+    if "autellix_swap_space" in case.get("engine_args", {}):
+        case["engine_args"]["autellix_swap_space"] = 12
 (Path(sys.argv[1]) / "bfcl-pp2-plan.json").write_text(json.dumps(plan, indent=2))
 PY
 set +e

@@ -74,7 +74,9 @@ def summarize(records):
                 return {(c["workload_program"], c["workload_call"]):
                         (c["prompt_tokens"], c["completion_tokens"]) for c in r["calls"]}
             def options(r):
-                return {k: v for k, v in r["effective_engine_args"].items() if k != "autellix_native_baseline"}
+                # Native SGLang does not allocate the Autellix host KV cache.
+                return {k: v for k, v in r["effective_engine_args"].items()
+                        if k not in {"autellix_native_baseline", "autellix_swap_space"}}
             paired = dict(same_trace=row["trace_sha256"] == native["trace_sha256"],
                           same_lengths=lengths(row) == lengths(native), same_options=options(row) == options(native),
                           same_model=row["model"] == native["model"], same_versions=row["versions"] == native["versions"])

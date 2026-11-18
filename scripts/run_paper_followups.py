@@ -37,6 +37,10 @@ def main():
                               name=policy if c["policy"] != "sglang-native" else "native") for c in base["cases"]]
         plan["cases"] += [dict(name=p, policy=p, reserve=0 if p == "fcfs" else 1,
                                 interval=8, quantum_scale=64, boundary_scale=1024) for p in extra_policies]
+        if name == "bfcl":
+            native, plas = plan["cases"]
+            plan["cases"] = [native, dict(plas, rates=[.005]),
+                             dict(plas, rates=[.01, .02], engine_args={"autellix_swap_space": 24})]
         path = plans / (name + ".json")
         path.write_text(json.dumps(plan, indent=2))
         with (run / (name + ".log")).open("w") as log:

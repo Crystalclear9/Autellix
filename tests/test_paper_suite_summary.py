@@ -42,6 +42,17 @@ class PaperSuiteSummary(unittest.TestCase):
         with self.assertRaises(ValueError):
             summary.summarize(rows)
 
+    def test_candidate_host_swap_budget_does_not_change_native_gpu_pairing(self):
+        rows = self.records()
+        rows[0]["effective_engine_args"]["autellix_swap_space"] = 8
+        rows[1]["effective_engine_args"]["autellix_swap_space"] = 24
+        result = summary.summarize(rows)
+        self.assertTrue(result["comparisons"][0]["pairing"]["same_options"])
+        self.assertEqual(result["trials"][1]["engine_args"]["autellix_swap_space"], 24)
+        rows[1]["effective_engine_args"]["max_total_tokens"] = 32768
+        with self.assertRaises(ValueError):
+            summary.summarize(rows)
+
 
 if __name__ == "__main__":
     unittest.main()
