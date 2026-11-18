@@ -8,6 +8,27 @@ import tarfile
 import tempfile
 
 
+def verify_archive(path, manifest):
+    expected = dict(manifest["files"])
+    with tarfile.open(path, "r|gz") as archive:
+        for member in archive:
+            if not member.isfile():
+                continue
+            name = str(Path(member.name).relative_to("paper-suite").as_posix())
+            with archive.extractfile(member) as payload:
+                if name == "manifest.json":
+                    if json.load(payload) != manifest:
+                        raise ValueError("archive manifest does not match the staged manifest")
+                    continue
+                digest = hashlib.sha256()
+                for block in iter(lambda: payload.read(1024 * 1024), b""):
+                    digest.update(block)
+            if expected.pop(name, None) != {"bytes": member.size, "sha256": digest.hexdigest()}:
+                raise ValueError(f"archive content mismatch: {name}")
+    if expected:
+        raise ValueError(f"missing files in archive: {', '.join(sorted(expected))}")
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--root", default="/mnt/masfiles/autellix")
@@ -90,9 +111,10 @@ def main():
         (root / "manifest.json").write_text(json.dumps(manifest, indent=2))
         with tarfile.open(output, "w:gz") as archive:
             archive.add(root, arcname="paper-suite")
+    verify_archive(output, manifest)
     result = dict(path=str(output), bytes=output.stat().st_size,
                   sha256=hashlib.sha256(output.read_bytes()).hexdigest(), trials=len(rows),
-                  files=len(manifest["files"]))
+                  files=len(manifest["files"]), verified_files=len(manifest["files"]))
     output.with_suffix(".manifest.json").write_text(json.dumps(result, indent=2))
     print(json.dumps(result))
 
