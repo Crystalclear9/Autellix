@@ -49,7 +49,7 @@ def validate_workload(programs):
         raise ValueError("workload must contain programs")
 
 
-def poisson_trace(programs, count, rate, seed=0):
+def poisson_trace(programs, count, rate, seed=0, *, equal_dataset_counts=False):
     validate_workload(programs)
     if count < 1 or not math.isfinite(rate) or rate <= 0:
         raise ValueError("count and arrival rate must be positive")
@@ -57,11 +57,17 @@ def poisson_trace(programs, count, rate, seed=0):
     datasets = {}
     for program in programs:
         datasets.setdefault(program.get("dataset", "default"), []).append(program)
+    pools = list(datasets.values())
+    if equal_dataset_counts:
+        if count % len(pools):
+            raise ValueError("an equally mixed trace needs a multiple of the dataset count")
+        dataset_order = pools * (count // len(pools))
+        rng.shuffle(dataset_order)
     for i in range(count):
         if i:
             now += rng.expovariate(rate)
-        # Mixed workloads sample datasets equally, then programs (not calls).
-        program = copy.deepcopy(rng.choice(rng.choice(list(datasets.values()))))
+        pool = dataset_order[i] if equal_dataset_counts else rng.choice(pools)
+        program = copy.deepcopy(rng.choice(pool))
         program["program_id"] = f"{program['program_id']}-{i}"
         program["arrival_time"] = now
         trace.append(program)

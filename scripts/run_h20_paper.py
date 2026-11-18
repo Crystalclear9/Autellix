@@ -21,7 +21,7 @@ def main():
     parser.add_argument("--model", required=True, type=Path)
     parser.add_argument("--datasets", required=True, type=Path)
     parser.add_argument("--run-dir", required=True, type=Path)
-    parser.add_argument("--device", required=True, help="physical GPU indices for this engine")
+    parser.add_argument("--device", required=True, help="comma-separated physical GPUs per replica; separate replicas with semicolons")
     parser.add_argument("--programs", type=int)
     parser.add_argument("--rates", type=float, nargs="+")
     parser.add_argument("--batch-size", type=int, default=16)
@@ -30,6 +30,8 @@ def main():
     parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument("--quantum-scale", type=float, default=2)
     parser.add_argument("--boundary-scale", type=float, default=128)
+    parser.add_argument("--native-default", action="store_true", help="also measure upstream SGLang kernel and scheduler defaults")
+    parser.add_argument("--routing-ablation", action="store_true", help="compare least-used and round-robin routing on multiple replicas")
     parser.add_argument("--label", help="separate a model or resource configuration in the summary")
     args = parser.parse_args()
 
@@ -38,10 +40,24 @@ def main():
     workload = (args.datasets / default_file).resolve(strict=True)
     run_dir = args.run_dir.resolve()
     run_dir.mkdir(parents=True, exist_ok=True)
-    stages = len(args.device.split(","))
+    groups = [group.split(",") for group in args.device.split(";")]
+    stages = len(groups[0])
+    devices = [device for group in groups for device in group]
+    if (any(len(group) != stages for group in groups) or len(set(devices)) != len(devices)
+            or not all(device.isdecimal() for device in devices)):
+        parser.error("use distinct physical GPU indices and the same stage count for each replica")
+    if args.routing_ablation and len(groups) < 2:
+        parser.error("routing ablation requires multiple replicas")
     name = args.label or args.workload
     candidate = dict(name=policy, policy=policy, reserve=1, interval=8,
                      quantum_scale=args.quantum_scale, boundary_scale=args.boundary_scale)
+    cases = [dict(name="native", policy="sglang-native", reserve=0), candidate]
+    if args.native_default:
+        cases.append(dict(name="native-default", policy="sglang-native", reserve=0, engine_args=dict(
+            autellix_native_defaults=True, attention_backend=None, sampling_backend=None)))
+    if args.routing_ablation:
+        cases.extend(dict(candidate, name=f"{policy}-{routing}", routing=routing)
+                     for routing in ("least-used", "round-robin"))
     plan = dict(model=str(model), device=args.device, workload=str(workload), workload_kind=name,
                 workload_family=args.workload,
                 programs=args.programs or default_count, rates=list(args.rates or default_rates),
@@ -51,7 +67,9 @@ def main():
                                  max_prefill_tokens=32768, mem_fraction_static=.9, random_seed=0,
                                  attention_backend="triton", sampling_backend="pytorch",
                                  autellix_swap_space=16),
-                cases=[dict(name="native", policy="sglang-native", reserve=0), candidate])
+                cases=cases)
+    if args.workload == "mixed":
+        plan["equal_dataset_counts"] = True
     plan_file, results = run_dir / f"{name}-plan.json", run_dir / f"{name}.json"
     plan_file.write_text(json.dumps(plan, indent=2), encoding="utf-8")
     script_dir = Path(__file__).resolve().parent

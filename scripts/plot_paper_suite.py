@@ -8,13 +8,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("summary")
     parser.add_argument("--output-dir", required=True)
+    parser.add_argument("--title", help="model and GPU description for the curves")
     args = parser.parse_args()
     import matplotlib.pyplot as plt
     result = json.loads(Path(args.summary).read_text())
     output = Path(args.output_dir)
     output.mkdir(parents=True, exist_ok=True)
     plt.rcParams.update({"font.size": 10, "axes.spines.top": False, "axes.spines.right": False})
-    colors = {"native": "#62717D", "plas": "#007F73", "atlas": "#007F73"}
+    colors = {"native": "#62717D", "plas": "#007F73", "atlas": "#007F73", "native-default": "#65529C"}
 
     def save(fig, name):
         for suffix in ("png", "svg"):
@@ -32,16 +33,17 @@ def main():
             ax.text(.5, .5, "Pending completed pairs", ha="center", va="center", transform=ax.transAxes)
             ax.set_axis_off()
             continue
-        for condition in dict.fromkeys(t["condition"] for t in selected):
+        for index, condition in enumerate(dict.fromkeys(t["condition"] for t in selected)):
             rows = sorted((t for t in selected if t["condition"] == condition), key=lambda t: t["rate"])
             x = [t["rate"] for t in rows]
-            color = colors[condition]
+            color = colors.get(condition, f"C{index}")
             ax.plot(x, [t["paper_token_latency"]["mean"] for t in rows], "o-", color=color, label=condition + " mean")
             ax.plot(x, [t["paper_token_latency"]["p95"] for t in rows], "x--", color=color, alpha=.65, label=condition + " P95")
         ax.set(title=workload.upper(), xlabel="Offered programs / second", ylabel="Program token latency (s/token)")
         ax.grid(alpha=.18)
         ax.legend(frameon=False, fontsize=8)
-    fig.suptitle("Llama-3.1-8B-Instruct / P40 / paired on the same card", fontsize=13)
+    models = sorted({Path(t["model"]).name for t in result["trials"]})
+    fig.suptitle(args.title or " / ".join(models), fontsize=13)
     save(fig, "paper-workload-curves")
 
     rows = result["comparisons"]

@@ -18,9 +18,12 @@ class SGLangBackend:
             raise RuntimeError("this integration requires sglang==0.4.9.post6")
         config = config or PolicyConfig()
         self.native = engine_args.pop("autellix_native_baseline", False)
+        native_defaults = engine_args.pop("autellix_native_defaults", False)
         if self.native and config.overprovision:
             raise ValueError("native SGLang baseline requires overprovision=0")
         legacy_gpu = engine_args.pop("autellix_legacy_gpu", False)
+        if native_defaults and (not self.native or legacy_gpu):
+            raise ValueError("upstream SGLang defaults require native mode on a modern GPU")
         prefix_attention = engine_args.pop("autellix_prefix_attention", True)
         score_elements = engine_args.pop("autellix_attention_score_elements", 2**26)
         mlp_chunk_size = engine_args.pop("autellix_mlp_chunk_size", 0)
@@ -62,11 +65,12 @@ class SGLangBackend:
                                                       mlp_chunk_size=mlp_chunk_size)
         else:
             entry.run_scheduler_process = partial(run_scheduler_process, autellix_options=options)
-        args = dict(disable_overlap_schedule=True, disable_cuda_graph=True,
-                    chunked_prefill_size=-1, page_size=1, max_running_requests=8,
-                    schedule_policy="fcfs", attention_backend="triton")
+        args = dict(max_running_requests=8)
+        if not native_defaults:
+            args.update(disable_cuda_graph=True, schedule_policy="fcfs", attention_backend="triton")
         args.update(engine_args)
-        args.update(disable_overlap_schedule=True, chunked_prefill_size=-1, page_size=1)
+        if not native_defaults:
+            args.update(disable_overlap_schedule=True, chunked_prefill_size=-1, page_size=1)
         options["capacity"] = args["max_running_requests"]
         pp = args.get("pp_size", 1)
         if pp > 1:

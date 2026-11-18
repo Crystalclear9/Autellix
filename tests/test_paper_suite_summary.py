@@ -63,6 +63,21 @@ class PaperSuiteSummary(unittest.TestCase):
         self.assertAlmostEqual(result["comparisons"][0]["mean_paper_latency_change_pct"], -25)
         self.assertEqual(result["trials"][0]["reported_cached_prompt_fraction"], .5)
 
+    def test_upstream_default_is_listed_against_the_matched_native_baseline(self):
+        native, candidate = self.records()
+        for row in (native, candidate):
+            row["effective_engine_args"].update(attention_backend="triton", sampling_backend="pytorch")
+        upstream = copy.deepcopy(native)
+        upstream["condition"] = "native-default"
+        upstream["effective_engine_args"].update(autellix_native_defaults=True, attention_backend=None,
+                                                 sampling_backend=None)
+        result = summary.summarize([upstream, native, candidate])
+        first = result["comparisons"][0]
+        self.assertEqual(first["baseline_condition"], "native")
+        self.assertTrue(first["upstream_default_optimizations"])
+        self.assertAlmostEqual(result["trials"][0]["completed_programs_per_second"], .1)
+        self.assertIn("p99_paper_latency_change_pct", result["comparisons"][1])
+
 
 if __name__ == "__main__":
     unittest.main()

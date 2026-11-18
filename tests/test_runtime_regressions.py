@@ -45,6 +45,15 @@ class RuntimeRegressions(unittest.TestCase):
             with self.assertRaises(ValueError):
                 poisson_trace(source, 20, rate)
 
+    def test_equal_mixed_trace_keeps_each_dataset_count(self):
+        from collections import Counter
+        from autellix.runtime.benchmark import poisson_trace
+        source = [dict(program_id=str(i), dataset=tag, calls=[dict(call_id="0", prompt="hi")])
+                  for i, tag in enumerate(["sharegpt", "sharegpt", "bfcl", "lats"])]
+        trace = poisson_trace(source, 12, 1., 2026, equal_dataset_counts=True)
+        self.assertEqual(Counter(p["dataset"] for p in trace), dict(sharegpt=4, bfcl=4, lats=4))
+        self.assertEqual(trace, poisson_trace(source, 12, 1., 2026, equal_dataset_counts=True))
+
     def test_program_token_latency_uses_dag_critical_path(self):
         from autellix.runtime.benchmark import run_workload
         clock = [0.]

@@ -31,8 +31,9 @@ def metrics(row):
     quartiles = []
     for q in range(4):
         ids = ordered[len(ordered)*q//4:len(ordered)*(q+1)//4]
-        quartiles.append(dict(programs=len(ids), mean_program_seconds=statistics.mean(row["programs"][p] for p in ids),
-                              mean_seconds_per_output_token=statistics.mean(token_times[p] for p in ids)))
+        if ids:
+            quartiles.append(dict(programs=len(ids), mean_program_seconds=statistics.mean(row["programs"][p] for p in ids),
+                                  mean_seconds_per_output_token=statistics.mean(token_times[p] for p in ids)))
     devices = {int(d) for group in row["device_groups"] for d in group.split(",")}
     gpu = {}
     for device in sorted(devices):
@@ -53,7 +54,8 @@ def metrics(row):
                 program_response_seconds=distribution(row["programs"].values()),
                 paper_token_latency=distribution(token_times.values()),
                 paper_metric="critical_path/total_output_tokens" if parallel else "program_response/total_output_tokens",
-                output_tokens_per_second=row["output_tokens_per_second"], elapsed_seconds=row["elapsed_seconds"],
+                output_tokens_per_second=row["output_tokens_per_second"], completed_programs_per_second=len(arrivals)/row["elapsed_seconds"],
+                elapsed_seconds=row["elapsed_seconds"],
                 arrival_horizon_seconds=horizon, drain_seconds=row["drain_seconds"],
                 completions_during_arrivals=row["completions_during_arrivals"],
                 maximum_submission_lag_seconds=max(row["first_submission_lag_seconds"].values()),
@@ -72,7 +74,8 @@ def summarize(records, slo_targets=DEFAULT_SLO_TARGETS):
         group[row["condition"]] = row
     trials, comparisons = [], []
     for key, group in sorted(groups.items()):
-        native = next(row for row in group.values() if row["arm"] == "sglang-native")
+        native = next(row for row in group.values() if row["arm"] == "sglang-native"
+                      and not row["effective_engine_args"].get("autellix_native_defaults"))
         baseline = metrics(native)
         trials.extend(metrics(row) for row in group.values())
         for row in group.values():
@@ -86,8 +89,14 @@ def summarize(records, slo_targets=DEFAULT_SLO_TARGETS):
                 # Native SGLang does not allocate the Autellix host KV cache.
                 return {k: v for k, v in r["effective_engine_args"].items()
                         if k not in {"autellix_native_baseline", "autellix_swap_space", "autellix_host_kv_recompute"}}
+            native_defaults = row["arm"] == "sglang-native" and row["effective_engine_args"].get("autellix_native_defaults", False)
+            row_options, baseline_options = options(row), options(native)
+            if native_defaults:
+                for opt in ("autellix_native_defaults", "attention_backend", "sampling_backend"):
+                    row_options.pop(opt, None)
+                    baseline_options.pop(opt, None)
             paired = dict(same_trace=row["trace_sha256"] == native["trace_sha256"],
-                          same_lengths=lengths(row) == lengths(native), same_options=options(row) == options(native),
+                          same_lengths=lengths(row) == lengths(native), same_options=row_options == baseline_options,
                           same_model=row["model"] == native["model"], same_versions=row["versions"] == native["versions"])
             if not all(paired.values()):
                 raise ValueError(f"unmatched workload or resources: {key}, {paired}")
@@ -100,6 +109,7 @@ def summarize(records, slo_targets=DEFAULT_SLO_TARGETS):
                     native_seconds=native["programs"][pid], candidate_seconds=response,
                     response_delta_seconds=response-native["programs"][pid]))
             comparisons.append(dict(workload=key[0], rate=key[1], seed=key[2], devices=key[3], condition=row["condition"],
+                baseline_condition=native["condition"], upstream_default_optimizations=native_defaults,
                 pairing=paired, programs=len(row["programs"]),
                 per_program=sorted(per_program, key=lambda p: -p["response_delta_seconds"]),
                 faster_programs=sum(row["programs"][p] < native["programs"][p] for p in row["programs"]),
@@ -108,6 +118,7 @@ def summarize(records, slo_targets=DEFAULT_SLO_TARGETS):
                 mean_response_change_pct=100*(candidate["program_response_seconds"]["mean"]/baseline["program_response_seconds"]["mean"]-1),
                 mean_paper_latency_change_pct=100*(candidate["paper_token_latency"]["mean"]/baseline["paper_token_latency"]["mean"]-1),
                 p95_paper_latency_change_pct=100*(candidate["paper_token_latency"]["p95"]/baseline["paper_token_latency"]["p95"]-1),
+                p99_paper_latency_change_pct=100*(candidate["paper_token_latency"]["p99"]/baseline["paper_token_latency"]["p99"]-1),
                 throughput_change_pct=100*(candidate["output_tokens_per_second"]/baseline["output_tokens_per_second"]-1)))
     slo_points = []
     for workload in sorted({t["workload"] for t in trials}):

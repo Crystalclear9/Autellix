@@ -56,7 +56,8 @@ def main():
         for repeat in range(plan.get("repeats", 1)):
             seed = plan.get("seed", 100) + repeat
             if plan.get("programs"):
-                trace = poisson_trace(programs, plan["programs"], rate, seed)
+                trace = poisson_trace(programs, plan["programs"], rate, seed,
+                                      equal_dataset_counts=plan.get("equal_dataset_counts", False))
             else:
                 trace = copy.deepcopy(programs)
                 rng = random.Random(seed)
