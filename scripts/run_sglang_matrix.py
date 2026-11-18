@@ -92,7 +92,9 @@ def main():
                            wall_start=started, plan=plan,
                            trace_sha256=trace_hash, versions=versions)
                 records.append(row)
-                destination.write_text(json.dumps(records, indent=2), encoding="utf-8")
+                checkpoint = destination.with_suffix(destination.suffix + ".tmp")
+                checkpoint.write_text(json.dumps(records, indent=2), encoding="utf-8")
+                checkpoint.replace(destination)
                 print(f"DONE case={case['name']} tok/s={row['output_tokens_per_second']:.3f} "
                       f"latency={row['program_latency_seconds']['mean']:.3f} "
                       f"s/token={row['paper_sequential_token_latency']['mean']:.6f}", flush=True)
