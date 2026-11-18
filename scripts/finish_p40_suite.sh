@@ -62,6 +62,7 @@ fi
 echo 'Starting existing Qwen3-14B weights across both P40 cards.'
 nohup bash scripts/serve_p40_two_gpu.sh > "$run_dir/service-pp2.log" 2>&1 < /dev/null &
 service_pid=$!
+trap 'kill -TERM "$service_pid" 2>/dev/null || true; wait "$service_pid" 2>/dev/null || true' EXIT
 echo "$service_pid" > "$run_dir/service-pp2.pid"
 export AUTELLIX_SERVICE_PID="$service_pid"
 "$python_bin" - <<'PY'

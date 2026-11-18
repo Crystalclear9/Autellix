@@ -342,3 +342,10 @@ Mixed 的平均秒/token 下降主要来自 1-token 程序 `q6Bz7MD-9`，其响�
 这次 PyTorch 聚合多花 2.87% 的时间。当前聚合仍有 gather、主机 staging 和 scatter
 成本，后续交换优化优先减少打包、分配和同步的次数。这项测量使用 vLLM 的 block 布局，
 原生 SGLang 配对使用前文的 SGLang token 缓存路径。[传输记录](results/p40-vllm-kv-transfer-20261118.json)
+
+## 转入 H20 时的 P40 状态
+
+ShareGPT、LATS、Mixed 和 BFCL 的 0.005/0.01 配对均已完成。BFCL 0.02 原生组
+完成 533 次调用，输出吞吐 1.747 token/s。PLAS 重跑在日志记录到 404/533 次调用后
+收到 SIGTERM，退出状态 143。复核时两张 P40 的显存占用均为 0 MiB。双卡 BFCL
+和后续部署回归转入 H20 阶段。已保存的策略结果和中断日志见[切换记录](results/p40-transition-20261118.json)。

@@ -1,0 +1,57 @@
+{
+  "bfcl_completed_arms": [
+    {
+      "rate": 0.005,
+      "condition": "native",
+      "trace_sha256": "3d5bf586ee5d51ee062ea8ae905eaee563b04c63caa5bc1e155b3632cd2f779a"
+    },
+    {
+      "rate": 0.005,
+      "condition": "plas",
+      "trace_sha256": "3d5bf586ee5d51ee062ea8ae905eaee563b04c63caa5bc1e155b3632cd2f779a"
+    },
+    {
+      "rate": 0.01,
+      "condition": "native",
+      "trace_sha256": "df954eb09e5341d275f554d87d2e8055a9c148e730197948d7b498f5929fc3e0"
+    },
+    {
+      "rate": 0.01,
+      "condition": "plas",
+      "trace_sha256": "df954eb09e5341d275f554d87d2e8055a9c148e730197948d7b498f5929fc3e0"
+    },
+    {
+      "rate": 0.02,
+      "condition": "native",
+      "trace_sha256": "f62aeeed6d29422f38c0f9f49d1fde1cf0da9b38bb189fac8738c55605fba38f"
+    }
+  ],
+  "high_load_native": {
+    "programs": 48,
+    "calls": 533,
+    "output_tokens": 27118,
+    "throughput": 1.7468775681316062,
+    "mean_program_response": 8250.652807631921
+  },
+  "interrupted": {
+    "rate": 0.02,
+    "condition": "plas",
+    "exit_code": 143,
+    "last_logged_calls": 404,
+    "total_calls": 533,
+    "last_logged_programs": 33,
+    "total_programs": 48
+  },
+  "gpus_used_mib_at_check": [
+    0,
+    0
+  ],
+  "artifacts": {
+    "bfcl-calibrated.json": "4f46ecd6d6be7bbd64675addc18ab9a4430c58e92603096279d775939c7e2b99",
+    "bfcl-interrupted-scheduler.jsonl": "28e4b6124325db7fd468263f80c0674398ac21fdcfa900f5319d40888b4c7f39",
+    "bfcl.exit": "9d9b18720961e9b4689fd763b85e7b6f36160ccd3a8a1c9ddc5103bb0f66c396",
+    "bfcl.json": "b0d01c3c73893bcd7127a44a523d1105a31599eb42c80e9e0191eacae6bb17cb",
+    "bfcl.log": "33279a0102fc8949ac675af3345cf37909876245ff57847e415bbc1113a32022",
+    "host-kv-overflow-gpu.json": "6b54b3362381c74e6af984c6bcbd0b6f1a346f6788b250ad0b17915d0d73d6b1"
+  }
+}
