@@ -22,6 +22,9 @@ def run_scheduler_process(*args, autellix_options, **kwargs):
         install_native_ops(prefix_attention=autellix_options.get("prefix_attention", True),
                            attention_score_elements=autellix_options.get("attention_score_elements", 2**26),
                            mlp_chunk_size=autellix_options.get("mlp_chunk_size", 0))
+    if autellix_options.get("pipeline"):
+        from .pipeline import install_pipeline_embeddings
+        install_pipeline_embeddings()
     import sglang.srt.managers.scheduler as module
     if autellix_options["config"].get("implementation", "paper") == "paper":
         from sglang.srt.managers import schedule_policy

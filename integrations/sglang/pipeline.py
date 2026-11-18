@@ -9,6 +9,34 @@ import json
 import time
 
 
+def install_pipeline_embeddings():
+    """Load tied Llama output embeddings on the pipeline's last stage."""
+    from sglang.srt.models.llama import LlamaForCausalLM, ParallelLMHead
+    from sglang.srt.model_loader.weight_utils import default_weight_loader
+
+    original_init = LlamaForCausalLM.__init__
+    original_load = LlamaForCausalLM.load_weights
+
+    def init(self, config, quant_config=None, prefix=""):
+        original_init(self, config, quant_config, prefix)
+        self._autellix_tied_pp_head = (self.pp_group.world_size > 1
+                                      and self.pp_group.is_last_rank and config.tie_word_embeddings)
+        if self._autellix_tied_pp_head:
+            self.lm_head = ParallelLMHead(config.vocab_size, config.hidden_size,
+                                          quant_config=quant_config, prefix="lm_head")
+
+    def load(self, weights):
+        def with_tied_head():
+            for name, weight in weights:
+                if self._autellix_tied_pp_head and name == "model.embed_tokens.weight":
+                    parameter = self.lm_head.weight
+                    getattr(parameter, "weight_loader", default_weight_loader)(parameter, weight)
+                yield name, weight
+        return original_load(self, with_tied_head())
+
+    LlamaForCausalLM.__init__, LlamaForCausalLM.load_weights = init, load
+
+
 class PolicyTape:
     def __init__(self, leader):
         self.leader = leader

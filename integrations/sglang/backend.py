@@ -19,6 +19,7 @@ class SGLangBackend:
         config = config or PolicyConfig()
         self.native = engine_args.pop("autellix_native_baseline", False)
         native_defaults = engine_args.pop("autellix_native_defaults", False)
+        pp = engine_args.get("pp_size", 1)
         if self.native and config.overprovision:
             raise ValueError("native SGLang baseline requires overprovision=0")
         legacy_gpu = engine_args.pop("autellix_legacy_gpu", False)
@@ -49,20 +50,21 @@ class SGLangBackend:
         host_kv_recompute = engine_args.pop("autellix_host_kv_recompute", False)
         if host_bytes <= 0:
             raise ValueError("autellix_swap_space must be positive GiB")
-        if host_kv_recompute and engine_args.get("pp_size", 1) > 1:
+        if host_kv_recompute and pp > 1:
             raise ValueError("host KV overflow recomputation requires pp_size=1")
         options = dict(table_path=table_path, config=asdict(config), trace=trace,
                        host_bytes=host_bytes, host_kv_recompute=host_kv_recompute,
-                       legacy_gpu=legacy_gpu, prefix_attention=prefix_attention,
+                       legacy_gpu=legacy_gpu, pipeline=pp > 1, prefix_attention=prefix_attention,
                        retain_running=retain_running, attention_score_elements=score_elements,
                        mlp_chunk_size=mlp_chunk_size)
         target = entry.run_scheduler_process
         if self.native:
-            if legacy_gpu:
+            if legacy_gpu or pp > 1:
                 from .legacy_gpu import run_native_scheduler_process
                 entry.run_scheduler_process = partial(run_native_scheduler_process, prefix_attention=prefix_attention,
                                                       attention_score_elements=score_elements,
-                                                      mlp_chunk_size=mlp_chunk_size)
+                                                      mlp_chunk_size=mlp_chunk_size, legacy_gpu=legacy_gpu,
+                                                      pipeline=pp > 1)
         else:
             entry.run_scheduler_process = partial(run_scheduler_process, autellix_options=options)
         args = dict(max_running_requests=8)
@@ -72,7 +74,6 @@ class SGLangBackend:
         if not native_defaults:
             args.update(disable_overlap_schedule=True, chunked_prefill_size=-1, page_size=1)
         options["capacity"] = args["max_running_requests"]
-        pp = args.get("pp_size", 1)
         if pp > 1:
             if options["capacity"] % pp:
                 raise ValueError("max_running_requests must be divisible by pp_size")
