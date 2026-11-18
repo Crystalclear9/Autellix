@@ -798,6 +798,273 @@
         "p95": 6722.0405859680195,
         "p99": 7279.735965225223
       }
+    },
+    {
+      "workload": "mixed",
+      "condition": "native",
+      "rate": 0.008,
+      "seed": 2026,
+      "model": "/mnt/masfiles/autellix/models/Meta-Llama-3.1-8B-Instruct",
+      "versions": {
+        "sglang": "0.4.9.post6",
+        "torch": "2.7.1",
+        "transformers": "4.54.0"
+      },
+      "engine_args": {
+        "autellix_legacy_gpu": true,
+        "dtype": "float16",
+        "context_length": 32768,
+        "max_running_requests": 4,
+        "max_total_tokens": 32768,
+        "mem_fraction_static": 0.9,
+        "random_seed": 0,
+        "autellix_swap_space": 8,
+        "max_prefill_tokens": 32768,
+        "autellix_mlp_chunk_size": 512,
+        "autellix_native_baseline": true
+      },
+      "devices": [
+        "1"
+      ],
+      "trace_sha256": "9472493fac248eb6521488fd33d42e2df9d8e369e83e62026a55b1b254eeecc1",
+      "programs": 12,
+      "calls": 1966,
+      "output_tokens": 156387,
+      "input_tokens_per_call": {
+        "mean": 2478.638351983723,
+        "median": 2463.0,
+        "p95": 3504,
+        "p99": 6302
+      },
+      "program_response_seconds": {
+        "mean": 7604.172540425033,
+        "median": 6527.327148714321,
+        "p95": 16377.543596117714,
+        "p99": 16377.543596117714
+      },
+      "paper_token_latency": {
+        "mean": 4.864128627535779,
+        "median": 0.5784843230025103,
+        "p95": 50.250804640352726,
+        "p99": 50.250804640352726
+      },
+      "paper_metric": "critical_path/total_output_tokens",
+      "output_tokens_per_second": 9.026374068211695,
+      "elapsed_seconds": 17325.561606265604,
+      "arrival_horizon_seconds": 2139.4358915205466,
+      "drain_seconds": 15186.125714745058,
+      "completions_during_arrivals": 5,
+      "maximum_submission_lag_seconds": 0.028398699083822976,
+      "arrival_quartiles": [
+        {
+          "programs": 3,
+          "mean_program_seconds": 5004.45255683942,
+          "mean_seconds_per_output_token": 0.33014622713546243
+        },
+        {
+          "programs": 3,
+          "mean_program_seconds": 10459.869856172492,
+          "mean_seconds_per_output_token": 0.9209150186287526
+        },
+        {
+          "programs": 3,
+          "mean_program_seconds": 9490.155711792091,
+          "mean_seconds_per_output_token": 0.6684311322275188
+        },
+        {
+          "programs": 3,
+          "mean_program_seconds": 5462.212036896129,
+          "mean_seconds_per_output_token": 17.53702213215138
+        }
+      ],
+      "backlog_checkpoints": [
+        {
+          "seconds": 213.94358915205467,
+          "unfinished_programs": 1
+        },
+        {
+          "seconds": 427.88717830410934,
+          "unfinished_programs": 2
+        },
+        {
+          "seconds": 641.830767456164,
+          "unfinished_programs": 3
+        },
+        {
+          "seconds": 855.7743566082187,
+          "unfinished_programs": 3
+        },
+        {
+          "seconds": 1069.7179457602733,
+          "unfinished_programs": 7
+        },
+        {
+          "seconds": 1283.661534912328,
+          "unfinished_programs": 8
+        },
+        {
+          "seconds": 1497.6051240643826,
+          "unfinished_programs": 7
+        },
+        {
+          "seconds": 1711.5487132164374,
+          "unfinished_programs": 6
+        },
+        {
+          "seconds": 1925.492302368492,
+          "unfinished_programs": 6
+        },
+        {
+          "seconds": 2139.4358915205466,
+          "unfinished_programs": 7
+        }
+      ],
+      "calls_by_engine": {
+        "0": 1966
+      },
+      "gpu": {
+        "1": {
+          "mean_utilization": 97.21392496392497,
+          "peak_memory_mib": 22137
+        }
+      }
+    },
+    {
+      "workload": "mixed",
+      "condition": "atlas",
+      "rate": 0.008,
+      "seed": 2026,
+      "model": "/mnt/masfiles/autellix/models/Meta-Llama-3.1-8B-Instruct",
+      "versions": {
+        "sglang": "0.4.9.post6",
+        "torch": "2.7.1",
+        "transformers": "4.54.0"
+      },
+      "engine_args": {
+        "autellix_legacy_gpu": true,
+        "dtype": "float16",
+        "context_length": 32768,
+        "max_running_requests": 4,
+        "max_total_tokens": 32768,
+        "mem_fraction_static": 0.9,
+        "random_seed": 0,
+        "autellix_swap_space": 8,
+        "max_prefill_tokens": 32768,
+        "autellix_mlp_chunk_size": 512,
+        "autellix_native_baseline": false
+      },
+      "devices": [
+        "1"
+      ],
+      "trace_sha256": "9472493fac248eb6521488fd33d42e2df9d8e369e83e62026a55b1b254eeecc1",
+      "programs": 12,
+      "calls": 1966,
+      "output_tokens": 156387,
+      "input_tokens_per_call": {
+        "mean": 2478.638351983723,
+        "median": 2463.0,
+        "p95": 3504,
+        "p99": 6302
+      },
+      "program_response_seconds": {
+        "mean": 7608.018200731546,
+        "median": 6015.181608274425,
+        "p95": 16336.72455650098,
+        "p99": 16336.72455650098
+      },
+      "paper_token_latency": {
+        "mean": 0.950353416677675,
+        "median": 0.5822078900588377,
+        "p95": 3.7059619165956974,
+        "p99": 3.7059619165956974
+      },
+      "paper_metric": "critical_path/total_output_tokens",
+      "output_tokens_per_second": 9.047691306391515,
+      "elapsed_seconds": 17284.740902855992,
+      "arrival_horizon_seconds": 2139.4358915205466,
+      "drain_seconds": 15145.305011335446,
+      "completions_during_arrivals": 6,
+      "maximum_submission_lag_seconds": 0.025691581997989488,
+      "arrival_quartiles": [
+        {
+          "programs": 3,
+          "mean_program_seconds": 5466.51586295002,
+          "mean_seconds_per_output_token": 0.4767814225668485
+        },
+        {
+          "programs": 3,
+          "mean_program_seconds": 10494.122972996225,
+          "mean_seconds_per_output_token": 0.8827236778917272
+        },
+        {
+          "programs": 3,
+          "mean_program_seconds": 9431.11677292206,
+          "mean_seconds_per_output_token": 0.8311530651932515
+        },
+        {
+          "programs": 3,
+          "mean_program_seconds": 5040.317194057881,
+          "mean_seconds_per_output_token": 1.6107555010588732
+        }
+      ],
+      "backlog_checkpoints": [
+        {
+          "seconds": 213.94358915205467,
+          "unfinished_programs": 1
+        },
+        {
+          "seconds": 427.88717830410934,
+          "unfinished_programs": 2
+        },
+        {
+          "seconds": 641.830767456164,
+          "unfinished_programs": 3
+        },
+        {
+          "seconds": 855.7743566082187,
+          "unfinished_programs": 4
+        },
+        {
+          "seconds": 1069.7179457602733,
+          "unfinished_programs": 8
+        },
+        {
+          "seconds": 1283.661534912328,
+          "unfinished_programs": 9
+        },
+        {
+          "seconds": 1497.6051240643826,
+          "unfinished_programs": 7
+        },
+        {
+          "seconds": 1711.5487132164374,
+          "unfinished_programs": 6
+        },
+        {
+          "seconds": 1925.492302368492,
+          "unfinished_programs": 6
+        },
+        {
+          "seconds": 2139.4358915205466,
+          "unfinished_programs": 6
+        }
+      ],
+      "calls_by_engine": {
+        "0": 1966
+      },
+      "gpu": {
+        "1": {
+          "mean_utilization": 96.66340815833937,
+          "peak_memory_mib": 22129
+        }
+      },
+      "inherited_service_seconds_nonzero": {
+        "count": 1930,
+        "mean": 3065.2570771447654,
+        "median": 2870.8182031555175,
+        "p95": 6537.977176727297,
+        "p99": 7297.266515754698
+      }
     }
   ],
   "comparisons": [
@@ -1796,6 +2063,140 @@
       "mean_paper_latency_change_pct": 2.081579706586578,
       "p95_paper_latency_change_pct": 3.354366103038031,
       "throughput_change_pct": -0.9616333012675837
+    },
+    {
+      "workload": "mixed",
+      "rate": 0.008,
+      "seed": 2026,
+      "devices": [
+        "1"
+      ],
+      "condition": "atlas",
+      "pairing": {
+        "same_trace": true,
+        "same_lengths": true,
+        "same_options": true,
+        "same_model": true,
+        "same_versions": true
+      },
+      "programs": 12,
+      "per_program": [
+        {
+          "program": "hotpot-5ab7101e5542995eadef0110-1",
+          "calls": 310,
+          "output_tokens": 26933,
+          "max_input_tokens": 3222,
+          "native_seconds": 14442.51531205141,
+          "candidate_seconds": 15259.791803026581,
+          "response_delta_seconds": 817.2764909751713
+        },
+        {
+          "program": "IL28zNH-2",
+          "calls": 6,
+          "output_tokens": 1398,
+          "max_input_tokens": 1263,
+          "native_seconds": 492.8120534612397,
+          "candidate_seconds": 1057.2801819673339,
+          "response_delta_seconds": 564.4681285060942
+        },
+        {
+          "program": "ptlOkIt-7",
+          "calls": 3,
+          "output_tokens": 795,
+          "max_input_tokens": 644,
+          "native_seconds": 566.3711375268265,
+          "candidate_seconds": 983.5427276836797,
+          "response_delta_seconds": 417.1715901568532
+        },
+        {
+          "program": "hotpot-5a8234c8554299676cceb22a-4",
+          "calls": 318,
+          "output_tokens": 26741,
+          "max_input_tokens": 3185,
+          "native_seconds": 15446.891283607218,
+          "candidate_seconds": 15536.919418031457,
+          "response_delta_seconds": 90.0281344242394
+        },
+        {
+          "program": "hotpot-5a8234c8554299676cceb22a-3",
+          "calls": 318,
+          "output_tokens": 26741,
+          "max_input_tokens": 3185,
+          "native_seconds": 15494.332744916726,
+          "candidate_seconds": 15539.724175708194,
+          "response_delta_seconds": 45.39143079146743
+        },
+        {
+          "program": "LeWH4OP-0",
+          "calls": 6,
+          "output_tokens": 767,
+          "max_input_tokens": 680,
+          "native_seconds": 78.03030500560999,
+          "candidate_seconds": 82.47560385614634,
+          "response_delta_seconds": 4.445298850536346
+        },
+        {
+          "program": "multi_turn_base_161-5",
+          "calls": 6,
+          "output_tokens": 273,
+          "max_input_tokens": 8758,
+          "native_seconds": 438.3855399935346,
+          "candidate_seconds": 405.72532524902635,
+          "response_delta_seconds": -32.66021474450827
+        },
+        {
+          "program": "hotpot-5a7bb1315542997c3ec97253-6",
+          "calls": 362,
+          "output_tokens": 29228,
+          "max_input_tokens": 4317,
+          "native_seconds": 16377.543596117714,
+          "candidate_seconds": 16336.72455650098,
+          "response_delta_seconds": -40.81903961673379
+        },
+        {
+          "program": "q6Bz7MD-9",
+          "calls": 1,
+          "output_tokens": 1,
+          "max_input_tokens": 23,
+          "native_seconds": 50.25402025105177,
+          "candidate_seconds": 3.7148917761605844,
+          "response_delta_seconds": -46.539128474891186
+        },
+        {
+          "program": "hotpot-5ab7101e5542995eadef0110-11",
+          "calls": 310,
+          "output_tokens": 26933,
+          "max_input_tokens": 3222,
+          "native_seconds": 14808.280194740428,
+          "candidate_seconds": 14624.853443909122,
+          "response_delta_seconds": -183.42675083130598
+        },
+        {
+          "program": "hotpot-5ab67b7155429954757d32ef-8",
+          "calls": 302,
+          "output_tokens": 15733,
+          "max_input_tokens": 2627,
+          "native_seconds": 11526.552401731735,
+          "candidate_seconds": 10973.083034581517,
+          "response_delta_seconds": -553.4693671502173
+        },
+        {
+          "program": "multi_turn_base_73-10",
+          "calls": 24,
+          "output_tokens": 844,
+          "max_input_tokens": 6970,
+          "native_seconds": 1528.1018956969067,
+          "candidate_seconds": 492.383246488361,
+          "response_delta_seconds": -1035.7186492085457
+        }
+      ],
+      "faster_programs": 6,
+      "matching_texts": 1895,
+      "calls": 1966,
+      "mean_response_change_pct": 0.05057302797994989,
+      "mean_paper_latency_change_pct": -80.46200071071857,
+      "p95_paper_latency_change_pct": -92.625069502629,
+      "throughput_change_pct": 0.23616612848889051
     }
   ],
   "slo_points": [
@@ -1909,6 +2310,62 @@
       "maximum_tested_rate_meeting_latency": {
         "atlas": 0.004,
         "native": 0.004
+      }
+    },
+    {
+      "workload": "mixed",
+      "mean_seconds_per_output_token_target": 0.1,
+      "maximum_tested_rate_meeting_latency": {
+        "atlas": null,
+        "native": null
+      }
+    },
+    {
+      "workload": "mixed",
+      "mean_seconds_per_output_token_target": 0.25,
+      "maximum_tested_rate_meeting_latency": {
+        "atlas": null,
+        "native": null
+      }
+    },
+    {
+      "workload": "mixed",
+      "mean_seconds_per_output_token_target": 0.5,
+      "maximum_tested_rate_meeting_latency": {
+        "atlas": null,
+        "native": null
+      }
+    },
+    {
+      "workload": "mixed",
+      "mean_seconds_per_output_token_target": 1.0,
+      "maximum_tested_rate_meeting_latency": {
+        "atlas": 0.008,
+        "native": null
+      }
+    },
+    {
+      "workload": "mixed",
+      "mean_seconds_per_output_token_target": 2.0,
+      "maximum_tested_rate_meeting_latency": {
+        "atlas": 0.008,
+        "native": null
+      }
+    },
+    {
+      "workload": "mixed",
+      "mean_seconds_per_output_token_target": 4.0,
+      "maximum_tested_rate_meeting_latency": {
+        "atlas": 0.008,
+        "native": null
+      }
+    },
+    {
+      "workload": "mixed",
+      "mean_seconds_per_output_token_target": 8.0,
+      "maximum_tested_rate_meeting_latency": {
+        "atlas": 0.008,
+        "native": 0.008
       }
     }
   ],
@@ -2088,6 +2545,72 @@
         "service_weighted_batch_size": 3.8924614491367895,
         "swapped_out_tokens": 1931796
       }
+    ],
+    "mixed": [
+      {
+        "condition": "native",
+        "rate": 0.008,
+        "repeat": 0,
+        "events": {}
+      },
+      {
+        "condition": "atlas",
+        "rate": 0.008,
+        "repeat": 0,
+        "events": {
+          "continue_plan": 34365,
+          "admit": 1966,
+          "schedule_window": 5329,
+          "batch": 42529,
+          "execute": 42529,
+          "plan_step": 42529,
+          "demote": 898,
+          "finished": 1966,
+          "retain_running": 128,
+          "reserve": 1712,
+          "retract": 2396,
+          "swap_out": 697,
+          "resume_cached": 1699,
+          "swap_in": 697,
+          "refill": 1237
+        },
+        "admissions_by_queue": {
+          "0": 53,
+          "1": 13,
+          "2": 29,
+          "3": 38,
+          "4": 71,
+          "5": 105,
+          "6": 1657
+        },
+        "demotions_by_queue": {
+          "1": 47,
+          "2": 34,
+          "3": 55,
+          "4": 74,
+          "5": 93,
+          "6": 595
+        },
+        "batches_by_size": {
+          "1": 3688,
+          "2": 1568,
+          "4": 34242,
+          "5": 1751,
+          "3": 1280
+        },
+        "model_seconds": 17136.23332104508,
+        "service_weighted_batch_size": 3.8878581336537157,
+        "swapped_out_tokens": 1739254
+      }
     ]
+  },
+  "mixed_sensitivity": {
+    "programs": 11,
+    "excluded_programs": [
+      "q6Bz7MD-9"
+    ],
+    "native_mean_seconds_per_token": 0.7380671718251478,
+    "atlas_mean_seconds_per_token": 0.699843553048764,
+    "change_pct": -5.178880762554661
   }
 }
