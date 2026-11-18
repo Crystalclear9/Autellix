@@ -13,8 +13,8 @@ GPU、模型、KV 容量和批次上限；候选组使用 PLAS 或 ATLAS。正�
 SGLang 的 Triton attention，保留 radix 缓存。两组关闭 overlap、CUDA Graph 和
 chunked prefill。到达率按 H20 的执行速度设置，结果包含实际积压和排空时间。
 汇总同时记录 SGLang 报告的缓存命中 token 比例，便于对照前缀复用和调度开销。
-`--native-default` 增加一组采用 SGLang 上游默认优化的对照，使用相同模型权重、批次和
-KV 上限。`--device '2;3' --routing-ablation` 在两个单卡副本上，固定调度策略对比
+`--native-default` 增加采用 SGLang 上游默认优化的对照，使用相同模型权重、批次和
+KV 上限。`--native-default .48` 只在这个到达率补测。`--device '2;3' --routing-ablation` 在两个单卡副本上，固定调度策略对比
 程序亲和性、最少调用数和轮询。多卡单副本使用 `--device '2,3'`。上述卡号为命令示例。
 
 下面的命令在 H20 上执行，`gpu` 使用本次分配且空闲的物理卡号。

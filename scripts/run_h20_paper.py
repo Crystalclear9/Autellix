@@ -30,7 +30,8 @@ def main():
     parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument("--quantum-scale", type=float, default=2)
     parser.add_argument("--boundary-scale", type=float, default=128)
-    parser.add_argument("--native-default", action="store_true", help="also measure upstream SGLang kernel and scheduler defaults")
+    parser.add_argument("--native-default", type=float, nargs="*", metavar="RATE",
+                        help="also measure upstream SGLang defaults at the listed rates, or at all rates")
     parser.add_argument("--routing-ablation", action="store_true", help="compare least-used and round-robin routing on multiple replicas")
     parser.add_argument("--label", help="separate a model or resource configuration in the summary")
     args = parser.parse_args()
@@ -52,15 +53,21 @@ def main():
     candidate = dict(name=policy, policy=policy, reserve=1, interval=8,
                      quantum_scale=args.quantum_scale, boundary_scale=args.boundary_scale)
     cases = [dict(name="native", policy="sglang-native", reserve=0), candidate]
-    if args.native_default:
-        cases.append(dict(name="native-default", policy="sglang-native", reserve=0, engine_args=dict(
-            autellix_native_defaults=True, attention_backend=None, sampling_backend=None)))
+    rates = list(args.rates or default_rates)
+    if args.native_default is not None:
+        upstream = dict(name="native-default", policy="sglang-native", reserve=0, engine_args=dict(
+            autellix_native_defaults=True, attention_backend=None, sampling_backend=None))
+        if args.native_default:
+            if not set(args.native_default) <= set(rates):
+                parser.error("upstream SGLang rates must be included in the replay rates")
+            upstream["rates"] = args.native_default
+        cases.append(upstream)
     if args.routing_ablation:
         cases.extend(dict(candidate, name=f"{policy}-{routing}", routing=routing)
                      for routing in ("least-used", "round-robin"))
     plan = dict(model=str(model), device=args.device, workload=str(workload), workload_kind=name,
                 workload_family=args.workload,
-                programs=args.programs or default_count, rates=list(args.rates or default_rates),
+                programs=args.programs or default_count, rates=rates,
                 seed=args.seed, repeats=args.repeats, request_timeout=7200,
                 engine_args=dict(dtype="bfloat16", context_length=32768, pp_size=stages,
                                  max_running_requests=args.batch_size, max_total_tokens=args.kv_tokens,
