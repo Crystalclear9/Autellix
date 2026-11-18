@@ -53,6 +53,16 @@ class PaperSuiteSummary(unittest.TestCase):
         with self.assertRaises(ValueError):
             summary.summarize(rows)
 
+    def test_labeled_dag_replay_uses_critical_path_and_records_cache_hits(self):
+        rows = self.records()
+        for row in rows:
+            row["plan"].update(workload_kind="lats-h20", workload_family="lats")
+            for call in row["calls"]:
+                call["cached_prompt_tokens"] = 1
+        result = summary.summarize(rows)
+        self.assertAlmostEqual(result["comparisons"][0]["mean_paper_latency_change_pct"], -25)
+        self.assertEqual(result["trials"][0]["reported_cached_prompt_fraction"], .5)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -14,6 +14,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--backend", default="vllm")
     parser.add_argument("--model", required=True)
+    parser.add_argument("--device", default="0", help="physical GPU for the smoke service")
     parser.add_argument("--engine-args", default="{}")
     parser.add_argument("--output", default="outputs/validation/http.json")
     args = parser.parse_args()
@@ -22,7 +23,7 @@ def main():
         port = sock.getsockname()[1]
     with tempfile.TemporaryDirectory(prefix="autellix-http-") as directory:
         command = [sys.executable, "-m", "autellix.runtime.server", "--backend", args.backend,
-                   "--model", args.model, "--engine-args", args.engine_args, "--state-dir", directory,
+                   "--model", args.model, "--devices", args.device, "--engine-args", args.engine_args, "--state-dir", directory,
                    "--port", str(port)]
         log = open(Path(directory, "server.log"), "w+")
         process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT)

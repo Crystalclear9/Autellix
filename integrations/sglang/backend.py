@@ -120,6 +120,7 @@ class SGLangBackend:
                         "token_ids": result.get("output_ids", []),
                         "completion_tokens": meta.get("completion_tokens", 0),
                         "prompt_tokens": meta.get("prompt_tokens", 0),
+                        "cached_prompt_tokens": meta.get("cached_tokens"),
                         "finish_reason": meta.get("finish_reason", {}), "metrics": metrics}
             finally:
                 await gen.aclose()

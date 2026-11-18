@@ -14,12 +14,15 @@ def main():
     parser.add_argument("--device", default="1")
     parser.add_argument("--output", required=True)
     parser.add_argument("--host-kv-recompute", action="store_true")
+    parser.add_argument("--modern", action="store_true", help="use SGLang's Triton path")
     args = parser.parse_args()
     results = []
     for reserve in (0, 1):
         options = dict(autellix_legacy_gpu=True, dtype="float32", context_length=512,
                        max_total_tokens=512, max_prefill_tokens=512, max_running_requests=2,
                        mem_fraction_static=.35, random_seed=0, autellix_swap_space=.25)
+        if args.modern:
+            options.update(autellix_legacy_gpu=False, dtype="float16", sampling_backend="pytorch")
         if args.host_kv_recompute:
             options.update(autellix_swap_space=.00001, autellix_host_kv_recompute=True)
         policy = PolicyConfig(policy="plas", schedule_interval=1, overprovision=reserve,

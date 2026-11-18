@@ -17,6 +17,7 @@ from autellix.runtime import InferenceEngine, ReplicaConfig, PolicyConfig
 
 BACKEND = os.environ.get("AUTELLIX_GPU_BACKEND")
 MODEL = os.environ.get("AUTELLIX_TEST_MODEL")
+DEVICE = os.environ.get("AUTELLIX_TEST_DEVICE", "0")
 
 
 @unittest.skipUnless(BACKEND and MODEL, "requires AUTELLIX_GPU_BACKEND and AUTELLIX_TEST_MODEL")
@@ -25,7 +26,7 @@ class RealInferenceTests(unittest.TestCase):
     def test_oversized_prefill_does_not_kill_replica(self):
         args = dict(max_model_len=512, max_num_batched_tokens=32, max_num_seqs=1,
                     gpu_memory_utilization=.35, swap_space=.25, dtype="half")
-        with InferenceEngine([ReplicaConfig("vllm", MODEL, engine_args=args)]) as engine:
+        with InferenceEngine([ReplicaConfig("vllm", MODEL, device=DEVICE, engine_args=args)]) as engine:
             bad_pid, good_pid = engine.start_session(), engine.start_session()
             bad = engine.submit(bad_pid, input_ids=[1] * 64, sampling=dict(max_tokens=8))
             good = engine.submit(good_pid, input_ids=[1] * 8,
@@ -78,7 +79,7 @@ class RealInferenceTests(unittest.TestCase):
                               overprovision=int(os.environ.get("AUTELLIX_TEST_RESERVE", "0")),
                               implementation=os.environ.get("AUTELLIX_TEST_IMPLEMENTATION", "paper"))
         with tempfile.TemporaryDirectory(prefix="autellix-gpu-") as directory:
-            engine = InferenceEngine([ReplicaConfig(BACKEND, MODEL, engine_args=args)],
+            engine = InferenceEngine([ReplicaConfig(BACKEND, MODEL, device=DEVICE, engine_args=args)],
                                      policy=policy, state_dir=directory)
             try:
                 engine.wait_ready(600)

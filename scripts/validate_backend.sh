@@ -13,12 +13,14 @@ python_bin="${AUTELLIX_PYTHON:-python}"
 engine_args="${AUTELLIX_ENGINE_ARGS:-$defaults}"
 cd "$project_dir"
 export AUTELLIX_GPU_BACKEND="$backend" AUTELLIX_TEST_MODEL="$model"
+export AUTELLIX_TEST_DEVICE="${AUTELLIX_TEST_DEVICE:-0}"
 if [[ "$backend" == vllm ]]; then
     export AUTELLIX_TEST_CUDA_SWAP=1
+    export CUDA_VISIBLE_DEVICES="$AUTELLIX_TEST_DEVICE"
 fi
 "$python_bin" -m unittest discover -s tests -v
-"$python_bin" scripts/http_smoke.py --backend "$backend" --model "$model" \
+"$python_bin" scripts/http_smoke.py --backend "$backend" --model "$model" --device "$AUTELLIX_TEST_DEVICE" \
     --engine-args "$engine_args" --output "outputs/validation/$backend-http.json"
 "$python_bin" -m autellix.runtime.benchmark --backend "$backend" --model "$model" \
-    --workload examples/real_workload.json --policies fcfs,mlfq,plas,atlas \
+    --workload examples/real_workload.json --policies fcfs,mlfq,plas,atlas --devices "$AUTELLIX_TEST_DEVICE" \
     --engine-args "$engine_args" --output "outputs/validation/$backend-dag-benchmark.json"

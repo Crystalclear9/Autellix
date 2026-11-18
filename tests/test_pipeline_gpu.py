@@ -19,6 +19,8 @@ class PipelineGPUTests(unittest.TestCase):
         options = dict(autellix_legacy_gpu=True, dtype="float32", pp_size=stages,
                        context_length=512, max_total_tokens=2048,
                        max_running_requests=stages, mem_fraction_static=.35, random_seed=0)
+        if os.environ.get("AUTELLIX_TEST_PP_MODERN") == "1":
+            options.update(autellix_legacy_gpu=False, dtype="float16", sampling_backend="pytorch")
         policy = PolicyConfig(boundaries=(0, .001, .002, math.inf), quanta=(.0001, .0002, .0004),
                               beta=1e12, schedule_interval=2, overprovision=0)
         with tempfile.TemporaryDirectory(prefix="autellix-pp-test-") as directory:

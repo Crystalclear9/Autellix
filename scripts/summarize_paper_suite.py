@@ -15,7 +15,8 @@ def distribution(values):
 
 def metrics(row):
     kind = row["plan"].get("workload_kind", "sharegpt")
-    token_times = (row["program_token_latencies"] if kind in {"lats", "mixed"}
+    parallel = row["plan"].get("workload_family", kind) in {"lats", "mixed"}
+    token_times = (row["program_token_latencies"] if parallel
                    else row["response_seconds_per_output_token"])
     arrivals, completed = row["arrival_times"], row["program_completion_times"]
     horizon = row["arrival_horizon_seconds"]
@@ -36,6 +37,11 @@ def metrics(row):
         if samples:
             gpu[device] = dict(mean_utilization=statistics.mean(g["utilization"] for g in samples),
                                peak_memory_mib=max(g["used_mib"] for g in samples))
+    cached = [c.get("cached_prompt_tokens") for c in row["calls"]]
+    prompt_tokens = sum(c["prompt_tokens"] for c in row["calls"])
+    cache = {}
+    if prompt_tokens and all(c is not None for c in cached):
+        cache["reported_cached_prompt_fraction"] = sum(cached) / prompt_tokens
     return dict(workload=kind, condition=row["condition"], rate=row["rate"], seed=row["seed"],
                 model=row["model"], versions=row["versions"], engine_args=row["effective_engine_args"],
                 devices=row["device_groups"], trace_sha256=row["trace_sha256"],
@@ -43,13 +49,13 @@ def metrics(row):
                 input_tokens_per_call=distribution(c["prompt_tokens"] for c in row["calls"]),
                 program_response_seconds=distribution(row["programs"].values()),
                 paper_token_latency=distribution(token_times.values()),
-                paper_metric="critical_path/total_output_tokens" if kind in {"lats", "mixed"} else "program_response/total_output_tokens",
+                paper_metric="critical_path/total_output_tokens" if parallel else "program_response/total_output_tokens",
                 output_tokens_per_second=row["output_tokens_per_second"], elapsed_seconds=row["elapsed_seconds"],
                 arrival_horizon_seconds=horizon, drain_seconds=row["drain_seconds"],
                 completions_during_arrivals=row["completions_during_arrivals"],
                 maximum_submission_lag_seconds=max(row["first_submission_lag_seconds"].values()),
                 arrival_quartiles=quartiles, backlog_checkpoints=checkpoints,
-                calls_by_engine=dict(Counter(c["engine_id"] for c in row["calls"])), gpu=gpu)
+                calls_by_engine=dict(Counter(c["engine_id"] for c in row["calls"])), gpu=gpu, **cache)
 
 
 def summarize(records):
