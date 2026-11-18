@@ -20,6 +20,8 @@
 旧实例保存了 25 个 BFCL 程序和 1 个 LATS 程序后停止实验进程。新实例已按下表
 续跑：GPU 0 采集 BFCL，GPU 1 采集 LATS，随后执行配对回放及 Mixed。
 采集前的完整程序哈希保存在 `logs/migration-47541-capture-prefixes.json`。
+最终采集得到 64 个 BFCL 程序和 6 个 LATS 程序，迁移前的 25 个 BFCL 程序与
+1 个 LATS 程序的内容哈希全部匹配。复核记录保存在 `runs/paper-suite/capture-resume-verification.json`。
 
 | 项目 | 新实例 |
 | --- | --- |
