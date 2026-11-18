@@ -42,9 +42,12 @@ def main():
     args = parser.parse_args()
     summaries = []
     for row in json.loads(Path(args.results).read_text(encoding="utf-8")):
-        path = Path(row["state_dir"]) / "replica-0.jsonl"
         ids = {call["metrics"]["rid"] for call in row["calls"] if "rid" in call["metrics"]}
-        summary = analyze(path, ids) if path.exists() else dict(events={})
+        replicas = {path.stem: analyze(path, ids)
+                    for path in sorted(Path(row["state_dir"]).glob("replica-*.jsonl"))}
+        summary = dict(replicas.get("replica-0", dict(events={})))
+        if len(replicas) > 1:
+            summary["replicas"] = replicas
         summaries.append(dict(condition=row["condition"], rate=row["rate"], repeat=row["repeat"], **summary))
     Path(args.output).write_text(json.dumps(summaries, indent=2), encoding="utf-8")
     print(json.dumps(summaries, indent=2))
