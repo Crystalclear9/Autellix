@@ -257,13 +257,15 @@ class RuntimeScheduler:
     """
 
     def __init__(self, table: ProgramTable, config: PolicyConfig | None = None,
-                 trace: str | None = None, clock=time.monotonic):
+                 trace: str | None = None, clock=time.monotonic, publish_waiting_each_step=True):
         self.table = table
         self.config = config or PolicyConfig()
         self.calls: dict[str, RuntimeCall] = {}
         self.clock = clock
         self.counter = 0
         self.trace = trace
+        self.publish_waiting_each_step = publish_waiting_each_step
+        self._scheduled = set()
         if trace:
             Path(trace).parent.mkdir(parents=True, exist_ok=True)
 
@@ -329,10 +331,17 @@ class RuntimeScheduler:
     def begin(self, rids, active_rids=()):
         now = self.clock()
         selected = set(rids) | set(active_rids)
-        for call in self.calls.values():
+        if self.publish_waiting_each_step:
+            affected = self.calls.values()
+        else:
+            # An unselected call's wait accrues until refresh, admission to
+            # a batch, or completion. No per-step database write is needed.
+            affected = [self.calls[rid] for rid in selected | self._scheduled if rid in self.calls]
+            self._scheduled = selected
+        for call in affected:
             self._wait_until(call, now)
             call.scheduled = call.rid in selected
-        self._publish(self.calls.values())
+        self._publish(affected)
         self.emit("batch", requests=list(rids))
 
     def executed(self, rids, seconds: float):

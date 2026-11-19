@@ -14,17 +14,21 @@ from autellix.runtime.telemetry import GPUMonitor
 
 
 def trial(model, device, engine_args, trace, arm, reserve=0, interval=8, quantum_scale=1., request_timeout=600,
-          boundary_scale=None, beta=8., progress_interval=0, routing="program"):
+          boundary_scale=None, beta=8., progress_interval=0, routing="program", backend="sglang"):
     options = dict(engine_args)
-    options["autellix_native_baseline"] = arm == "sglang-native"
+    native = arm in {"sglang-native", "vllm", "vllm-opt", "vllm-opt-multistep"}
+    if backend == "sglang":
+        options["autellix_native_baseline"] = native
+    elif native:
+        options["autellix_mode"] = arm
     defaults = PolicyConfig()
     boundary_scale = quantum_scale if boundary_scale is None else boundary_scale
-    policy = PolicyConfig(policy="fcfs" if arm == "sglang-native" else arm,
-                          schedule_interval=interval, overprovision=0 if arm == "sglang-native" else reserve,
+    policy = PolicyConfig(policy="fcfs" if native else arm,
+                          schedule_interval=interval, overprovision=0 if native else reserve,
                           boundaries=tuple(x * boundary_scale for x in defaults.boundaries),
                           quanta=tuple(x * quantum_scale for x in defaults.quanta), beta=beta)
     groups = device.split(";")
-    with InferenceEngine([ReplicaConfig("sglang", model, group, options) for group in groups],
+    with InferenceEngine([ReplicaConfig(backend, model, group, options) for group in groups],
                          policy=policy, routing=routing) as engine:
         sessions = [engine.start_session() for _ in groups]
         futures = [engine.submit(sid, prompt="Warmup.", sampling={"temperature": 0, "max_tokens": 4})
@@ -39,14 +43,15 @@ def trial(model, device, engine_args, trace, arm, reserve=0, interval=8, quantum
         result["gpu_sampling_errors"] = monitor.errors
         result["device_groups"] = groups
         result["routing"] = routing
-        assert all(bool(c["metrics"].get("native_sglang")) == (arm == "sglang-native")
-                   for c in result["calls"]), "unexpected scheduler accounting path"
+        if backend == "sglang":
+            assert all(bool(c["metrics"].get("native_sglang")) == native
+                       for c in result["calls"]), "unexpected scheduler accounting path"
         engine.wait_idle(30)
         assert engine.table.describe() == {}, "session cleanup incomplete"
         result["arm"] = arm
         result["state_dir"] = str(engine.state_dir)
         result["effective_engine_args"] = options
-        result["hooks_installed"] = arm != "sglang-native"
+        result["hooks_installed"] = not native
         result["overprovision"] = policy.overprovision
         result["schedule_interval"] = policy.schedule_interval
         result["quantum_scale"] = quantum_scale
@@ -56,10 +61,12 @@ def trial(model, device, engine_args, trace, arm, reserve=0, interval=8, quantum
         # time, including initial admission/driver delay, divided by output count.
         counts = {p["program_id"]: 0 for p in trace}
         for call in result["calls"]:
-            counts[call["workload_program"]] += call["completion_tokens"]
+            counts[call["workload_program"]] += call.get("completion_tokens", len(call["token_ids"]))
         result["response_seconds_per_output_token"] = {
-            pid: latency/counts[pid] for pid, latency in result["programs"].items()}
+            pid: latency/counts[pid] if counts[pid] else None for pid, latency in result["programs"].items()}
         result["paper_sequential_token_latency"] = distribution(result["response_seconds_per_output_token"].values())
+        if backend == "vllm":
+            result["program_datasets"] = {p["program_id"]: p.get("dataset") for p in trace}
         result["output_hashes"] = {f'{c["workload_program"]}/{c["workload_call"]}':
             hashlib.sha256(c["text"].encode()).hexdigest() for c in result["calls"]}
         return result

@@ -9,6 +9,7 @@ from typing import Iterable
 
 from .baselines import make_baseline
 from .datasets import load_programs_from_file, workload_analysis
+from ..core.execution import make_execution_model
 from ..core.models import SimulationResult
 from ..core.simulator import Simulator
 from .workloads import make_paper_workload
@@ -85,6 +86,7 @@ class ExperimentRunner:
         arrival_rate: float,
         engines: int,
         dataset_path: str | None = None,
+        fixed_steps: bool = False,
     ) -> tuple[SimulationResult, dict[str, float | int | str]]:
         programs = make_paper_workload(
             workload,
@@ -103,7 +105,7 @@ class ExperimentRunner:
             programs,
             scheduler=baseline.scheduler,
             load_balancer=baseline.load_balancer,
-            execution_model=baseline.execution_model,
+            execution_model=make_execution_model("fixed") if fixed_steps else baseline.execution_model,
             num_engines=engines,
             batch_size=self.batch_size,
             schedule_interval=baseline.schedule_interval,
@@ -128,6 +130,7 @@ class ExperimentRunner:
         num_programs: int,
         load_balancers: Iterable[str] | None = None,
         dataset_path: str | None = None,
+        fixed_steps: bool = False,
     ) -> list[dict[str, float | int | str]]:
         if load_balancers is not None:
             return self.sweep_load_balancers(
@@ -149,6 +152,7 @@ class ExperimentRunner:
                         arrival_rate=rate,
                         engines=engines,
                         dataset_path=dataset_path,
+                        fixed_steps=fixed_steps,
                     )
                     record["status"] = "ok"
                 except RuntimeError as exc:
@@ -322,6 +326,17 @@ class ExperimentRunner:
                 num_programs=num_programs,
                 dataset_path=dataset_path,
             )
+        if normalized == "optimal-scheduling":
+            rates = (.0004, .0008, .0016) if workload == "lats" else (.005, .01, .02)
+            return self.sweep(
+                workload=workload,
+                baseline_names=["fcfs", "round-robin", "mlfq", "autellix", "srpt"],
+                arrival_rates=rates,
+                engines=engines,
+                num_programs=num_programs,
+                dataset_path=dataset_path,
+                fixed_steps=True,
+            )
         if normalized == "timing-breakdown":
             records = self.sweep(
                 workload=workload,
@@ -348,7 +363,7 @@ class ExperimentRunner:
             return records
         raise ValueError(
             "preset must be one of: workload-analysis, latency-throughput, "
-            "load-balancer, offline-makespan, timing-breakdown"
+            "load-balancer, offline-makespan, optimal-scheduling, timing-breakdown"
         )
 
 

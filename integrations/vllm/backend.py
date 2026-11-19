@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from importlib.metadata import version
+from time import perf_counter
 from types import MethodType
 
 from autellix.runtime.policy import PolicyConfig, ProgramTable, RuntimeScheduler
@@ -12,7 +13,8 @@ class VLLMBackend:
     """Pinned single-GPU or tensor-parallel replica with internal scheduling."""
 
     def __init__(self, model: str, table_path: str, config: PolicyConfig | None = None,
-                 trace: str | None = None, batched_swap: bool = True, **engine_args):
+                 trace: str | None = None, batched_swap: bool = True, observe_native: bool = True,
+                 measure_timing: bool = False, publish_waiting_each_step: bool = True, **engine_args):
         if version("vllm") != "0.6.1":
             raise RuntimeError("this backend requires vllm==0.6.1")
         config = config or PolicyConfig()
@@ -52,13 +54,19 @@ class VLLMBackend:
             # by PaperPlan rather than native chunk-prefill scheduling.
             args["enable_chunked_prefill"] = True
             args.setdefault("max_num_batched_tokens", max(args.get("max_model_len", 2048), capacity + config.overprovision))
-        if tp > 1 and not native:
+        if tp > 1 and not native and batched_swap:
             from .executor import AutellixMPExecutor
             args["distributed_executor_backend"] = AutellixMPExecutor
         self.table = ProgramTable(table_path)
-        self.controller = RuntimeScheduler(self.table, config, trace)
+        self.controller = None
+        if not native or observe_native:
+            self.controller = RuntimeScheduler(self.table, config, trace,
+                                               publish_waiting_each_step=publish_waiting_each_step)
         self.engine = LLMEngine.from_engine_args(EngineArgs(model=model, **args))
-        self.scheduler = attach_scheduler(self.engine.scheduler[0], self.controller, observe_only=native)
+        self.scheduler = self.engine.scheduler[0]
+        if self.controller is None:
+            return
+        attach_scheduler(self.scheduler, self.controller, observe_only=native)
         if refill_mode:
             from autellix.runtime.window import SchedulingWindow
             self.scheduler._autellix_window = SchedulingWindow(self.controller, capacity)
@@ -70,6 +78,34 @@ class VLLMBackend:
         if batched_swap and not native:
             for cache in worker.cache_engine:
                 attach_cache_engine(cache)
+        if measure_timing:
+            controller = self.controller
+            schedule = self.scheduler.schedule
+
+            def timed_schedule(*args, **kwargs):
+                started = perf_counter()
+                result = schedule(*args, **kwargs)
+                outputs = result[1]
+                groups = len(outputs.scheduled_seq_groups)
+                prefill = outputs.num_prefill_groups
+                self.scheduler._autellix_timed_phase = ("prefill" if groups == prefill else "mixed") if prefill else "decode"
+                controller.emit("schedule_time", seconds=perf_counter() - started,
+                                requests=[g.seq_group.request_id for g in outputs.scheduled_seq_groups])
+                return result
+
+            def timed_transfer(transfer, direction):
+                def execute(mapping):
+                    started = perf_counter()
+                    transfer(mapping)
+                    torch.cuda.synchronize()
+                    controller.emit("kv_transfer", direction=direction, blocks=len(mapping),
+                                    seconds=perf_counter() - started)
+                return execute
+
+            self.scheduler.schedule = timed_schedule
+            for cache in worker.cache_engine:
+                cache.swap_out = timed_transfer(cache.swap_out, "out")
+                cache.swap_in = timed_transfer(cache.swap_in, "in")
         def transfer_out(blocks):
             mapping = torch.tensor(blocks, dtype=torch.int64, device="cpu")
             worker.cache_engine[0].swap_out(mapping)
@@ -99,7 +135,11 @@ class VLLMBackend:
             end.record()
             end.synchronize()
             if rids:
-                controller.executed(rids, start.elapsed_time(end) / 1000.)
+                seconds = start.elapsed_time(end) / 1000.
+                controller.executed(rids, seconds)
+                if measure_timing:
+                    controller.emit("model_phase_time", phase=scheduler._autellix_timed_phase,
+                                    seconds=seconds, requests=rids)
                 if scheduler._autellix_window is not None:
                     scheduler._autellix_window.executed(scheduler._autellix_is_prefill)
             return result
@@ -117,34 +157,39 @@ class VLLMBackend:
         tokens = prompt if isinstance(prompt, list) else self.tokenize(prompt)
         if len(tokens) >= self.engine.model_config.max_model_len:
             raise ValueError("prompt leaves no room for generation within max_model_len")
-        if (self.scheduler._autellix_paper is not None and
+        if (getattr(self.scheduler, "_autellix_paper", None) is not None and
                 len(tokens) > self.scheduler.scheduler_config.max_num_batched_tokens):
             raise ValueError("prompt exceeds the paper-mode whole-prefill token budget; increase max_num_batched_tokens")
         if any(t < 0 or t >= self.engine.model_config.hf_config.vocab_size for t in tokens):
             raise ValueError("input token ID outside model vocabulary")
-        self.controller.admit(rid, pid, metadata=self.table.take_context(rid))
+        metadata = self.table.take_context(rid)
+        if self.controller is not None:
+            self.controller.admit(rid, pid, metadata=metadata)
         try:
             inputs = {"prompt_token_ids": prompt} if isinstance(prompt, list) else prompt
             self.engine.add_request(rid, inputs, params)
         except BaseException:
-            self.controller.finish(rid, "failed")
+            if self.controller is not None:
+                self.controller.finish(rid, "failed")
             raise
 
     def step(self):
         try:
             outputs = self.engine.step()
         except BaseException:
-            self.controller.fail_all()
+            if self.controller is not None:
+                self.controller.fail_all()
             raise
         results = []
         for result in outputs:
             choice = result.outputs[0] if result.outputs else None
             metrics = {}
-            if result.finished:
+            if result.finished and self.controller is not None:
                 metrics = self.controller.finish(result.request_id)
             results.append({"request_id": result.request_id, "finished": result.finished,
                                 "text": choice.text if choice else "",
                                 "token_ids": list(choice.token_ids) if choice else [],
+                                "completion_tokens": len(choice.token_ids) if choice else 0,
                                 "finish_reason": choice.finish_reason if choice else "error",
                                 "prompt_tokens": len(result.prompt_token_ids or []),
                             "metrics": metrics})
@@ -152,14 +197,16 @@ class VLLMBackend:
 
     def cancel(self, rid):
         self.engine.abort_request(rid)
-        self.controller.finish(rid, "cancelled")
+        if self.controller is not None:
+            self.controller.finish(rid, "cancelled")
 
     def has_work(self):
         return self.engine.has_unfinished_requests()
 
     def close(self):
-        for rid in list(self.controller.calls):
-            self.cancel(rid)
+        if self.controller is not None:
+            for rid in list(self.controller.calls):
+                self.cancel(rid)
         shutdown = getattr(self.engine.model_executor, "shutdown", None)
         if shutdown is not None:
             shutdown()

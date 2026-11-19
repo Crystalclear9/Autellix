@@ -2,14 +2,15 @@
 from __future__ import annotations
 
 import argparse
-import concurrent.futures
 import json
 import statistics
 import random
 import copy
 import math
 import hashlib
+import heapq
 from importlib.metadata import version, PackageNotFoundError
+from queue import Empty, SimpleQueue
 import time
 from pathlib import Path
 
@@ -49,9 +50,10 @@ def validate_workload(programs):
         raise ValueError("workload must contain programs")
 
 
-def poisson_trace(programs, count, rate, seed=0, *, equal_dataset_counts=False):
+def sample_trace(programs, count, rate, seed=0, *, equal_dataset_counts=False):
+    """Sample programs with Poisson arrivals, or submit them all at time zero if rate is None."""
     validate_workload(programs)
-    if count < 1 or not math.isfinite(rate) or rate <= 0:
+    if count < 1 or (rate is not None and (not math.isfinite(rate) or rate <= 0)):
         raise ValueError("count and arrival rate must be positive")
     rng, now, trace = random.Random(seed), 0., []
     datasets = {}
@@ -64,7 +66,7 @@ def poisson_trace(programs, count, rate, seed=0, *, equal_dataset_counts=False):
         dataset_order = pools * (count // len(pools))
         rng.shuffle(dataset_order)
     for i in range(count):
-        if i:
+        if i and rate is not None:
             now += rng.expovariate(rate)
         pool = dataset_order[i] if equal_dataset_counts else rng.choice(pools)
         program = copy.deepcopy(rng.choice(pool))
@@ -72,6 +74,12 @@ def poisson_trace(programs, count, rate, seed=0, *, equal_dataset_counts=False):
         program["arrival_time"] = now
         trace.append(program)
     return trace
+
+
+def poisson_trace(programs, count, rate, seed=0, *, equal_dataset_counts=False):
+    if rate is None:
+        raise ValueError("Poisson arrivals require a positive rate")
+    return sample_trace(programs, count, rate, seed, equal_dataset_counts=equal_dataset_counts)
 
 
 def load_workloads(paths):
@@ -103,86 +111,93 @@ def distribution(values):
 
 def run_workload(engine, programs, request_timeout=600, progress_interval=0):
     validate_workload(programs)
-    results, pending, submitted = {}, {}, set()
-    program_times = {}
-    first_submissions = {}
-    sessions, completions, call_starts, critical = {}, {}, {}, {}
+    arrivals = {p["program_id"]: p.get("arrival_time", 0) for p in programs}
+    remaining_calls = {p["program_id"]: len(p["calls"]) for p in programs}
+    calls, parents, dependents, order = {}, {}, {}, {}
+    for program in programs:
+        pid = program["program_id"]
+        for call in program["calls"]:
+            key = pid, call["call_id"]
+            order[key] = len(calls)
+            calls[key] = call
+            parents[key] = [(pid, parent) for parent in call.get("parents", [])]
+            for parent in parents[key]:
+                dependents.setdefault(parent, []).append(key)
+    remaining_parents = {key: len(keys) for key, keys in parents.items()}
+    results, pending, sessions = {}, {}, {}
+    program_times, first_submissions = {}, {}
+    completions, call_starts, critical = {}, {}, {}
+    last_completion, critical_times, output_counts = {}, {}, {}
+    completed_futures = SimpleQueue()
+    deadlines = []
     start = time.monotonic()
-    last_progress = start
+    ready = [(start + arrivals[key[0]] + call.get("think_time", 0), order[key], key)
+             for key, call in calls.items() if not parents[key]]
+    heapq.heapify(ready)
+    next_progress = start + progress_interval if progress_interval else math.inf
     try:
-        while len(results) < sum(len(p["calls"]) for p in programs):
+        while len(results) < len(calls):
             now = time.monotonic()
-            if progress_interval and now - last_progress >= progress_interval:
+            if now >= next_progress:
                 print(f"PROGRESS elapsed={now-start:.1f}s calls={len(results)} "
                       f"programs={len(program_times)}/{len(programs)} pending={len(pending)}", flush=True)
-                last_progress = now
-            for program in programs:
-                pid = program["program_id"]
-                arrival = start + program.get("arrival_time", 0)
-                if time.monotonic() < arrival:
-                    continue
+                next_progress = now + progress_interval
+            while ready and ready[0][0] <= time.monotonic():
+                _, _, key = heapq.heappop(ready)
+                pid, call_id = key
                 if pid not in sessions:
                     sessions[pid] = engine.start_session()
-                for call in program["calls"]:
-                    key = pid, call["call_id"]
-                    parents = [(pid, parent) for parent in call.get("parents", [])]
-                    if key in submitted or not all(parent in results for parent in parents):
-                        continue
-                    ready_at = max((completions[parent] for parent in parents), default=arrival) + call.get("think_time", 0)
-                    if time.monotonic() < ready_at:
-                        continue
+                call = calls[key]
+                append_parents = parents[key] and call.get("append_parent_outputs", True)
+                if "input_ids" in call and not append_parents:
+                    inputs = {"input_ids": call["input_ids"]}
+                else:
                     prompt = call["prompt"]
-                    if parents and call.get("append_parent_outputs", True):
-                        prompt += "\nPrevious results:\n" + "\n".join(results[parent]["text"] for parent in parents)
-                    call_starts[key] = time.monotonic()
-                    first_submissions.setdefault(pid, call_starts[key] - start)
-                    frozen_input = "input_ids" in call and not (parents and call.get("append_parent_outputs", True))
-                    inputs = ({"input_ids": call["input_ids"]} if frozen_input
-                              else {"prompt": prompt})
-                    future = engine.submit(sessions[pid], **inputs, call_id=call["call_id"],
-                                           sampling={"temperature": 0, "max_tokens": call.get("max_tokens", 32),
-                                                     **call.get("sampling", {})})
-                    pending[future] = key
-                    future.add_done_callback(lambda _, k=key: completions.setdefault(k, time.monotonic()))
-                    submitted.add(key)
-            # Short bounded waits keep scheduled arrivals and external-tool
-            # delays independent of the duration of outstanding generations.
-            done, _ = concurrent.futures.wait(pending, timeout=.01,
-                                              return_when=concurrent.futures.FIRST_COMPLETED)
-            if not done:
-                if any(time.monotonic() - call_starts[key] > request_timeout for key in pending.values()):
+                    if append_parents:
+                        prompt += "\nPrevious results:\n" + "\n".join(results[parent]["text"] for parent in parents[key])
+                    inputs = {"prompt": prompt}
+                call_starts[key] = time.monotonic()
+                first_submissions.setdefault(pid, call_starts[key] - start)
+                future = engine.submit(sessions[pid], **inputs, call_id=call_id,
+                                       sampling={"temperature": 0, "max_tokens": call.get("max_tokens", 32),
+                                                 **call.get("sampling", {})})
+                pending[future] = key
+                heapq.heappush(deadlines, (call_starts[key] + request_timeout, order[key], future))
+                future.add_done_callback(lambda done: completed_futures.put((done, time.monotonic())))
+            while deadlines and deadlines[0][2] not in pending:
+                heapq.heappop(deadlines)
+            deadline = deadlines[0][0] if deadlines else math.inf
+            wake_at = min(deadline, next_progress, ready[0][0] if ready else math.inf)
+            try:
+                timeout = None if math.isinf(wake_at) else max(0., wake_at - time.monotonic())
+                future, completed = completed_futures.get(timeout=timeout)
+            except Empty:
+                if time.monotonic() >= deadline:
                     raise TimeoutError(f"backend request exceeded {request_timeout} seconds")
-                if not pending:
-                    time.sleep(.001)
                 continue
-            for future in done:
-                key = pending.pop(future)
-                results[key] = future.result()
-                completions.setdefault(key, time.monotonic())
-            for program in programs:
-                pid = program["program_id"]
-                if pid not in program_times and all((pid, c["call_id"]) in results for c in program["calls"]):
-                    program_times[pid] = max(completions[(pid, c["call_id"])] for c in program["calls"]) - start - program.get("arrival_time", 0)
-                    unresolved = list(program["calls"])
-                    while unresolved:
-                        for call in unresolved[:]:
-                            key = pid, call["call_id"]
-                            parents = [(pid, parent) for parent in call.get("parents", [])]
-                            if all(parent in critical for parent in parents):
-                                critical[key] = max((critical[p] for p in parents), default=0) + completions[key] - call_starts[key] + call.get("think_time", 0)
-                                unresolved.remove(call)
-                    engine.end_session(sessions[pid])
+            key = pending.pop(future)
+            pid = key[0]
+            result = results[key] = future.result()
+            completions[key] = completed
+            critical[key] = (max((critical[parent] for parent in parents[key]), default=0.)
+                             + completed - call_starts[key] + calls[key].get("think_time", 0))
+            critical_times[pid] = max(critical_times.get(pid, 0.), critical[key])
+            output_counts[pid] = output_counts.get(pid, 0) + result.get("completion_tokens", len(result["token_ids"]))
+            last_completion[pid] = max(last_completion.get(pid, start), completed)
+            for child in dependents.get(key, ()):
+                remaining_parents[child] -= 1
+                if remaining_parents[child] == 0:
+                    at = max(completions[parent] for parent in parents[child]) + calls[child].get("think_time", 0)
+                    heapq.heappush(ready, (at, order[child], child))
+            remaining_calls[pid] -= 1
+            if remaining_calls[pid] == 0:
+                program_times[pid] = last_completion[pid] - start - arrivals[pid]
+                engine.end_session(sessions.pop(pid))
         elapsed = time.monotonic() - start
-        tokens = sum(r.get("completion_tokens", len(r["token_ids"])) for r in results.values())
-        token_latencies, critical_times = {}, {}
-        for program in programs:
-            pid = program["program_id"]
-            critical_times[pid] = max(critical[(pid, c["call_id"])] for c in program["calls"])
-            count = sum(results[(pid, c["call_id"])].get("completion_tokens", len(results[(pid, c["call_id"])] ["token_ids"])) for c in program["calls"])
-            token_latencies[pid] = critical_times[pid] / count if count else None
-        arrival_end = max(p.get("arrival_time", 0) for p in programs)
-        completion_times = {p["program_id"]: p.get("arrival_time", 0) + program_times[p["program_id"]]
-                            for p in programs}
+        tokens = sum(output_counts.values())
+        token_latencies = {pid: critical_times[pid] / count if count else None for pid, count in output_counts.items()}
+        arrival_end = max(arrivals.values())
+        completion_times = {pid: completed - start for pid, completed in last_completion.items()}
         return dict(measurement="real_backend", policy=engine.policy.policy,
                     backend=[r.backend for r in engine.replicas], model=engine.model,
                     elapsed_seconds=elapsed, completion_tokens=tokens,
@@ -192,13 +207,12 @@ def run_workload(engine, programs, request_timeout=600, progress_interval=0):
                     drain_seconds=max(0., elapsed-arrival_end),
                     completions_during_arrivals=sum(t <= arrival_end for t in completion_times.values()),
                     program_completion_times=completion_times,
-                    first_submission_lag_seconds={p["program_id"]: first_submissions[p["program_id"]] - p.get("arrival_time", 0)
-                                                  for p in programs},
+                    first_submission_lag_seconds={pid: submitted - arrivals[pid] for pid, submitted in first_submissions.items()},
                     program_latency_seconds=distribution(program_times.values()),
                     program_token_latency_seconds=distribution(token_latencies.values()),
                     program_critical_path_seconds=critical_times,
                     program_token_latencies=token_latencies,
-                    arrival_times={p["program_id"]: p.get("arrival_time", 0) for p in programs},
+                    arrival_times=arrivals,
                     programs=program_times,
                     calls=[dict(workload_program=pid, workload_call=cid, **r) for (pid, cid), r in results.items()])
     finally:

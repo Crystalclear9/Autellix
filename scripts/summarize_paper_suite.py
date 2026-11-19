@@ -1,6 +1,6 @@
 """Summarize complete paired paper-workload trials and arrival-window behavior."""
 import argparse
-from collections import Counter
+from collections import Counter, defaultdict
 import json
 from pathlib import Path
 import statistics
@@ -21,6 +21,11 @@ def metrics(row):
     parallel = row["plan"].get("workload_family", kind) in {"lats", "mixed"}
     token_times = (row["program_token_latencies"] if parallel
                    else row["response_seconds_per_output_token"])
+    paper_metric = "critical_path/total_output_tokens" if parallel else "program_response/total_output_tokens"
+    if row["plan"].get("workload_family") == "mixed" and "program_datasets" in row:
+        token_times = {pid: (token_times[pid] if dataset == "lats" else row["response_seconds_per_output_token"][pid])
+                       for pid, dataset in row["program_datasets"].items()}
+        paper_metric = "per_program_response_or_critical_path/total_output_tokens"
     arrivals, completed = row["arrival_times"], row["program_completion_times"]
     horizon = row["arrival_horizon_seconds"]
     checkpoints = []
@@ -54,7 +59,7 @@ def metrics(row):
                 input_tokens_per_call=distribution(c["prompt_tokens"] for c in row["calls"]),
                 program_response_seconds=distribution(row["programs"].values()),
                 paper_token_latency=distribution(token_times.values()),
-                paper_metric="critical_path/total_output_tokens" if parallel else "program_response/total_output_tokens",
+                paper_metric=paper_metric,
                 output_tokens_per_second=row["output_tokens_per_second"], completed_programs_per_second=len(arrivals)/row["elapsed_seconds"],
                 elapsed_seconds=row["elapsed_seconds"],
                 arrival_horizon_seconds=horizon, drain_seconds=row["drain_seconds"],
@@ -74,22 +79,28 @@ def summarize(records, slo_targets=DEFAULT_SLO_TARGETS):
             raise ValueError(f"duplicate trial: {key}, {row['condition']}")
         group[row["condition"]] = row
     trials, comparisons = [], []
-    for key, group in sorted(groups.items()):
-        native = next(row for row in group.values() if row["arm"] == "sglang-native"
-                      and not row["effective_engine_args"].get("autellix_native_defaults"))
-        baseline = metrics(native)
-        trials.extend(metrics(row) for row in group.values())
+    for key, group in sorted(groups.items(), key=lambda item: (item[0][0], item[0][1] or 0, *item[0][2:])):
+        by_case = {name: metrics(row) for name, row in group.items()}
+        trials.extend(by_case.values())
+        native = next((row for row in group.values() if row["arm"] == "sglang-native"
+                       and not row["effective_engine_args"].get("autellix_native_defaults")), None)
+        if native is None:
+            native = next((group[name] for name in ("vllm", "vllm-opt", "program", "native-swap") if name in group), None)
+        if native is None:
+            continue
+        baseline = by_case[native["condition"]]
         for row in group.values():
             if row is native:
                 continue
-            candidate = metrics(row)
+            candidate = by_case[row["condition"]]
             def lengths(r):
                 return {(c["workload_program"], c["workload_call"]):
                         (c["prompt_tokens"], c["completion_tokens"]) for c in r["calls"]}
             def options(r):
                 # Native SGLang does not allocate the Autellix host KV cache.
                 return {k: v for k, v in r["effective_engine_args"].items()
-                        if k not in {"autellix_native_baseline", "autellix_swap_space", "autellix_host_kv_recompute"}}
+                        if k not in {"autellix_native_baseline", "autellix_swap_space", "autellix_host_kv_recompute",
+                                     "autellix_mode", "preemption_mode", "batched_swap"}}
             native_defaults = row["arm"] == "sglang-native" and row["effective_engine_args"].get("autellix_native_defaults", False)
             row_options, baseline_options = options(row), options(native)
             if native_defaults:
@@ -101,9 +112,11 @@ def summarize(records, slo_targets=DEFAULT_SLO_TARGETS):
                           same_model=row["model"] == native["model"], same_versions=row["versions"] == native["versions"])
             if not all(paired.values()):
                 raise ValueError(f"unmatched workload or resources: {key}, {paired}")
-            per_program = []
+            per_program, calls_by_program = [], defaultdict(list)
+            for call in row["calls"]:
+                calls_by_program[call["workload_program"]].append(call)
             for pid, response in row["programs"].items():
-                calls = [c for c in row["calls"] if c["workload_program"] == pid]
+                calls = calls_by_program[pid]
                 per_program.append(dict(program=pid, calls=len(calls),
                     output_tokens=sum(c["completion_tokens"] for c in calls),
                     max_input_tokens=max(c["prompt_tokens"] for c in calls),
@@ -121,15 +134,25 @@ def summarize(records, slo_targets=DEFAULT_SLO_TARGETS):
                 p95_paper_latency_change_pct=100*(candidate["paper_token_latency"]["p95"]/baseline["paper_token_latency"]["p95"]-1),
                 p99_paper_latency_change_pct=100*(candidate["paper_token_latency"]["p99"]/baseline["paper_token_latency"]["p99"]-1),
                 throughput_change_pct=100*(candidate["output_tokens_per_second"]/baseline["output_tokens_per_second"]-1)))
+    configurations = defaultdict(list)
+    for trial in trials:
+        if trial["rate"] is not None:
+            ranks = tuple(len(device.split(",")) for device in trial["devices"])
+            configurations[trial["workload"], trial["model"], ranks, tuple(sorted(trial["versions"].items()))].append(trial)
     slo_points = []
-    for workload in sorted({t["workload"] for t in trials}):
-        selected = [t for t in trials if t["workload"] == workload]
+    for (workload, model, ranks, versions), selected in sorted(configurations.items()):
         for target in slo_targets:
-            rates = {condition: max((t["rate"] for t in selected if t["condition"] == condition
-                                      and t["paper_token_latency"]["mean"] <= target), default=None)
-                     for condition in sorted({t["condition"] for t in selected})}
-            slo_points.append(dict(workload=workload, mean_seconds_per_output_token_target=target,
-                                   maximum_tested_rate_meeting_latency=rates))
+            qualified = {condition: [trial for trial in selected if trial["condition"] == condition
+                                     and trial["paper_token_latency"]["mean"] <= target]
+                         for condition in sorted({trial["condition"] for trial in selected})}
+            slo_points.append(dict(workload=workload, model=model, ranks_per_replica=ranks, versions=dict(versions),
+                                   mean_seconds_per_output_token_target=target,
+                                   maximum_tested_rate_meeting_latency={
+                                       case: max((trial["rate"] for trial in rows), default=None)
+                                       for case, rows in qualified.items()},
+                                   maximum_completed_rate_meeting_latency={
+                                       case: max((trial["completed_programs_per_second"] for trial in rows), default=None)
+                                       for case, rows in qualified.items()}))
     return dict(trials=trials, comparisons=comparisons, slo_points=slo_points,
                 slo_definition="Largest measured offered rate satisfying mean program token latency; finite trace backlog and drain are reported separately.")
 

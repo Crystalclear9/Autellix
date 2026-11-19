@@ -52,7 +52,9 @@ def programs_from_records(
             call_id = str(_get(row, "call_id", "request_id", "id", default=f"{program_id}_{idx}"))
             parents = _parents(row, previous_call_id)
             prefill = int(_get(row, "prefill_tokens", "prompt_tokens", "input_tokens", default=0))
-            decode = int(_get(row, "decode_tokens", "completion_tokens", "output_tokens", default=0))
+            sampling = row.get("sampling")
+            replay_tokens = row.get("max_tokens", 0) if isinstance(sampling, dict) and sampling.get("ignore_eos") else 0
+            decode = int(_get(row, "decode_tokens", "completion_tokens", "output_tokens", default=replay_tokens))
             model_time = int(
                 _get(
                     row,

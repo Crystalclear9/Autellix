@@ -54,6 +54,36 @@ class RuntimeRegressions(unittest.TestCase):
         self.assertEqual(Counter(p["dataset"] for p in trace), dict(sharegpt=4, bfcl=4, lats=4))
         self.assertEqual(trace, poisson_trace(source, 12, 1., 2026, equal_dataset_counts=True))
 
+    def test_offline_trace_submits_sampled_programs_at_time_zero(self):
+        from autellix.runtime.benchmark import sample_trace
+        source = [{"program_id": "p", "arrival_time": 3, "calls": [{"call_id": "a", "prompt": "hi"}]}]
+        trace = sample_trace(source, 3, None, 2026)
+        self.assertEqual([row["arrival_time"] for row in trace], [0, 0, 0])
+        self.assertEqual([row["program_id"] for row in trace], ["p-0", "p-1", "p-2"])
+        self.assertEqual(source[0]["arrival_time"], 3)
+
+    def test_window_activity_preserves_measured_waiting_time(self):
+        timings = []
+        for publish_each_step in (True, False):
+            with tempfile.TemporaryDirectory() as directory:
+                table = ProgramTable(str(Path(directory, "state.db")))
+                clock = [0.]
+                controller = RuntimeScheduler(table, clock=lambda: clock[0],
+                                              publish_waiting_each_step=publish_each_step)
+                table.open("p")
+                controller.admit("a", "p")
+                controller.admit("b", "p")
+                for tick in (1., 3.):
+                    clock[0] = tick
+                    controller.begin(["a"])
+                    clock[0] += 1
+                    controller.executed(["a"], 1.)
+                clock[0] = 5.
+                controller.begin(["b"])
+                timings.append((controller.calls["a"].waited, controller.calls["b"].waited))
+                table.close()
+        self.assertEqual(timings, [(3., 5.), (3., 5.)])
+
     def test_program_token_latency_uses_dag_critical_path(self):
         from autellix.runtime.benchmark import run_workload
         clock = [0.]

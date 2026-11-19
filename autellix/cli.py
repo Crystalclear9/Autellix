@@ -162,6 +162,7 @@ def build_parser() -> argparse.ArgumentParser:
             "latency-throughput",
             "load-balancer",
             "offline-makespan",
+            "optimal-scheduling",
             "timing-breakdown",
         ],
     )

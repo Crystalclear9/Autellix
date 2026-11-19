@@ -10,7 +10,18 @@ from importlib.metadata import version
 from pathlib import Path
 
 from compare_sglang import trial
-from autellix.runtime.benchmark import load_workloads, poisson_trace
+from autellix.runtime.benchmark import load_workloads, sample_trace
+
+
+def hash_trace(trace):
+    # Match json.dumps(trace, sort_keys=True) without buffering the entire trace.
+    digest = hashlib.sha256(b"[")
+    for index, program in enumerate(trace):
+        if index:
+            digest.update(b", ")
+        digest.update(json.dumps(program, sort_keys=True).encode())
+    digest.update(b"]")
+    return digest.hexdigest()
 
 
 def completed_trials(records, plan, versions):
@@ -42,6 +53,7 @@ def main():
     parser.add_argument("--resume", action="store_true", help="reuse completed trials with unchanged inputs and settings")
     args = parser.parse_args()
     plan = json.loads(Path(args.plan).read_text())
+    backend = plan.get("backend", "sglang")
     if "layer_partition" in plan:
         os.environ["SGLANG_PP_LAYER_PARTITION"] = ",".join(map(str, plan["layer_partition"]))
     elif plan["engine_args"].get("pp_size", 1) == 1:
@@ -49,14 +61,14 @@ def main():
     programs = load_workloads([plan["workload"]])
     destination = Path(args.output)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    versions = {name: version(name) for name in ["sglang", "torch", "transformers"]}
+    versions = {name: version(name) for name in (backend, "torch", "transformers")}
     records = json.loads(destination.read_text()) if args.resume and destination.exists() else []
     completed = completed_trials(records, plan, versions)
     for rate in plan["rates"]:
         for repeat in range(plan.get("repeats", 1)):
             seed = plan.get("seed", 100) + repeat
             if plan.get("programs"):
-                trace = poisson_trace(programs, plan["programs"], rate, seed,
+                trace = sample_trace(programs, plan["programs"], rate, seed,
                                       equal_dataset_counts=plan.get("equal_dataset_counts", False))
             else:
                 trace = copy.deepcopy(programs)
@@ -64,11 +76,11 @@ def main():
                 rng.shuffle(trace)
                 arrival = 0.
                 for i, program in enumerate(trace):
-                    if i:
+                    if i and rate is not None:
                         arrival += rng.expovariate(rate)
                     program["arrival_time"] = arrival
             cases = plan["cases"]
-            trace_hash = hashlib.sha256(json.dumps(trace, sort_keys=True).encode()).hexdigest()
+            trace_hash = hash_trace(trace)
             offset = repeat % len(cases)
             cases = cases[offset:] + cases[:offset]
             for case in cases:
@@ -88,10 +100,14 @@ def main():
                             interval=case.get("interval", 8), quantum_scale=case.get("quantum_scale", 1.),
                             boundary_scale=case.get("boundary_scale"), beta=case.get("beta", 8.),
                             request_timeout=plan.get("request_timeout", 3600), progress_interval=30,
-                            routing=case.get("routing", "program"))
+                            routing=case.get("routing", "program"), backend=backend)
                 row.update(condition=case["name"], rate=rate, repeat=repeat, seed=seed,
                            wall_start=started, plan=plan,
                            trace_sha256=trace_hash, versions=versions)
+                if plan.get("compact_calls"):
+                    for call in row["calls"]:
+                        call.pop("text", None)
+                        call.pop("token_ids", None)
                 records.append(row)
                 checkpoint = destination.with_suffix(destination.suffix + ".tmp")
                 checkpoint.write_text(json.dumps(records, indent=2), encoding="utf-8")
