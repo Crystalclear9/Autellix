@@ -36,14 +36,36 @@ python scripts/run_h20_paper.py sharegpt --model "$model" --datasets "$data/data
   --run-dir "$data/runs/h20-sharegpt" --device "$gpu"
 ```
 
-长任务用 `fjr-autellix-*` 命名的 tmux 会话运行。接口回归启动的 HTTP 服务会随测试退出，
+长任务在 `tmux -L fjr-autellix` 的独立会话中运行。接口回归启动的 HTTP 服务会随测试退出，
 每次配对结束后关闭引擎。结果保存后，通过 `nvidia-smi` 核对任务进程是否已释放 GPU。
 
 论文第 6 节按程序级秒/token 对照可承载的程序到达率，另报 P95 和 P99。结果汇总记录
 这三项，并记录实际程序完成率、输出 token/s、到达阶段积压和排空时间。8B 使用单张
-H20，70B 在本实验使用流水线并行，论文使用 4 张 A100。论文的主要对照包括 vLLM
+H20，70B 在 SGLang 使用流水线并行，在 vLLM 使用四卡张量并行。论文的主要对照包括 vLLM
 0.6.1、启用分块 prefill 和前缀缓存的 vLLM-opt，以及 MLFQ。
 [Autellix 论文，第 6 节](https://arxiv.org/html/2502.13965v1#S6)
+
+## vLLM 离线回放与续跑
+
+在 `fjr` 的 `autellix-vllm061` 环境中使用同一份 ShareGPT 程序回放。所有程序同时提交，
+用整批完成时间衡量吞吐，并记录程序级秒/token。下面的命令沿用上面的 `model`、`data`
+和 `gpu`，直接读取共享权重与已准备好的 4,000 程序输入。
+
+```bash
+conda activate autellix-vllm061
+lib="$HOME/stu/fjr/miniconda3/envs/autellix-sglang/lib/python3.10/site-packages/nvidia/cublas/lib"
+export LD_PRELOAD="$lib/libcublas.so.12:$lib/libcublasLt.so.12"
+python scripts/run_paper_vllm.py offline sharegpt --model "$model" --device "$gpu" \
+  --trace "$data/datasets/sharegpt-whole4000.json" --all-programs --window-activity \
+  --label offline-4000 --run-dir "$data/runs/offline-4000" --cases vllm vllm-opt
+```
+
+回放在每个对照组结束时保存检查点。续跑时复用原计划和输出文件，完成的组按版本、
+配置和输入哈希校验后跳过；中断的组从头回放。Autellix 的主机 KV 容量和时间片通过
+`--swap-gib` 和 `--quantum-scale` 设置，`--keep-resident-kv` 使被抢占的 KV 在有空位时
+留在 GPU。4,000 程序的 Autellix 补测使用 `--cases autellix --keep-resident-kv
+--quantum-scale 8 --swap-gib 384 --request-timeout 79200`，并指定独立的运行目录。
+原生 SGLang 对照沿用同一份输入、随机种子和批次上限，汇总时核对输入哈希和输出 token 数。
 
 ## 回放输入核对
 
