@@ -7,6 +7,8 @@ PagedAttention). Unsupported layouts fail rather than silently corrupt KV.
 """
 from __future__ import annotations
 
+MAX_TRANSFER_BYTES = 1 << 30
+
 
 def batched_swap(source, destination, mapping):
     import torch
@@ -38,26 +40,36 @@ def batched_swap(source, destination, mapping):
         keep = torch.tensor(list(last_copy.values()), dtype=torch.long, device="cpu")
         src_idx, dst_idx = src_idx[keep], dst_idx[keep]
     gpu = first_src.device if first_src.is_cuda else first_dst.device
-    shape = (len(source), 2, len(src_idx), *first_src.shape[2:])
-    staging = torch.empty(shape, dtype=first_src.dtype, device="cpu", pin_memory=True)
+    bytes_per_block = len(source) * first_src[:, 0].numel() * first_src.element_size()
+    blocks_per_transfer = max(1, MAX_TRANSFER_BYTES // bytes_per_block)
     with torch.cuda.device(gpu):
-        if first_src.is_cuda:
-            indices = src_idx.to(gpu)
-            payload = torch.empty(shape, dtype=first_src.dtype, device=gpu)
-            for layer, part in zip(source, payload.unbind()):
-                torch.index_select(layer, 1, indices, out=part)
-            staging.copy_(payload, non_blocking=True)
-            torch.cuda.current_stream(gpu).synchronize()
-            for i, layer in enumerate(destination):
-                layer.index_copy_(1, dst_idx, staging[i])
-        else:
-            for layer, part in zip(source, staging.unbind()):
-                torch.index_select(layer, 1, src_idx, out=part)
-            payload = staging.to(gpu, non_blocking=True)
-            target = dst_idx.to(gpu)
-            for i, layer in enumerate(destination):
-                layer.index_copy_(1, target, payload[i])
-            torch.cuda.current_stream(gpu).synchronize()
+        for src_blocks, dst_blocks in zip(src_idx.split(blocks_per_transfer), dst_idx.split(blocks_per_transfer)):
+            _transfer(source, destination, src_blocks, dst_blocks, gpu)
+
+
+def _transfer(source, destination, src_idx, dst_idx, gpu):
+    import torch
+
+    first = source[0]
+    shape = (len(source), 2, len(src_idx), *first.shape[2:])
+    staging = torch.empty(shape, dtype=first.dtype, device="cpu", pin_memory=True)
+    if first.is_cuda:
+        indices = src_idx.to(gpu)
+        payload = torch.empty(shape, dtype=first.dtype, device=gpu)
+        for layer, part in zip(source, payload.unbind()):
+            torch.index_select(layer, 1, indices, out=part)
+        staging.copy_(payload, non_blocking=True)
+        torch.cuda.current_stream(gpu).synchronize()
+        for layer, part in zip(destination, staging.unbind()):
+            layer.index_copy_(1, dst_idx, part)
+    else:
+        for layer, part in zip(source, staging.unbind()):
+            torch.index_select(layer, 1, src_idx, out=part)
+        payload = staging.to(gpu, non_blocking=True)
+        target = dst_idx.to(gpu)
+        for layer, part in zip(destination, payload.unbind()):
+            layer.index_copy_(1, target, part)
+        torch.cuda.current_stream(gpu).synchronize()
 
 
 def attach_cache_engine(cache_engine):
