@@ -74,8 +74,8 @@ python scripts/run_paper_vllm.py offline sharegpt \
 `python -m autellix.cli paper-preset --preset optimal-scheduling --workload sharegpt --dataset "$trace"`，
 同一命令可切换到 LATS。KV 内核微基准使用 `cuda/batched_swap_benchmark.py`。
 
-H20 运行 vLLM 0.6.1 时可在隔离环境中预载一对已验证的较新 CUDA 12 cuBLAS 库，
-以避开 CUDA 12.1 在该设备上的矩阵乘法崩溃。同一组实验的所有策略应使用同一对库。
+H20 运行 vLLM 0.6.1 和 PyTorch 2.4.0 时，预载 cuBLAS 12.6.4.1 的两份库，
+以避开 cuBLAS 12.1 在该设备上的矩阵乘法崩溃。同一组实验的所有策略使用同一对库。
 
 ```bash
 export LD_PRELOAD="$cublas_lib/libcublas.so.12:$cublas_lib/libcublasLt.so.12"

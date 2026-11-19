@@ -7,6 +7,14 @@ from pathlib import Path
 from collections import defaultdict
 
 
+def sha256_file(path):
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def reconstruct_conversations(rows):
     """ShareGPT's numeric ID suffix is the original message offset."""
     groups = defaultdict(dict)
@@ -76,29 +84,42 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(args.model, local_files_only=True)
     if args.chat_template:
         tokenizer.chat_template = args.chat_template.read_text(encoding="utf-8")
-    source = Path(args.source).read_bytes()
-    rows = json.loads(source)
+    source = Path(args.source)
+    source_sha256 = sha256_file(source)
+    rows = json.loads(source.read_bytes())
     source_records = len(rows)
     if not args.source_records:
         rows = reconstruct_conversations(rows)
     source_calls = [sum(m.get("from") == "gpt" for m in r["conversations"]) for r in rows]
     random.Random(args.seed).shuffle(rows)
-    selected, seen, examined = [], set(), 0
-    for row in rows:
-        examined += 1
-        item = convert(row, tokenizer, args.context, args.output_cap)
-        if (item and len(item["calls"]) >= args.min_calls
-                and (not args.max_calls or len(item["calls"]) <= args.max_calls)
-                and item["program_id"] not in seen):
-            selected.append(item); seen.add(item["program_id"])
-            if len(selected) == args.programs:
+    out = Path(args.output)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    staged = out.with_suffix(out.suffix + ".tmp")
+    seen, examined, selected_calls, selected_tokens = set(), 0, 0, 0
+    with staged.open("w", encoding="utf-8") as stream:
+        stream.write("[\n")
+        for row in rows:
+            examined += 1
+            item = convert(row, tokenizer, args.context, args.output_cap)
+            if (not item or len(item["calls"]) < args.min_calls
+                    or (args.max_calls and len(item["calls"]) > args.max_calls)
+                    or item["program_id"] in seen):
+                continue
+            if seen:
+                stream.write(",\n")
+            formatted = json.dumps(item, ensure_ascii=False, indent=2)
+            stream.write("  " + formatted.replace("\n", "\n  "))
+            seen.add(item["program_id"])
+            selected_calls += len(item["calls"])
+            selected_tokens += sum(call["max_tokens"] for call in item["calls"])
+            if len(seen) == args.programs:
                 break
-    if len(selected) != args.programs:
+        stream.write("\n]")
+    if len(seen) != args.programs:
         raise RuntimeError("not enough eligible whole conversations")
-    out = Path(args.output); out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(selected, ensure_ascii=False, indent=2), encoding="utf-8")
+    staged.replace(out)
     manifest = dict(source_url="https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered",
-                    source_sha256=hashlib.sha256(source).hexdigest(), source_records=source_records,
+                    source_sha256=source_sha256, source_records=source_records,
                     reconstructed_conversations=not args.source_records, source_programs=len(rows),
                     source_mean_calls=sum(source_calls)/len(source_calls), source_max_calls=max(source_calls),
                     examined=examined, selected_ids=sorted(seen), seed=args.seed,
@@ -108,9 +129,8 @@ def main():
                     replay_protocol=["source fragments merged by message offset" if not args.source_records else "individual source fragments",
                                  "whole-conversation context filtering", "reference-history replay",
                                  "reference output lengths with ignore_eos" if not args.output_cap else "capped output length with ignore_eos"],
-                    programs=len(selected), calls=sum(len(x["calls"]) for x in selected),
-                    output_tokens=sum(c["max_tokens"] for x in selected for c in x["calls"]),
-                    replay_sha256=hashlib.sha256(out.read_bytes()).hexdigest())
+                    programs=len(seen), calls=selected_calls, output_tokens=selected_tokens,
+                    replay_sha256=sha256_file(out))
     if args.chat_template:
         manifest["chat_template_sha256"] = hashlib.sha256(tokenizer.chat_template.encode()).hexdigest()
     out.with_suffix(".manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")

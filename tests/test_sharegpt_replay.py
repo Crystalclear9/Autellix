@@ -1,6 +1,12 @@
 import importlib.util
+import hashlib
+import json
 from pathlib import Path
+import sys
+import tempfile
+from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 spec=importlib.util.spec_from_file_location("sharegpt_replay",Path(__file__).parents[1]/"scripts/prepare_sharegpt_replay.py")
 module=importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
@@ -48,6 +54,21 @@ class ShareGPTReplayTests(unittest.TestCase):
     def test_uncapped_reference_lengths(self):
         calls=module.convert(self.row(),Tokenizer(),100,0)["calls"]
         self.assertEqual([c["max_tokens"] for c in calls],[3,3])
+
+    def test_streaming_keeps_replay_format_and_manifest_digest(self):
+        rows = [self.row(), dict(self.row(), id="q")]
+        with tempfile.TemporaryDirectory() as directory:
+            source, output = (Path(directory) / name for name in ("source.json", "replay.json"))
+            source.write_text(json.dumps(rows), encoding="utf-8")
+            args = ["prepare", "--source", str(source), "--output", str(output), "--programs", "2", "--model", "local"]
+            transformers = SimpleNamespace(AutoTokenizer=SimpleNamespace(from_pretrained=lambda *a, **kw: Tokenizer()))
+            with patch.object(sys, "argv", args), patch.dict(sys.modules, {"transformers": transformers}):
+                module.main()
+            expected = [module.convert(row, Tokenizer(), 32768, 0) for row in reversed(rows)]
+            self.assertEqual(output.read_text(encoding="utf-8"), json.dumps(expected, ensure_ascii=False, indent=2))
+            manifest = json.loads(output.with_suffix(".manifest.json").read_text())
+            self.assertEqual(manifest["replay_sha256"], hashlib.sha256(output.read_bytes()).hexdigest())
+            self.assertEqual((manifest["programs"], manifest["calls"], manifest["output_tokens"]), (2, 4, 12))
 
     def test_template_is_encoded_without_second_special_token_pass(self):
         class RecordingTokenizer(Tokenizer):
