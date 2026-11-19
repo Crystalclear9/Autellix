@@ -60,6 +60,7 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--source", required=True)
     p.add_argument("--model", required=True)
+    p.add_argument("--chat-template", type=Path, help="Jinja template for a tokenizer that ships without one")
     p.add_argument("--output", required=True)
     p.add_argument("--programs", type=int, default=12)
     p.add_argument("--context", type=int, default=32768)
@@ -73,6 +74,8 @@ def main():
         p.error("programs must be positive, output-cap nonnegative and context at least 2")
     from transformers import AutoTokenizer
     tokenizer = AutoTokenizer.from_pretrained(args.model, local_files_only=True)
+    if args.chat_template:
+        tokenizer.chat_template = args.chat_template.read_text(encoding="utf-8")
     source = Path(args.source).read_bytes()
     rows = json.loads(source)
     source_records = len(rows)
@@ -108,6 +111,8 @@ def main():
                     programs=len(selected), calls=sum(len(x["calls"]) for x in selected),
                     output_tokens=sum(c["max_tokens"] for x in selected for c in x["calls"]),
                     replay_sha256=hashlib.sha256(out.read_bytes()).hexdigest())
+    if args.chat_template:
+        manifest["chat_template_sha256"] = hashlib.sha256(tokenizer.chat_template.encode()).hexdigest()
     out.with_suffix(".manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     print(json.dumps(manifest, indent=2))
 

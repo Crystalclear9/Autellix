@@ -35,21 +35,24 @@ def batched_swap(source, destination, mapping):
     # Shared prefix blocks can repeat. Match vLLM's same-stream copy order.
     last_copy = {block: i for i, block in enumerate(dst_idx.tolist())}
     if len(last_copy) != len(dst_idx):
-        keep = torch.tensor(list(last_copy.values()), dtype=torch.long)
+        keep = torch.tensor(list(last_copy.values()), dtype=torch.long, device="cpu")
         src_idx, dst_idx = src_idx[keep], dst_idx[keep]
     gpu = first_src.device if first_src.is_cuda else first_dst.device
+    shape = (len(source), 2, len(src_idx), *first_src.shape[2:])
+    staging = torch.empty(shape, dtype=first_src.dtype, device="cpu", pin_memory=True)
     with torch.cuda.device(gpu):
-        indices = src_idx.to(first_src.device)
-        packed = torch.stack([layer.index_select(1, indices) for layer in source])
         if first_src.is_cuda:
-            staging = torch.empty(packed.shape, dtype=packed.dtype, device="cpu", pin_memory=True)
-            staging.copy_(packed, non_blocking=True)
+            indices = src_idx.to(gpu)
+            payload = torch.empty(shape, dtype=first_src.dtype, device=gpu)
+            for layer, part in zip(source, payload.unbind()):
+                torch.index_select(layer, 1, indices, out=part)
+            staging.copy_(payload, non_blocking=True)
             torch.cuda.current_stream(gpu).synchronize()
             for i, layer in enumerate(destination):
                 layer.index_copy_(1, dst_idx, staging[i])
         else:
-            staging = torch.empty(packed.shape, dtype=packed.dtype, device="cpu", pin_memory=True)
-            staging.copy_(packed)
+            for layer, part in zip(source, staging.unbind()):
+                torch.index_select(layer, 1, src_idx, out=part)
             payload = staging.to(gpu, non_blocking=True)
             target = dst_idx.to(gpu)
             for i, layer in enumerate(destination):
