@@ -44,10 +44,14 @@ class RealInferenceTests(unittest.TestCase):
     def test_tensor_parallel_generation_and_program_accounting(self):
         import torch
         self.assertGreaterEqual(torch.cuda.device_count(), 2)
+        devices = os.environ.get("AUTELLIX_TEST_TP_DEVICES", "0,1")
         args = dict(tensor_parallel_size=2, max_model_len=512, max_num_seqs=1,
-                    gpu_memory_utilization=.35, swap_space=.25, dtype="half")
-        with InferenceEngine([ReplicaConfig("vllm", MODEL, device="0,1", engine_args=args)],
-                             policy=PolicyConfig(schedule_interval=3, overprovision=1)) as engine:
+                    gpu_memory_utilization=.35, swap_space=.25, dtype="half",
+                    batched_swap=os.environ.get("AUTELLIX_TEST_TP_NATIVE_SWAP") != "1")
+        policy = PolicyConfig(boundaries=(0, .001, .002, math.inf), quanta=(.0001, .0002, .0004),
+                              schedule_interval=1, overprovision=0, beta=1e12)
+        with InferenceEngine([ReplicaConfig("vllm", MODEL, device=devices, engine_args=args)],
+                             policy=policy) as engine:
             pid = engine.start_session()
             tokens = engine.tokenize(prompt="The capital of France is")
             sampling = dict(temperature=0, max_tokens=24, ignore_eos=True)
@@ -58,6 +62,10 @@ class RealInferenceTests(unittest.TestCase):
             reference = engine.submit(pid, input_ids=tokens, sampling=sampling).result(180)
             self.assertEqual(result["token_ids"], reference["token_ids"])
             self.assertGreater(result["metrics"]["executed"], 0)
+            with (engine.state_dir / "replica-0.jsonl").open(encoding="utf-8") as trace:
+                events = Counter(json.loads(line)["event"] for line in trace)
+            self.assertGreater(events["swap_out"], 0)
+            self.assertGreater(events["resume"], 0)
             engine.end_session(pid)
             engine.end_session(other)
             engine.wait_idle(30)

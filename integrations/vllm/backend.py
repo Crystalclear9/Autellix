@@ -55,9 +55,9 @@ class VLLMBackend:
             # by PaperPlan rather than native chunk-prefill scheduling.
             args["enable_chunked_prefill"] = True
             args.setdefault("max_num_batched_tokens", max(args.get("max_model_len", 2048), capacity + config.overprovision))
-        if tp > 1 and not native and batched_swap:
-            from .executor import AutellixMPExecutor
-            args["distributed_executor_backend"] = AutellixMPExecutor
+        if tp > 1 and not native:
+            from .executor import AutellixMPExecutor, AutellixNativeSwapMPExecutor
+            args["distributed_executor_backend"] = AutellixMPExecutor if batched_swap else AutellixNativeSwapMPExecutor
         self.table = ProgramTable(table_path)
         self.controller = None
         if not native or observe_native:
@@ -76,7 +76,7 @@ class VLLMBackend:
             self.scheduler._autellix_paper = PaperPlan(self.scheduler, self.controller, capacity, keep_resident_kv)
             self.scheduler._autellix_window = self.scheduler._autellix_paper.window
         worker = self.engine.model_executor.driver_worker
-        if batched_swap and not native:
+        if tp == 1 and batched_swap and not native:
             for cache in worker.cache_engine:
                 attach_cache_engine(cache)
         if measure_timing:

@@ -1,18 +1,45 @@
-"""Pinned tensor-parallel workers: install KV transfer hooks on every rank."""
+"""KV transfer and metadata handling for the pinned tensor-parallel workers."""
+from vllm.distributed import broadcast_tensor_dict
 from vllm.executor.multiproc_gpu_executor import MultiprocessingGPUExecutor
 from vllm.worker.worker import Worker
+from vllm.worker.worker_base import WorkerInput, extract_previous_hidden_states
 
 from autellix.runtime.swap import attach_cache_engine
 
 
 class AutellixWorker(Worker):
+    batched_swap = True
+
     def initialize_cache(self, *args, **kwargs):
         result = super().initialize_cache(*args, **kwargs)
-        for cache in self.cache_engine:
-            attach_cache_engine(cache)
+        if self.batched_swap:
+            for cache in self.cache_engine:
+                attach_cache_engine(cache)
         return result
+
+    def _get_worker_input_from_broadcast(self):
+        data = broadcast_tensor_dict(src=0)
+        if not data:
+            return None
+        worker_input = WorkerInput.from_broadcasted_tensor_dict(data)
+        if worker_input.num_seq_groups == 0:
+            # Transfer-only steps carry worker inputs but no attention metadata.
+            # Worker.execute_model runs the cache operations and returns [].
+            return None, worker_input, {}
+        model_input = self.model_runner.make_model_input_from_broadcasted_tensor_dict(data)
+        return model_input, worker_input, extract_previous_hidden_states(data)
+
+
+class AutellixNativeSwapWorker(AutellixWorker):
+    batched_swap = False
 
 
 class AutellixMPExecutor(MultiprocessingGPUExecutor):
+    worker_class = AutellixWorker
+
     def _get_worker_module_and_class(self):
-        return "integrations.vllm.executor", "AutellixWorker", None
+        return __name__, self.worker_class.__name__, None
+
+
+class AutellixNativeSwapMPExecutor(AutellixMPExecutor):
+    worker_class = AutellixNativeSwapWorker

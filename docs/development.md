@@ -20,7 +20,9 @@ AUTELLIX_GPU_BACKEND=vllm AUTELLIX_TEST_MODEL=/absolute/path/to/model \
   python -m unittest discover -s tests -p test_gpu_runtime.py -v
 ```
 
-SGLang 将后端变量改为 `sglang`。可选项：`AUTELLIX_TEST_REPLICAS=1` 验证双进程路由和取消；`AUTELLIX_TEST_CUDA_SWAP=1` 验证实际 KV 传输；`AUTELLIX_TEST_TP=1` 启用需要两张 GPU 的 vLLM 张量并行测试；`AUTELLIX_TEST_IMPLEMENTATION=compat` 验证旧模式。
+SGLang 将后端变量改为 `sglang`。`AUTELLIX_TEST_REPLICAS=1` 验证双进程路由和取消。`AUTELLIX_TEST_CUDA_SWAP=1` 验证实际 KV 传输。`AUTELLIX_TEST_IMPLEMENTATION=compat` 验证旧模式。
+
+`AUTELLIX_TEST_TP=1` 验证 vLLM 张量并行中的抢占和 KV 恢复。用 `AUTELLIX_TEST_TP_DEVICES=0,2` 指定两张物理卡。`AUTELLIX_TEST_TP_NATIVE_SWAP=1` 使用原生 KV 搬运执行同一回归。
 
 三张 P40 的流水线回归：
 
