@@ -27,6 +27,8 @@ def main():
     parser.add_argument("--swap-gib", type=float, default=32)
     parser.add_argument("--seed", type=int, default=2026)
     parser.add_argument("--repeats", type=int, default=1)
+    parser.add_argument("--request-timeout", type=float, default=14400,
+                        help="seconds allowed for each call, including queueing")
     parser.add_argument("--interval", type=int, default=8)
     parser.add_argument("--quantum-scale", type=float, default=2)
     parser.add_argument("--boundary-scale", type=float, default=128)
@@ -84,7 +86,7 @@ def main():
                 experiment=args.experiment, workload=str(workload), workload_kind=label, workload_family=args.workload,
                 programs=0 if args.all_programs else count,
                 rates=[None] if args.experiment == "offline" else list(args.rates or rates),
-                seed=args.seed, repeats=args.repeats, request_timeout=14400, compact_calls=True,
+                seed=args.seed, repeats=args.repeats, request_timeout=args.request_timeout, compact_calls=True,
                 engine_args=dict(dtype="bfloat16", max_model_len=32768, tensor_parallel_size=tp_size,
                                  max_num_seqs=args.batch_size, max_num_batched_tokens=32768,
                                  gpu_memory_utilization=.88, swap_space=args.swap_gib, seed=0,

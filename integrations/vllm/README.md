@@ -69,6 +69,7 @@ python scripts/run_paper_vllm.py offline sharegpt \
 使用 `scripts/prepare_sharegpt_replay.py --programs 4000` 准备 4000 条不同的完整对话，
 再用 `offline sharegpt --trace "$trace" --all-programs` 回放每条对话一次。
 基础模型的 tokenizer 可通过 `--chat-template` 读取现有的聊天模板。
+`--request-timeout` 按秒设置单次调用允许等待和执行的总时长，默认 14,400 秒。
 主对照使用相同的活动请求上限、BF16 和 eager 模式。Autellix 可额外预填充一个预备请求。
 `timing` 记录各阶段开销。
 使用 `scripts/summarize_paper_suite.py` 汇总各目录的测量 JSON，计时数据可用
