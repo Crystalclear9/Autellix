@@ -10,7 +10,8 @@ from importlib.metadata import version
 from pathlib import Path
 
 from compare_sglang import trial
-from autellix.runtime.benchmark import load_workloads, sample_trace
+from summarize_paper_suite import paper_token_latencies
+from autellix.runtime.benchmark import distribution, load_workloads, sample_trace
 
 
 def hash_trace(trace):
@@ -112,9 +113,12 @@ def main():
                 checkpoint = destination.with_suffix(destination.suffix + ".tmp")
                 checkpoint.write_text(json.dumps(records, indent=2), encoding="utf-8")
                 checkpoint.replace(destination)
+                token_times, _ = paper_token_latencies(row)
+                mean = distribution(token_times.values())["mean"]
+                token_latency = f"{mean:.6f}" if mean is not None else "n/a"
                 print(f"DONE case={case['name']} tok/s={row['output_tokens_per_second']:.3f} "
                       f"latency={row['program_latency_seconds']['mean']:.3f} "
-                      f"s/token={row['paper_sequential_token_latency']['mean']:.6f}", flush=True)
+                      f"s/token={token_latency}", flush=True)
 
 
 if __name__ == "__main__":

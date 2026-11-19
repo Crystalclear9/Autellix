@@ -16,7 +16,7 @@ def distribution(values):
                 p95=values[math.ceil(.95 * len(values))-1], p99=values[math.ceil(.99 * len(values))-1])
 
 
-def metrics(row):
+def paper_token_latencies(row):
     kind = row["plan"].get("workload_kind", "sharegpt")
     parallel = row["plan"].get("workload_family", kind) in {"lats", "mixed"}
     token_times = (row["program_token_latencies"] if parallel
@@ -26,6 +26,12 @@ def metrics(row):
         token_times = {pid: (token_times[pid] if dataset == "lats" else row["response_seconds_per_output_token"][pid])
                        for pid, dataset in row["program_datasets"].items()}
         paper_metric = "per_program_response_or_critical_path/total_output_tokens"
+    return token_times, paper_metric
+
+
+def metrics(row):
+    kind = row["plan"].get("workload_kind", "sharegpt")
+    token_times, paper_metric = paper_token_latencies(row)
     arrivals, completed = row["arrival_times"], row["program_completion_times"]
     horizon = row["arrival_horizon_seconds"]
     checkpoints = []
@@ -73,7 +79,8 @@ def summarize(records, slo_targets=DEFAULT_SLO_TARGETS):
     groups = {}
     for row in records:
         kind = row["plan"].get("workload_kind", "sharegpt")
-        key = kind, row["rate"], row["seed"], tuple(row["device_groups"])
+        key = (kind, row["rate"], row["seed"], tuple(row["device_groups"]), row["model"],
+               tuple(sorted(row["versions"].items())))
         group = groups.setdefault(key, {})
         if row["condition"] in group:
             raise ValueError(f"duplicate trial: {key}, {row['condition']}")
@@ -122,7 +129,8 @@ def summarize(records, slo_targets=DEFAULT_SLO_TARGETS):
                     max_input_tokens=max(c["prompt_tokens"] for c in calls),
                     native_seconds=native["programs"][pid], candidate_seconds=response,
                     response_delta_seconds=response-native["programs"][pid]))
-            comparisons.append(dict(workload=key[0], rate=key[1], seed=key[2], devices=key[3], condition=row["condition"],
+            comparisons.append(dict(workload=key[0], rate=key[1], seed=key[2], devices=key[3], model=row["model"],
+                condition=row["condition"],
                 baseline_condition=native["condition"], upstream_default_optimizations=native_defaults,
                 pairing=paired, programs=len(row["programs"]),
                 per_program=sorted(per_program, key=lambda p: -p["response_delta_seconds"]),

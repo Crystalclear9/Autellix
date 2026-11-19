@@ -42,6 +42,13 @@ class PaperSuiteSummary(unittest.TestCase):
         with self.assertRaises(ValueError):
             summary.summarize(rows)
 
+    def test_same_label_and_devices_can_be_reused_for_a_larger_model(self):
+        small, large = self.records(), self.records()
+        for row in large:
+            row["model"] = "Llama-70B"
+        result = summary.summarize(small + large)
+        self.assertEqual({row["model"] for row in result["comparisons"]}, {"Llama", "Llama-70B"})
+
     def test_candidate_host_swap_budget_does_not_change_native_gpu_pairing(self):
         rows = self.records()
         rows[0]["effective_engine_args"]["autellix_swap_space"] = 8
