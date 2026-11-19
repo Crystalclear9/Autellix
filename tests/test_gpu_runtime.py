@@ -196,14 +196,14 @@ class CUDASwapTests(unittest.TestCase):
         source = [torch.randn(2, 9, 4, 2, 8, dtype=torch.float16, device="cuda") for _ in range(3)]
         host = [torch.full((2, 11, 4, 2, 8), -10., dtype=torch.float16) for _ in source]
         target = [torch.zeros_like(layer) for layer in source]
-        batched_swap(source, host, [(7, 2), (0, 9), (4, 5)])
-        batched_swap(host, target, [(2, 7), (9, 0), (5, 4)])
+        batched_swap(source, host, [(0, 2), (7, 2), (0, 9), (4, 5), (4, 5)])
+        batched_swap(host, target, [(9, 7), (2, 7), (9, 0), (5, 4)])
         for src, dst, cpu in zip(source, target, host):
             self.assertTrue(torch.equal(src[:, [7, 0, 4]], dst[:, [7, 0, 4]]))
             self.assertTrue(torch.equal(dst[:, 1], torch.zeros_like(dst[:, 1])))
             self.assertTrue(torch.all(cpu[:, 0] == -10).item())
         with self.assertRaises(IndexError):
-            batched_swap(source, host, [(10, 0)])
+            batched_swap(source, host, [(10, 0), (7, 0)])
 
 
 if __name__ == "__main__":

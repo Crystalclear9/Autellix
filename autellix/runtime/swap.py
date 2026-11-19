@@ -17,8 +17,9 @@ def batched_swap(source, destination, mapping):
     if not len(pairs):
         return
     src_idx, dst_idx = pairs[:, 0].contiguous(), pairs[:, 1].contiguous()
-    if len(set(dst_idx.tolist())) != len(dst_idx):
-        raise ValueError("destination blocks must be unique")
+    src_min, src_max = torch.aminmax(src_idx)
+    dst_min, dst_max = torch.aminmax(dst_idx)
+    src_min, src_max, dst_min, dst_max = (int(i) for i in (src_min, src_max, dst_min, dst_max))
     first_src, first_dst = source[0], destination[0]
     if {first_src.device.type, first_dst.device.type} != {"cpu", "cuda"}:
         raise ValueError("swap requires one CPU and one CUDA cache")
@@ -29,9 +30,13 @@ def batched_swap(source, destination, mapping):
                 or dst.dtype != src.dtype or src.device != first_src.device
                 or dst.device != first_dst.device):
             raise ValueError("unsupported KV cache shape, dtype, device, or stride")
-        if (src_idx.min().item() < 0 or src_idx.max().item() >= src.shape[1]
-                or dst_idx.min().item() < 0 or dst_idx.max().item() >= dst.shape[1]):
+        if src_min < 0 or src_max >= src.shape[1] or dst_min < 0 or dst_max >= dst.shape[1]:
             raise IndexError("KV block mapping out of bounds")
+    # Shared prefix blocks can repeat. Match vLLM's same-stream copy order.
+    last_copy = {block: i for i, block in enumerate(dst_idx.tolist())}
+    if len(last_copy) != len(dst_idx):
+        keep = torch.tensor(list(last_copy.values()), dtype=torch.long)
+        src_idx, dst_idx = src_idx[keep], dst_idx[keep]
     gpu = first_src.device if first_src.is_cuda else first_dst.device
     with torch.cuda.device(gpu):
         indices = src_idx.to(first_src.device)
