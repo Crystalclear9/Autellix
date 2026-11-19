@@ -77,6 +77,31 @@ class PaperPlanTests(unittest.TestCase):
         self.assertTrue(out.blocks_to_swap_in)
         self.assertEqual(len(self.refreshes), 1)
 
+    def test_inactive_kv_stays_resident_without_changing_the_selected_batch(self):
+        self.ctl.config = PolicyConfig(overprovision=0)
+        self.priority.update(high=0, low=1)
+        inactive, waiting = Group("low"), Group("high", True)
+        self.s.running.append(inactive)
+        self.s.waiting.append(waiting)
+        out = PaperPlan(self.s, self.ctl, 1, keep_resident_kv=True).next_step()
+        self.assertEqual([g.seq_group.request_id for g in out.scheduled_seq_groups], ["high"])
+        self.assertIn(inactive, self.s.running)
+        self.assertFalse(out.blocks_to_swap_out)
+
+    def test_allocation_pressure_evicts_lowest_priority_inactive_kv(self):
+        self.ctl.config = PolicyConfig(overprovision=0)
+        self.priority.update(high=0, low=1, lowest=2)
+        low, lowest = Group("low"), Group("lowest")
+        self.s.running.extend([lowest, low])
+        self.s.waiting.append(Group("high", True))
+        self.s.block_manager.can_allocate = lambda _: self.status.LATER if lowest in self.s.running else self.status.OK
+        plan = PaperPlan(self.s, self.ctl, 1, keep_resident_kv=True)
+        self.assertTrue(plan.next_step().blocks_to_swap_out)
+        self.assertEqual(list(self.s.swapped), [lowest])
+        out = plan.next_step()
+        self.assertEqual([g.seq_group.request_id for g in out.scheduled_seq_groups], ["high"])
+        self.assertIn(low, self.s.running)
+
     def test_window_refills_without_readmitting_new_arrival(self):
         self.priority.update(a=0, b=1, urgent=-1)
         a, b = Group("a", True), Group("b", True)

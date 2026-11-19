@@ -107,7 +107,7 @@ def summarize(records, slo_targets=DEFAULT_SLO_TARGETS):
                 # Native SGLang does not allocate the Autellix host KV cache.
                 return {k: v for k, v in r["effective_engine_args"].items()
                         if k not in {"autellix_native_baseline", "autellix_swap_space", "autellix_host_kv_recompute",
-                                     "autellix_mode", "preemption_mode", "batched_swap"}}
+                                     "autellix_mode", "preemption_mode", "batched_swap", "keep_resident_kv"}}
             native_defaults = row["arm"] == "sglang-native" and row["effective_engine_args"].get("autellix_native_defaults", False)
             row_options, baseline_options = options(row), options(native)
             if native_defaults:

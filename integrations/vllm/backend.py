@@ -14,7 +14,8 @@ class VLLMBackend:
 
     def __init__(self, model: str, table_path: str, config: PolicyConfig | None = None,
                  trace: str | None = None, batched_swap: bool = True, observe_native: bool = True,
-                 measure_timing: bool = False, publish_waiting_each_step: bool = True, **engine_args):
+                 measure_timing: bool = False, publish_waiting_each_step: bool = True,
+                 keep_resident_kv: bool = False, **engine_args):
         if version("vllm") != "0.6.1":
             raise RuntimeError("this backend requires vllm==0.6.1")
         config = config or PolicyConfig()
@@ -72,7 +73,7 @@ class VLLMBackend:
             self.scheduler._autellix_window = SchedulingWindow(self.controller, capacity)
         if paper:
             from .paper import PaperPlan
-            self.scheduler._autellix_paper = PaperPlan(self.scheduler, self.controller, capacity)
+            self.scheduler._autellix_paper = PaperPlan(self.scheduler, self.controller, capacity, keep_resident_kv)
             self.scheduler._autellix_window = self.scheduler._autellix_paper.window
         worker = self.engine.model_executor.driver_worker
         if batched_swap and not native:

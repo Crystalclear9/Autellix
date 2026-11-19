@@ -8,9 +8,10 @@ from autellix.runtime.window import SchedulingWindow
 
 
 class PaperPlan:
-    def __init__(self, scheduler, controller, capacity):
+    def __init__(self, scheduler, controller, capacity, keep_resident_kv=False):
         self.scheduler, self.controller = scheduler, controller
         self.window = SchedulingWindow(controller, capacity)
+        self.keep_resident_kv = keep_resident_kv
         self.prepared = set()
         self.reserved_slots = set()
 
@@ -54,12 +55,26 @@ class PaperPlan:
             self.reserved_slots.discard(group.request_id)
             ctl.emit("swap_out", rid=group.request_id)
 
-        # Flush outgoing copies before reusing their GPU blocks for swap-in.
-        for group in list(s.running):
-            if group.request_id not in window.cohort:
-                evict(group)
-        if outgoing:
-            return output()
+        def evict_for(index):
+            if incoming:
+                return False
+            victim = max((g for g in s.running if g.request_id not in window.cohort),
+                         key=lambda g: ctl.key(g.request_id), default=None)
+            if victim is None:
+                victim = next((by_id[r] for r in reversed(window.cohort[index + 1:])
+                               if by_id[r] in s.running), None)
+            if victim is None:
+                return False
+            evict(victim)
+            return True
+
+        if not self.keep_resident_kv:
+            # Flush outgoing copies before reusing their GPU blocks for swap-in.
+            for group in list(s.running):
+                if group.request_id not in window.cohort:
+                    evict(group)
+            if outgoing:
+                return output()
 
         if (not boundary and window.cohort and
                 all(r in self.prepared and r in self.reserved_slots and by_id[r] in s.running
@@ -80,7 +95,7 @@ class PaperPlan:
             return output(groups)
 
         groups, tokens = [], 0
-        for rid in window.cohort:
+        for index, rid in enumerate(window.cohort):
             group = by_id[rid]
             if rid not in chosen and rid in self.reserved_slots:
                 continue
@@ -89,7 +104,7 @@ class PaperPlan:
             count = (group.get_seqs()[0].data.get_num_uncomputed_tokens() if prefill else 1) if executes else 0
             if tokens + count > s.scheduler_config.max_num_batched_tokens:
                 if groups:
-                    window.retain_prefix(window.cohort.index(rid))
+                    window.retain_prefix(index)
                 break  # Algorithm 1: stop at the first request that cannot fit.
             lookahead = max(0, window.remaining) if rid not in self.reserved_slots else 0
             if group in s.waiting:
@@ -102,10 +117,7 @@ class PaperPlan:
             if status != AllocStatus.OK:
                 # A lower-priority resident must never block a higher-priority
                 # arrival or swapped request. Retry after the transfer barrier.
-                victims = [by_id[r] for r in window.cohort[window.cohort.index(rid) + 1:]
-                           if by_id[r] in s.running]
-                if victims and not incoming:
-                    evict(victims[-1])
+                if evict_for(index):
                     return output()
                 if status == AllocStatus.NEVER:
                     for seq in group.get_seqs():
@@ -116,7 +128,7 @@ class PaperPlan:
                             queue.remove(group)
                     ignored.append(group)
                 if groups:
-                    window.retain_prefix(window.cohort.index(rid))
+                    window.retain_prefix(index)
                 break
             if group in s.waiting:
                 s.waiting.remove(group)
@@ -132,16 +144,13 @@ class PaperPlan:
             # Reserve future KV capacity once per window. Subsequent append
             # calls commit actual token IDs / prefix-cache bookkeeping only.
             if not s.block_manager.can_append_slots(group, lookahead):
-                victims = [by_id[r] for r in window.cohort[window.cohort.index(rid) + 1:]
-                           if by_id[r] in s.running]
-                if victims and not incoming:
-                    evict(victims[-1])
+                if evict_for(index):
                     return output()
                 if incoming:
                     return output()  # retry capacity after the incoming barrier
                 if not groups:
                     raise RuntimeError("insufficient KV capacity for one scheduling window; reduce schedule_interval")
-                window.retain_prefix(window.cohort.index(rid))
+                window.retain_prefix(index)
                 break
             for seq in group.get_seqs():
                 copies.extend(s.block_manager.append_slots(seq, lookahead))

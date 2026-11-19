@@ -32,6 +32,8 @@ def main():
     parser.add_argument("--boundary-scale", type=float, default=128)
     parser.add_argument("--window-activity", action="store_true",
                         help="publish unscheduled calls' waiting time at scheduling windows")
+    parser.add_argument("--keep-resident-kv", action="store_true",
+                        help="keep preempted KV on GPU until another request needs its blocks")
     parser.add_argument("--cases", nargs="+", help="run only the listed cases")
     parser.add_argument("--label")
     args = parser.parse_args()
@@ -55,6 +57,8 @@ def main():
 
     candidate = dict(name="autellix", policy=policy, interval=args.interval, reserve=1,
                      quantum_scale=args.quantum_scale, boundary_scale=args.boundary_scale)
+    if args.keep_resident_kv:
+        candidate["engine_args"] = {"keep_resident_kv": True}
     baselines = [dict(name=name, policy=name, interval=steps, engine_args={"preemption_mode": None}) for name, steps in (
         ("vllm", 1), ("vllm-opt", 1), ("vllm-opt-multistep", args.interval))]
     mlfq = dict(candidate, name="mlfq", policy="mlfq")
@@ -65,7 +69,8 @@ def main():
     elif args.experiment == "scaling":
         cases = [candidate]
     elif args.experiment == "swap":
-        cases = [dict(candidate, name="native-swap", engine_args={"batched_swap": False}), candidate]
+        native_swap = {**candidate.get("engine_args", {}), "batched_swap": False}
+        cases = [dict(candidate, name="native-swap", engine_args=native_swap), candidate]
     if args.cases:
         if set(args.cases) - {case["name"] for case in cases}:
             parser.error("unknown case for this experiment")

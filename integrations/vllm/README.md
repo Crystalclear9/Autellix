@@ -65,6 +65,7 @@ python scripts/run_paper_vllm.py offline sharegpt \
 
 `--device '0,1,2,3'` 表示一个 TP=4 引擎，`--device '0;1;2;3'` 表示四个单卡副本。
 长队列离线测量可用 `--window-activity` 将等待中请求的状态更新合并到调度窗口。
+`--keep-resident-kv` 保留暂停请求的 GPU KV，当前调度窗口需要显存块时再换出。
 使用 `scripts/prepare_sharegpt_replay.py --programs 4000` 准备 4000 条不同的完整对话，
 再用 `offline sharegpt --trace "$trace" --all-programs` 回放每条对话一次。
 基础模型的 tokenizer 可通过 `--chat-template` 读取现有的聊天模板。
