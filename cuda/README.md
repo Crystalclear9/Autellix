@@ -15,8 +15,8 @@ python cuda/batched_swap_benchmark.py --blocks 128 --layers 4 --iterations 10
 ## 测量内容
 
 - 执行真实 GPU/CPU 传输，使用非连续映射验证 KV 往返结果完全一致。
-- 预热后同步 CUDA 计时，报告中位数；不预设批量传输在所有负载下都更快。
+- 预热后同步 CUDA 计时，报告中位数和相对于原生搬运的加速比。
 - 批量路径使用 `autellix/runtime/swap.py`：聚合各层 K/V 为连续载荷，经锁页内存一次传输后写入目标 block。
-- 支持连续的 `[2, blocks, ...]` KV 布局；不兼容的形状、越界映射和重复目标会被拒绝。
+- 使用连续的 `[2, blocks, ...]` KV 布局。多个映射指向同一目标块时，按原生复制顺序保留最后一次写入。
 
 此路径使用 PyTorch CUDA 操作，无需单独编译自定义 kernel。传输性能由本微基准测量，生成与抢占恢复正确性由[开发与验证](../docs/development.md)中的真实推理测试检查。

@@ -14,10 +14,14 @@ def main():
     parser.add_argument("experiment", choices=("online", "offline", "routing", "scaling", "swap", "timing"))
     parser.add_argument("workload", choices=WORKLOADS)
     parser.add_argument("--model", required=True, type=Path)
-    parser.add_argument("--datasets", required=True, type=Path)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--datasets", type=Path, help="directory with the standard workload files")
+    source.add_argument("--trace", type=Path, help="use a prepared program trace")
     parser.add_argument("--run-dir", required=True, type=Path)
     parser.add_argument("--device", required=True, help="comma-separated TP ranks; semicolon-separated replicas")
-    parser.add_argument("--programs", type=int)
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument("--programs", type=int)
+    selection.add_argument("--all-programs", action="store_true", help="replay each offline program once")
     parser.add_argument("--rates", type=float, nargs="+")
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--swap-gib", type=float, default=32)
@@ -43,6 +47,8 @@ def main():
         parser.error("routing requires at least two replicas")
     if args.experiment == "offline" and args.rates:
         parser.error("offline programs all arrive at time zero")
+    if args.all_programs and args.experiment != "offline":
+        parser.error("--all-programs requires an offline replay")
     count = args.programs if args.programs is not None else count
     if count < 1 or (args.workload == "mixed" and count % 3):
         parser.error("use a positive program count divisible by three for Mixed")
@@ -65,13 +71,14 @@ def main():
             parser.error("unknown case for this experiment")
         cases = [case for case in cases if case["name"] in args.cases]
 
-    workload = (args.datasets / filename).resolve(strict=True)
+    workload = (args.trace if args.trace else args.datasets / filename).resolve(strict=True)
     output = args.run_dir.resolve()
     output.mkdir(parents=True, exist_ok=True)
     label = args.label or f"{args.workload}-{args.experiment}"
     plan = dict(backend="vllm", model=str(args.model.resolve(strict=True)), device=args.device,
                 experiment=args.experiment, workload=str(workload), workload_kind=label, workload_family=args.workload,
-                programs=count, rates=[None] if args.experiment == "offline" else list(args.rates or rates),
+                programs=0 if args.all_programs else count,
+                rates=[None] if args.experiment == "offline" else list(args.rates or rates),
                 seed=args.seed, repeats=args.repeats, request_timeout=14400, compact_calls=True,
                 engine_args=dict(dtype="bfloat16", max_model_len=32768, tensor_parallel_size=tp_size,
                                  max_num_seqs=args.batch_size, max_num_batched_tokens=32768,
@@ -80,7 +87,7 @@ def main():
                 cases=cases)
     if args.window_activity:
         plan["engine_args"]["publish_waiting_each_step"] = False
-    if args.workload == "mixed":
+    if args.workload == "mixed" and not args.all_programs:
         plan["equal_dataset_counts"] = True
     plan_file, results = output / f"{label}-plan.json", output / f"{label}.json"
     plan_file.write_text(json.dumps(plan, indent=2), encoding="utf-8")
