@@ -2,7 +2,7 @@
 
 对论文 [Autellix: An Efficient Serving Engine for LLM Agents as General Programs（arXiv:2502.13965v1）](https://arxiv.org/abs/2502.13965v1) 的**复现尝试**。
 
-本项目实现程序感知调度、PLAS/ATLAS、KV 交换、多步调度与预备请求，并接入 vLLM 和 SGLang 推理后端。源码核对、实测结果和改进方向统一记录在实验报告中。
+本项目实现程序感知调度、PLAS/ATLAS、KV 交换、多步调度与预备请求，并接入 vLLM 和 SGLang 推理后端。
 
 ## 文档
 
@@ -15,7 +15,7 @@
 | 调整策略、窗口、显存和副本 | [配置参考](docs/configuration.md) |
 | 理解论文机制和代码职责 | [架构与论文方法](docs/architecture.md) |
 | 修改代码、升级后端、验证回归 | [开发与验证](docs/development.md) |
-| 构建程序 DAG、测量响应和吞吐 | [工作负载与指标](docs/workloads.md) |
+| 构建程序 DAG、回放论文实验 | [工作负载与指标](docs/workloads.md)、[vLLM 回放](integrations/vllm/README.md#论文实验回放) |
 | 排查故障、管理状态和输出 | [运行维护与排错](docs/operations.md) |
 
 后端专项说明：[vLLM](integrations/vllm/README.md)、[SGLang](integrations/sglang/README.md)；传输微基准：[KV benchmark](cuda/README.md)。
