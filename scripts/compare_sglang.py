@@ -65,8 +65,7 @@ def trial(model, device, engine_args, trace, arm, reserve=0, interval=8, quantum
         result["response_seconds_per_output_token"] = {
             pid: latency/counts[pid] if counts[pid] else None for pid, latency in result["programs"].items()}
         result["paper_sequential_token_latency"] = distribution(result["response_seconds_per_output_token"].values())
-        if backend == "vllm":
-            result["program_datasets"] = {p["program_id"]: p.get("dataset") for p in trace}
+        result["program_datasets"] = {p["program_id"]: p.get("dataset") for p in trace}
         result["output_hashes"] = {f'{c["workload_program"]}/{c["workload_call"]}':
             hashlib.sha256(c["text"].encode()).hexdigest() for c in result["calls"]}
         return result
