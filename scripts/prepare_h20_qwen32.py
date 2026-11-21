@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import random
 import re
+import tempfile
 
 from prepare_sharegpt_replay import convert, reconstruct_conversations
 
@@ -41,7 +42,18 @@ def agent_replay(path, tokenizer, kind):
 
 
 def write_json(path, value):
-    path.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
+    data = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode()
+    if path.is_file() and path.read_bytes() == data:
+        return
+    staged = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=path.parent, prefix=f".{path.name}.", delete=False) as stream:
+            staged = Path(stream.name)
+            stream.write(data)
+        staged.replace(path)
+    finally:
+        if staged is not None:
+            staged.unlink(missing_ok=True)
 
 
 def main():
