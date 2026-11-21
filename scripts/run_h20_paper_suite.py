@@ -236,7 +236,7 @@ def main():
     for plan in plans:
         write_json(out / (plan["workload_kind"] + "-plan.json"), plan)
     manifest["gpu_plans"].update((p["workload_kind"], p["paper_figures"]) for p in plans)
-    manifest["cpu_figures"] = sorted(set(manifest["cpu_figures"]) | (set(args.figures) & {7, 11, 14, 15, 18}))
+    manifest["cpu_figures"] = sorted(set(manifest.get("cpu_figures", ())) | (set(args.figures) & {7, 11, 14, 15, 18}))
     write_json(manifest_path, manifest)
     if args.plan_only:
         return 0
