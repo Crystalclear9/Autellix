@@ -26,6 +26,14 @@ def write_json(path, value):
     tmp.replace(path)
 
 
+def summarize_measured(out, manifest):
+    results = [out / f"{name}.json" for name, figures in manifest["gpu_plans"].items()
+               if set(figures) & {12, 13, 16} and (out / f"{name}.json").exists()]
+    if results:
+        rows = (row for path in results for row in json.loads(path.read_text(encoding="utf-8")))
+        write_json(out / "measured-comparisons.json", paper_matrix(rows, strict=False))
+
+
 def cases_for(backend, family):
     policy = WORKLOADS[family][3]
     if backend == "vllm":
@@ -274,6 +282,8 @@ def main():
         exe, run_env = interpreters[backend]
         gpu_run(name, [exe, str(root / "scripts/run_sglang_matrix.py"), "--plan", str(out / (name + "-plan.json")),
                        "--output", str(out / (name + ".json")), "--resume"], run_env)
+        if set(plan["paper_figures"]) & {12, 13, 16}:
+            summarize_measured(out, manifest)
         if plan["scheduler_trace"] and (out / (name + ".json")).exists():
             with (out / (name + "-timing.log")).open("w", encoding="utf-8") as log:
                 subprocess.run([exe, str(root / "scripts/analyze_scheduler_trace.py"), str(out / (name + ".json")),
@@ -284,11 +294,6 @@ def main():
 
             rows = json.loads((out / (name + ".json")).read_text(encoding="utf-8"))
             write_json(out / (name + "-motivation.json"), motivation(rows))
-    results = [out / (name + ".json") for name, figures in manifest["gpu_plans"].items()
-               if set(figures) & {12, 13, 16} and (out / (name + ".json")).exists()]
-    if results:
-        rows = (row for path in results for row in json.loads(path.read_text(encoding="utf-8")))
-        write_json(out / "measured-comparisons.json", paper_matrix(rows))
     return int(any(statuses.values()))
 
 

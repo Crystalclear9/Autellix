@@ -83,7 +83,7 @@ def metrics(row):
                 calls_by_engine=dict(Counter(c["engine_id"] for c in row["calls"])), gpu=gpu, **cache)
 
 
-def paper_matrix(records, slo_targets=DEFAULT_SLO_TARGETS):
+def paper_matrix(records, slo_targets=DEFAULT_SLO_TARGETS, *, strict=True):
     """Join figure points across runner files and across inference engines."""
     trials, at_load = [], defaultdict(dict)
     for row in records:
@@ -107,7 +107,8 @@ def paper_matrix(records, slo_targets=DEFAULT_SLO_TARGETS):
         point = dict(figures=figures, workload=plan["workload_family"], backend=backend,
                      condition=row["condition"], model=row["model"], devices=row["device_groups"],
                      resources=dict(zip(("dtype", "context_tokens", "batch_size", "kv_tokens"), resources)),
-                     versions=row["versions"], programs=len(row["programs"]), rate=row["rate"], seed=row["seed"],
+                     versions=row["versions"], engine_args=opts,
+                     programs=len(row["programs"]), rate=row["rate"], seed=row["seed"],
                      planned_repeats=plan.get("repeats", 1),
                      trace_sha256=row["trace_sha256"], makespan_seconds=make,
                      token_latency=distribution(latencies.values()), output_tokens=row["completion_tokens"],
@@ -122,7 +123,7 @@ def paper_matrix(records, slo_targets=DEFAULT_SLO_TARGETS):
                          for c in row["calls"])
         slot[arm] = hashlib.sha256(json.dumps(lengths).encode()).hexdigest(), point
 
-    pairs = []
+    pairs, unmatched = [], []
     reference_arms = ("vllm/vllm", "vllm/vllm-opt", "vllm/vllm-opt-multistep", "vllm/fcfs-combined",
                       "vllm/mlfq", "sglang/sglang-native", "sglang/fcfs-combined", "sglang/mlfq")
     for slot in at_load.values():
@@ -134,8 +135,17 @@ def paper_matrix(records, slo_targets=DEFAULT_SLO_TARGETS):
                 if arm not in slot:
                     continue
                 lengths, point = slot[arm]
+                reason = None
                 if point["trace_sha256"] != reference["trace_sha256"] or lengths != reference_lengths:
-                    raise ValueError(f"mismatched trace or work: {arm} versus {baseline_arm}")
+                    reason = "mismatched trace or work"
+                elif point["backend"] == reference["backend"] and point["versions"] != reference["versions"]:
+                    reason = "mismatched backend versions"
+                if reason:
+                    if strict:
+                        raise ValueError(f"{reason}: {arm} versus {baseline_arm}")
+                    unmatched.append(dict(candidate=arm, baseline=baseline_arm, reason=reason, figures=point["figures"],
+                                          workload=point["workload"], rate=point["rate"], seed=point["seed"]))
+                    continue
                 ratios = {stat: 100 * (value / reference["token_latency"][stat] - 1)
                           for stat, value in point["token_latency"].items()
                           if value is not None and reference["token_latency"][stat]}
@@ -167,7 +177,7 @@ def paper_matrix(records, slo_targets=DEFAULT_SLO_TARGETS):
                 slo.append(dict(figures=figures, workload=workload, programs=programs, model=model, devices=devices,
                                 latency_statistic=stat, seconds_per_token_target=target,
                                 arrival_window_completed_programs_per_second=rates))
-    return dict(trials=trials, comparisons=pairs, slo_points=slo)
+    return dict(trials=trials, comparisons=pairs, unmatched=unmatched, slo_points=slo)
 
 
 def summarize(records, slo_targets=DEFAULT_SLO_TARGETS):
@@ -305,10 +315,11 @@ def main():
     parser.add_argument("--output", required=True)
     parser.add_argument("--slo", type=float, nargs="+", default=DEFAULT_SLO_TARGETS,
                         help="mean program seconds per token targets")
+    parser.add_argument("--matrix-only", action="store_true", help="join figure results across separate runs")
     args = parser.parse_args()
-    records = [row for file in args.inputs for row in json.loads(Path(file).read_text())]
-    result = summarize(records, slo_targets=args.slo)
-    Path(args.output).write_text(json.dumps(result, indent=2))
+    rows = (row for file in args.inputs for row in json.loads(Path(file).read_text(encoding="utf-8")))
+    result = paper_matrix(rows, slo_targets=args.slo) if args.matrix_only else summarize(list(rows), slo_targets=args.slo)
+    Path(args.output).write_text(json.dumps(result, indent=2), encoding="utf-8")
     print(json.dumps(result["comparisons"], indent=2))
 
 

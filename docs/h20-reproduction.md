@@ -175,7 +175,9 @@ SHA-256 已核对，记录位于 `data/autellix/import/migration-verification.js
 [Autellix 论文，第 6 节](https://arxiv.org/html/2502.13965v1#S6)
 
 `measured-comparisons.json` 以轨迹哈希、逐调用 token 数以及两端共同的 GPU、上下文、
-批次和 KV 容量核对配对，分别报告 makespan、程序完成率和归一化程序延迟。
+批次和 KV 容量核对配对，在每个图 12、13、16 的运行计划退出后更新。汇总包含
+makespan、程序完成率、归一化程序延迟，以及对应的引擎参数。跨目录的已完成试验可用
+`summarize_paper_suite.py --matrix-only` 汇总。
 
 ShareGPT 的 4,000 条回放含 23,575 次调用，平均输出 279 token、带完整历史的平均输入
 2,962 token。BFCL 轨迹保留每次输入的工具定义和上下文。现有 LATS 轨迹来自六个

@@ -131,6 +131,9 @@ class PaperSuiteSummary(unittest.TestCase):
         candidate["calls"][0]["completion_tokens"] += 1
         with self.assertRaisesRegex(ValueError, "mismatched trace or work"):
             summary.paper_matrix([native, candidate])
+        pending = summary.paper_matrix([native, candidate], strict=False)
+        self.assertFalse(pending["comparisons"])
+        self.assertEqual(pending["unmatched"][0]["reason"], "mismatched trace or work")
 
 
 if __name__ == "__main__":
