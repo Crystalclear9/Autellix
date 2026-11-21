@@ -131,16 +131,50 @@ SHA-256 已核对，记录位于 `data/autellix/import/migration-verification.js
 
 ## 论文机制与实现
 
-| 机制 | 实现入口与核对 |
+| 论文条目 | 当前 vLLM 实现与实验核对 |
 | --- | --- |
-| PLAS、ATLAS、MLFQ | `autellix/runtime/policy.py` 以实际模型服务时间更新程序历史，按多级 FIFO 队列执行降级和防饥饿；在线 ATLAS 使用论文算法 1 的最长路径标量 |
-| N 步与 K 个预备请求 | `autellix/runtime/window.py` 管理窗口和补位；H20 轨迹记录 `schedule_window`、`continue_plan` 和逐步执行 |
-| GPU 调度 | `integrations/sglang/scheduler.py` 在 SGLang 的 GPU 调度进程中控制请求接纳、运行批次和 KV 锁；CUDA event 计入模型执行时间 |
-| KV 交换 | `integrations/sglang/swap.py` 逐请求执行分块 gather/copy/scatter；论文的跨请求专用 CUDA 聚合交换仍待实现 |
-| 多引擎和会话 | `autellix/runtime/engine.py` 管理每副本进程、异步结果和程序亲和性；短输入优先选择请求最少的副本，长输入沿用程序所在副本 |
-| 论文实验 | 覆盖完整 ShareGPT、BFCL、LATS、Mixed、同到达率配对和程序级 SLO 曲线；论文的 Falcon-180B 和大规模离线批量曲线仍待补齐 |
+| §4.2.1 程序表、PLAS、ATLAS | [`ProgramTable` 和 `RuntimeScheduler`](../autellix/runtime/policy.py) 保存会话、调用及累计等待时间。PLAS 继承已完成调用的累计模型时间。在线 ATLAS 继承程序当前的最长已观察服务路径标量，完成时以 `max(旧值, 继承值 + 本次模型时间)` 更新。DAG 回放按依赖提交调用，在线调度使用程序表标量。 |
+| §4.2.2 队列、抢占、防饥饿 | [`PaperPlan`](../integrations/vllm/paper.py) 按程序优先级选取全局批次，遇到 token 或 KV 容量限制时保留可接纳的队首。时间片用尽后降级，较低队列按程序历史和调用当前窗口的等待/服务比提升。请求压入 vLLM 的实际执行批次，CUDA event 记录模型时间。BFCL 1.92 的轨迹含 3,321 次提升和 1,365 次换出及恢复。 |
+| §4.2.2 N 步和 K 个预备请求 | [`SchedulingWindow`](../autellix/runtime/window.py) 冻结 N 步的优先次序，预填充或恢复 K 个候补请求，活动请求完成后窗口内补位。ShareGPT 1.92 记录了 74 次补位。接入层仍使用 vLLM 的逐步执行与 KV 元数据接口，保留每步的元数据构造和 CUDA 计时同步。 |
+| §4.3 路由与 §5 会话 | [`InferenceEngine`](../autellix/runtime/engine.py) 按副本的未完成调用数选择负载最低的引擎，超过 2,048 token 的请求复用程序亲和的副本。已测两个及四个 8B 副本，以及两个双卡 TP 的 70B 副本。 |
+| §5 聚合 KV 交换 | [`batched_swap`](../autellix/runtime/swap.py) 在 vLLM 的真实 KV 缓存路径上聚合跨层 K/V，以连续 pinned buffer 传输，每段上限 1 GiB。打包、解包用 PyTorch gather/scatter 和同步保护；论文使用定制 CUDA/C++ 内核。H20 的 8–512 块往返验收逐项一致，优化后微基准较原生 vLLM 快 1.14–1.30 倍。 |
+| §6 实验覆盖 | 8B 四类在线负载共 60 个 vLLM 实验，70B 四卡张量并行共 20 个；另有多副本、耗时拆分、KV 微基准和 SRPT 模拟。8B 离线 128 完成全组，1,000 与 4,000 有部分组合完成。论文使用 A100，本轮使用 H20，Falcon-180B 尚未运行。 |
 
-## 已测的单卡配对
+这是一次 Autellix 论文复现尝试。核心调度、路由和 KV 交换均接入了真实推理。实验中的
+`vllm-opt` 使用分块 prefill 与前缀缓存，`vllm-opt-multistep` 使用前缀缓存与原生多步，
+分开覆盖论文 vLLM-opt 的三项优化。回放使用固定参考输出长度；本地 LATS 平均 320 次调用，
+论文为 159.7 次。论文在线吞吐比较固定程序级延迟下可承载的程序到达率，下表报告固定到达率的
+输出 token/s 与程序级延迟。 [Autellix 论文，§4–§6](https://arxiv.org/html/2502.13965v1#S4)
+
+## vLLM Autellix 与原生 SGLang
+
+以下配对使用单张 H20、Llama-3.1-8B BF16、活动 batch 上限 16。Autellix 接入 vLLM 0.6.1，
+对照使用 SGLang 0.4.9.post6 的上游默认执行优化。GPU KV 预算和依赖版本沿用各自的运行配置。
+`online-*` 与 `sglang-high-*` 的四个最高负载配对分时使用同型号的
+不同实体卡；后两行在各自同一张实体卡上完成。每对的输入轨迹 SHA-256、权重路径和输出 token
+数量一致，输出序列哈希随引擎而异。延迟为论文口径的平均毫秒/token，LATS 按关键路径计算，
+Mixed 按程序类型选择端到端时间或关键路径时间。
+
+| 负载（程序/秒） | 输出 token/s，Autellix / SGLang | 吞吐变化 | 毫秒/token，Autellix / SGLang | 延迟变化 |
+| --- | ---: | ---: | ---: | ---: |
+| ShareGPT 1.92 | 306.08 / 444.84 | −31.2% | 31.87 / 12.31 | +159.0% |
+| BFCL 1.92 | 30.43 / 352.54 | −91.4% | 1,931.48 / 48.90 | +3,849.9% |
+| LATS 0.28 | 549.90 / 689.46 | −20.2% | 9.37 / 7.42 | +26.4% |
+| Mixed 0.48 | 429.58 / 547.06 | −21.5% | 15.46 / 11.14 | +38.7% |
+| ShareGPT 1.92，时间片倍率 8，H20 0 | 331.29 / 444.84 | −25.5% | 23.89 / 12.31 | +94.1% |
+| BFCL 1.92，保留 GPU 上暂停的 KV，H20 5 | 272.24 / 347.65 | −21.7% | 60.74 / 50.23 | +20.9% |
+
+原 BFCL 组换出 1,365 次，启用 `--keep-resident-kv` 后换出降至 0，吞吐由 30.43 升至 272.24
+token/s。ShareGPT 时间片倍率 8 的补测记录 71 次换出。要量化换出归零后的差距，可对齐两边的
+KV token 预算，在同一张卡上分别测量模型执行、每步批次构建、CUDA 计时同步和 KV 传输。原始计划与结果位于
+`data/autellix/runs/paper-vllm-20261119/` 的 `online-*`、`sglang-high-*`、`tune-sharegpt-q8`、
+`resident-bfcl` 和 `sglang-bfcl-resident-card`。
+
+离线 1,000 程序调优组和 vLLM-opt 使用同型号的不同 H20。相同 ShareGPT 输入的平均延迟由 vLLM-opt 的
+2.316 秒/token 降至 0.690 秒/token（−70.2%），整批时间由 2,453 秒增至 2,604 秒（+6.2%）。
+4,000 程序的基础 vLLM 已完成，原生 SGLang 与 Autellix 的整批配对尚未完成。
+
+## SGLang 适配的单卡配对
 
 下表以同资源、同 Triton 配置的原生 SGLang 为基准。响应和秒/token 越低越好，
 输出吞吐越高越好。
