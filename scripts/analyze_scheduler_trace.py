@@ -12,7 +12,7 @@ def analyze(path, request_ids=None, workload_window=None):
 
 def _summarize_events(stream, request_ids, workload_window):
     counts, queues, admissions, batch_sizes = Counter(), Counter(), Counter(), Counter()
-    timing, transfer_blocks = Counter(), Counter()
+    timing, transfer_blocks, transfer_copies = Counter(), Counter(), Counter()
     model_seconds, occupied_seconds, swapped_tokens = 0., 0., 0
     for line in stream:
         event = json.loads(line)
@@ -44,10 +44,13 @@ def _summarize_events(stream, request_ids, workload_window):
         elif event["event"] == "kv_transfer":
             timing["swap_" + event["direction"]] += event["seconds"]
             transfer_blocks[event["direction"]] += event["blocks"]
+            if "copies" in event:
+                transfer_copies[event["direction"]] += event["copies"]
     return dict(events=dict(counts), admissions_by_queue=dict(admissions), demotions_by_queue=dict(queues),
                 batches_by_size=dict(batch_sizes), model_seconds=model_seconds,
                 service_weighted_batch_size=occupied_seconds/model_seconds if model_seconds else None,
-                swapped_out_tokens=swapped_tokens, timing_seconds=dict(timing), kv_transfer_blocks=dict(transfer_blocks))
+                swapped_out_tokens=swapped_tokens, timing_seconds=dict(timing),
+                kv_transfer_blocks=dict(transfer_blocks), kv_transfer_copies=dict(transfer_copies))
 
 
 def timing_per_token(row, replicas):

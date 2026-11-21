@@ -103,19 +103,24 @@ class VLLMBackend:
                                 requests=[g.seq_group.request_id for g in outputs.scheduled_seq_groups])
                 return result
 
-            def timed_transfer(transfer, direction):
+            def timed_transfer(transfer, direction, layers):
                 def execute(mapping):
+                    if not len(mapping):
+                        return transfer(mapping)
                     started = perf_counter()
-                    transfer(mapping)
+                    copies = transfer(mapping)
                     torch.cuda.synchronize()
-                    controller.emit("kv_transfer", direction=direction, blocks=len(mapping),
+                    if copies is None:
+                        copies = 2 * layers * len(mapping)
+                    controller.emit("kv_transfer", direction=direction, blocks=len(mapping), copies=copies,
                                     seconds=perf_counter() - started)
                 return execute
 
             self.scheduler.schedule = timed_schedule
             for cache in worker.cache_engine:
-                cache.swap_out = timed_transfer(cache.swap_out, "out")
-                cache.swap_in = timed_transfer(cache.swap_in, "in")
+                layers = len(cache.gpu_cache)
+                cache.swap_out = timed_transfer(cache.swap_out, "out", layers)
+                cache.swap_in = timed_transfer(cache.swap_in, "in", layers)
         def transfer_out(blocks):
             mapping = torch.tensor(blocks, dtype=torch.int64, device="cpu")
             worker.cache_engine[0].swap_out(mapping)

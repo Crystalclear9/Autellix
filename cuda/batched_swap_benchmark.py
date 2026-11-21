@@ -19,7 +19,7 @@ def main(argv: list[str] | None = None) -> int:
     if min(args.blocks, args.block_bytes, args.layers, args.iterations) <= 0 or args.block_bytes % 2:
         parser.error("counts must be positive; block-bytes must be divisible by 2")
     import torch
-    from autellix.runtime.swap import batched_swap
+    from autellix.runtime.swap import MAX_TRANSFER_BYTES, batched_swap
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA GPU required; no simulated fallback")
     shape = (2, args.blocks, args.block_bytes // 2)
@@ -60,8 +60,12 @@ def main(argv: list[str] | None = None) -> int:
     small_seconds = measure(small)
     batched_seconds = measure(lambda src, dst: batched_swap(src, dst, mapping))
     size = args.layers * 2 * args.blocks * args.block_bytes * 2
+    blocks_per_payload = max(1, MAX_TRANSFER_BYTES // (2 * args.layers * args.block_bytes))
+    copies_per_direction = (args.blocks + blocks_per_payload - 1) // blocks_per_payload
     result = dict(device=torch.cuda.get_device_name(), correctness="exact_roundtrip",
                   small_roundtrip_seconds=small_seconds, batched_roundtrip_seconds=batched_seconds,
+                  small_roundtrip_payload_copies=4 * args.layers * args.blocks,
+                  batched_roundtrip_payload_copies=2 * copies_per_direction,
                   small_GBps=size / small_seconds / 1e9, batched_GBps=size / batched_seconds / 1e9,
                   speedup=small_seconds / batched_seconds, config=vars(args))
     if args.fused:

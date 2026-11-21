@@ -1,5 +1,6 @@
 """Synchronous host swap for the pinned SGLang MHA token pool (page size 1)."""
 from time import perf_counter
+from math import ceil
 
 
 class HostKV:
@@ -22,11 +23,11 @@ class HostKV:
         self.observe = observe
         self.transfer_seconds = 0.
 
-    def _record_transfer(self, direction, blocks, started):
+    def _record_transfer(self, direction, blocks, copies, started):
         if self.observe is not None:
             seconds = perf_counter() - started
             self.transfer_seconds += seconds
-            self.observe("kv_transfer", direction=direction, blocks=blocks, seconds=seconds)
+            self.observe("kv_transfer", direction=direction, blocks=blocks, copies=copies, seconds=seconds)
 
     def discard(self, rid):
         entry = self.saved.pop(rid, None)
@@ -50,6 +51,7 @@ class HostKV:
                 payload = staging.to(layout.device, non_blocking=True)
                 layout.move(indices[start:end], payload, pack=False)
             stream.synchronize()
+        return ceil(len(indices) / count)
 
     def save(self, rid, tokens, indices):
         import torch
@@ -68,7 +70,7 @@ class HostKV:
                            dtype=layer.dtype, device="cpu", pin_memory=layer.is_cuda)
         indices = indices.long()
         if self.packed is not None:
-            self._move_packed(indices, host, pack=True)
+            copies = self._move_packed(indices, host, pack=True)
         else:
             chunk = max(1, self.transfer_bytes // (layer[0].numel() * layer.element_size()))
             stream = torch.cuda.current_stream(layer.device)
@@ -79,7 +81,8 @@ class HostKV:
                     target[start:end].copy_(values, non_blocking=True)
                     stream.synchronize()
                     del values
-        self._record_transfer("out", len(indices), started)
+            copies = len(self.layers) * ceil(len(indices) / chunk)
+        self._record_transfer("out", len(indices), copies, started)
         self.saved[rid] = (list(tokens), host)
         self.used_bytes += size - old_size
         return True
@@ -113,7 +116,7 @@ class HostKV:
                 copy_indices = indices.long()
                 started = perf_counter() if self.observe is not None else None
                 if self.packed is not None:
-                    self._move_packed(copy_indices, host[prefix_len:], pack=False)
+                    copies = self._move_packed(copy_indices, host[prefix_len:], pack=False)
                 else:
                     for layer, source in zip(self.layers, host):
                         for start in range(0, needed, chunk):
@@ -122,7 +125,8 @@ class HostKV:
                             layer.index_copy_(0, copy_indices[start:end], values)
                             stream.synchronize()
                             del values
-                self._record_transfer("in", needed, started)
+                    copies = len(self.layers) * ceil(needed / chunk)
+                self._record_transfer("in", needed, copies, started)
                 shared = self.tree.insert(tokens, torch.cat((prefix, indices)))
             except BaseException:
                 self.allocator.free(indices)

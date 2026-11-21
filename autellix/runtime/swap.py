@@ -17,7 +17,7 @@ def batched_swap(source, destination, mapping, *, packed=None):
         raise ValueError("source and destination layer counts must match")
     pairs = torch.as_tensor(mapping, dtype=torch.long, device="cpu").reshape(-1, 2)
     if not len(pairs):
-        return
+        return 0
     src_idx, dst_idx = pairs[:, 0].contiguous(), pairs[:, 1].contiguous()
     src_min, src_max = torch.aminmax(src_idx)
     dst_min, dst_max = torch.aminmax(dst_idx)
@@ -45,6 +45,7 @@ def batched_swap(source, destination, mapping, *, packed=None):
     with torch.cuda.device(gpu):
         for src_blocks, dst_blocks in zip(src_idx.split(blocks_per_transfer), dst_idx.split(blocks_per_transfer)):
             _transfer(source, destination, src_blocks, dst_blocks, gpu, packed)
+    return (len(src_idx) + blocks_per_transfer - 1) // blocks_per_transfer
 
 
 def _transfer(source, destination, src_idx, dst_idx, gpu, packed):
@@ -87,10 +88,10 @@ def attach_cache_engine(cache_engine, *, fused=False):
         packed = PackedKVLayout(cache_engine.gpu_cache, channels=2)
 
     def swap_in(self, mapping):
-        batched_swap(self.cpu_cache, self.gpu_cache, mapping, packed=packed)
+        return batched_swap(self.cpu_cache, self.gpu_cache, mapping, packed=packed)
 
     def swap_out(self, mapping):
-        batched_swap(self.gpu_cache, self.cpu_cache, mapping, packed=packed)
+        return batched_swap(self.gpu_cache, self.cpu_cache, mapping, packed=packed)
 
     cache_engine.swap_in = MethodType(swap_in, cache_engine)
     cache_engine.swap_out = MethodType(swap_out, cache_engine)

@@ -168,7 +168,7 @@ SHA-256 已核对，记录位于 `data/autellix/import/migration-verification.js
 | 图 16，离线 makespan | 从同一 4,000 程序池抽取 1,000、2,000、3,000 和 4,000 个不同程序，每组同时提交，记录整批完成时间。对照包含三项组合优化的 FCFS、原生 vLLM、原生 SGLang、MLFQ 和两种 Autellix 接入。关闭 SQLite 的瞬时活动发布，调度和完成统计继续更新 |
 | 图 17，开销拆分 | vLLM-opt、MLFQ 和 Autellix 分别测量 ShareGPT、LATS 的模型、调度、KV 搬运和请求累计排队时间，按实际处理窗口排除预热 |
 | 图 18，最优调度对照 | ShareGPT 与 LATS 的等步长模拟，含可提前获知剩余服务量的 SRPT |
-| 图 19，KV 交换 | 跨层 fused 打包与解包，测原生 vLLM 搬运、PyTorch 聚合和 fused 路径。另有实际推理对照与 N=1 消融，SGLang 记录其自有 KV 池的传输时间 |
+| 图 19，KV 交换 | 跨层 fused 打包与解包，测原生 vLLM 搬运、PyTorch 聚合和 fused 路径。推理消融同时记录逻辑换出、主机与设备之间的 KV 载荷传输次数及耗时，并比较 N=1 窗口 |
 
 图 12 的 Llama-3.1-70B 和 Falcon-180B 原配置分别使用 4 张和 8 张 A100。图 14 的副本组数
 分别为 4 和 2，图 15 比较独立引擎扩容。上述 GPU 结果与单卡 8B、CPU 模拟分别汇总。
@@ -176,6 +176,11 @@ SHA-256 已核对，记录位于 `data/autellix/import/migration-verification.js
 
 `measured-comparisons.json` 以轨迹哈希、逐调用 token 数以及两端共同的 GPU、上下文、
 批次和 KV 容量核对配对，分别报告 makespan、程序完成率和归一化程序延迟。
+
+ShareGPT 的 4,000 条回放含 23,575 次调用，平均输出 279 token、带完整历史的平均输入
+2,962 token。BFCL 轨迹保留每次输入的工具定义和上下文。现有 LATS 轨迹来自六个
+HotpotQA 程序，平均 320 次调用，论文报告 159.7 次。输入长度与程序调用数采用图 11
+的工作负载清单核对，结果保留对应轨迹版本。
 
 ```bash
 python scripts/run_h20_paper_suite.py --model "$model" --datasets "$data/datasets" --gpu "$gpu" \

@@ -59,6 +59,7 @@ def install(cls, options):
     def init(self, *a, **kw):
         original_init(self, *a, **kw)
         self.pp_size = getattr(self, "pp_size", 1)
+        self._autellix_model_events = (torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True))
         if self.pp_size > 1:
             from .pipeline import configure
             configure(self, options)
@@ -369,7 +370,7 @@ def install(cls, options):
             self._autellix_inflight.update(rids)
         else:
             self.autellix.begin(rids)
-        start, end = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
+        start, end = self._autellix_model_events
         start.record()
         result = original_run(self, batch)
         end.record()
