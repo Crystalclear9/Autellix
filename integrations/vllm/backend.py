@@ -16,7 +16,8 @@ class VLLMBackend:
                  trace: str | None = None, batched_swap: bool = True, observe_native: bool = True,
                  measure_timing: bool = False, publish_waiting_each_step: bool = True,
                  keep_resident_kv: bool = False, publish_activity_at_window: bool = False,
-                 refill_idle_slots: bool = False, paper_chunked_prefill: bool = False, **engine_args):
+                 refill_idle_slots: bool = False, paper_chunked_prefill: bool = False,
+                 resident_reserve_only: bool = False, **engine_args):
         if version("vllm") != "0.6.1":
             raise RuntimeError("this backend requires vllm==0.6.1")
         config = config or PolicyConfig()
@@ -77,7 +78,8 @@ class VLLMBackend:
             from .paper import PaperPlan
             self.scheduler._autellix_paper = PaperPlan(self.scheduler, self.controller, capacity, keep_resident_kv,
                                                       refill_idle_slots=refill_idle_slots,
-                                                      chunked_prefill=paper_chunked_prefill)
+                                                      chunked_prefill=paper_chunked_prefill,
+                                                      resident_reserve_only=resident_reserve_only)
             self.scheduler._autellix_window = self.scheduler._autellix_paper.window
         worker = self.engine.model_executor.driver_worker
         if tp == 1 and batched_swap and not native:

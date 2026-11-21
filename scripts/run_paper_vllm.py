@@ -40,6 +40,7 @@ def main():
                         help="keep preempted KV on GPU until another request needs its blocks")
     parser.add_argument("--publish-activity-at-window", action="store_true", help="publish the shared activity view at window boundaries")
     parser.add_argument("--refill-idle-slots", action="store_true", help="fill vacant batch slots after the prepared reserve is exhausted")
+    parser.add_argument("--resident-reserve-only", action="store_true", help="choose reserve requests from KV already on GPU")
     parser.add_argument("--cuda-graphs", action="store_true", help="enable the native decode CUDA graphs for all cases")
     parser.add_argument("--paper-chunked-prefill", action="store_true", help="use budgeted prefill along with Autellix windows")
     parser.add_argument("--no-scheduler-trace", action="store_true", help="measure without per-step scheduler JSONL events")
@@ -66,7 +67,8 @@ def main():
 
     candidate = dict(name="autellix", policy=policy, interval=args.interval, reserve=1,
                      quantum_scale=args.quantum_scale, boundary_scale=args.boundary_scale)
-    options = {name: True for name in ("keep_resident_kv", "publish_activity_at_window", "refill_idle_slots", "paper_chunked_prefill")
+    options = {name: True for name in ("keep_resident_kv", "publish_activity_at_window", "refill_idle_slots",
+                                       "paper_chunked_prefill", "resident_reserve_only")
                if getattr(args, name)}
     if options:
         candidate["engine_args"] = options

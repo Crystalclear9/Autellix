@@ -32,6 +32,7 @@ class SGLangBackend:
         cache_paused_kv = engine_args.pop("autellix_cache_paused_kv", False)
         publish_activity_at_window = engine_args.pop("autellix_window_activity", False)
         refill_idle_slots = engine_args.pop("autellix_refill_idle_slots", False)
+        resident_reserve_only = engine_args.pop("autellix_resident_reserve_only", False)
         mix_prefill_decode = engine_args.pop("autellix_mix_prefill_decode", True)
         if legacy_gpu:
             # Explicit compatibility mode: native PyTorch ops, no CUDA JIT.
@@ -62,6 +63,7 @@ class SGLangBackend:
                        retain_running=retain_running, cache_paused_kv=cache_paused_kv and pp == 1,
                        publish_activity_at_window=publish_activity_at_window and config.implementation == "paper",
                        refill_idle_slots=refill_idle_slots and config.implementation == "paper",
+                       resident_reserve_only=resident_reserve_only and config.implementation == "paper",
                        mix_prefill_decode=mix_prefill_decode,
                        attention_score_elements=score_elements,
                        mlp_chunk_size=mlp_chunk_size)

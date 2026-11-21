@@ -1,8 +1,12 @@
 """Freeze policy order for N decode steps, with resident reserve refill."""
+from itertools import islice
+
+
 class SchedulingWindow:
-    def __init__(self, controller, capacity, refill_idle_slots=False):
+    def __init__(self, controller, capacity, refill_idle_slots=False, resident_reserve_only=False):
         self.controller, self.capacity = controller, capacity
         self.refill_idle_slots = refill_idle_slots
+        self.resident_reserve_only = resident_reserve_only
         self.capacity_limited = False
         self.remaining = 0
         self.cohort = []
@@ -15,11 +19,17 @@ class SchedulingWindow:
         if not available:
             self.cohort, self.active, self.reserve, self.remaining = [], set(), set(), 0
             return set(), set()
+        resident = set(resident)
         cohort = [rid for rid in self.cohort if rid in available]
         boundary = self.remaining == 0 or not cohort
         if boundary:
             ctl.refresh()
-            cohort = sorted(available, key=ctl.key)[:self.capacity + ctl.config.overprovision]
+            ranked = sorted(available, key=ctl.key)
+            if self.resident_reserve_only:
+                tail = (rid for rid in islice(ranked, self.capacity, None) if rid in resident)
+                cohort = ranked[:self.capacity] + list(islice(tail, ctl.config.overprovision))
+            else:
+                cohort = ranked[:self.capacity + ctl.config.overprovision]
             self.remaining = ctl.config.schedule_interval
             self.capacity_limited = False
             ctl.emit("schedule_window", requests=cohort, decode_steps=self.remaining)
@@ -34,13 +44,13 @@ class SchedulingWindow:
         active = set(cohort[:self.capacity])
         reserve = set(cohort[self.capacity:])
         if not boundary:
-            for rid in active & self.reserve & set(resident):
+            for rid in active & self.reserve & resident:
                 ctl.emit("refill", rid=rid, remaining_steps=self.remaining)
         self.cohort, self.active, self.reserve = cohort, active, reserve
         # Precompute the reserve's prefill / restore its swapped KV once; hold
         # it resident thereafter. Only capacity requests participate in decode.
-        prepare = reserve - set(resident)
-        return active | prepare, reserve & set(resident)
+        prepare = reserve - resident
+        return active | prepare, reserve & resident
 
     def executed(self, is_prefill=False):
         if not is_prefill:

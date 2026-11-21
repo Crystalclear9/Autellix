@@ -161,6 +161,21 @@ class PaperPlanTests(unittest.TestCase):
         self.assertEqual(plan.window.remaining, 2)
         self.assertEqual(len(self.refreshes), 1)
 
+    def test_reserve_uses_ready_kv_without_lower_priority_prefill(self):
+        self.priority.update(active=0, waiting=1, resident=2)
+        self.s.running.extend([Group("active"), Group("resident")])
+        self.s.waiting.append(Group("waiting", True))
+        plan = PaperPlan(self.s, self.ctl, 1, keep_resident_kv=True, resident_reserve_only=True)
+        plan.prepared.update(["active", "resident"])
+        first = plan.next_step()
+        self.assertEqual(plan.window.cohort, ["active", "resident"])
+        self.assertEqual([g.seq_group.request_id for g in first.scheduled_seq_groups], ["active"])
+        plan.window.executed()
+        self.s.running.popleft()
+        refill = plan.next_step()
+        self.assertEqual([g.seq_group.request_id for g in refill.scheduled_seq_groups], ["resident"])
+        self.assertEqual([g.request_id for g in self.s.waiting], ["waiting"])
+
     def test_idle_refill_does_not_bypass_capacity_limited_prefix(self):
         self.ctl.config = PolicyConfig(schedule_interval=3, overprovision=0)
         self.priority.update(a=0, b=1)

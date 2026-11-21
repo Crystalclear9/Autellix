@@ -77,7 +77,8 @@ def install(cls, options):
         if options.get("capacity") and self.pp_size == 1:
             from autellix.runtime.window import SchedulingWindow
             self._autellix_window = SchedulingWindow(self.autellix, options["capacity"],
-                                                      refill_idle_slots=options.get("refill_idle_slots", False))
+                                                      refill_idle_slots=options.get("refill_idle_slots", False),
+                                                      resident_reserve_only=options.get("resident_reserve_only", False))
         if options.get("host_bytes"):
             from .swap import HostKV
             self._autellix_host = HostKV(self.token_to_kv_pool_allocator, self.tree_cache, options["host_bytes"],

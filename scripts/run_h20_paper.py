@@ -35,6 +35,7 @@ def main():
     parser.add_argument("--cache-paused-kv", action="store_true", help="cache paused prefixes in the GPU radix tree")
     parser.add_argument("--publish-activity-at-window", action="store_true", help="publish the shared activity view at window boundaries")
     parser.add_argument("--refill-idle-slots", action="store_true", help="fill vacant batch slots after the prepared reserve is exhausted")
+    parser.add_argument("--resident-reserve-only", action="store_true", help="choose reserve requests from KV already on GPU")
     parser.add_argument("--optimized-kernels", action="store_true", help="use SGLang's selected attention kernels and CUDA graphs")
     parser.add_argument("--native-default", type=float, nargs="*", metavar="RATE",
                         help="also measure upstream SGLang defaults at the listed rates, or at all rates")
@@ -71,6 +72,8 @@ def main():
         candidate_options["autellix_window_activity"] = True
     if args.refill_idle_slots:
         candidate_options["autellix_refill_idle_slots"] = True
+    if args.resident_reserve_only:
+        candidate_options["autellix_resident_reserve_only"] = True
     if args.optimized_kernels:
         candidate_options.update(attention_backend=None, sampling_backend=None, disable_cuda_graph=False)
     if candidate_options:

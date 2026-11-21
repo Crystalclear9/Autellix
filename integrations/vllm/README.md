@@ -15,6 +15,8 @@
 
 默认 `paper` 模式由 `paper.py` 按全局优先级接纳请求，不使用原生 `_schedule()` 决定批次。窗口开始时预留后续 KV 槽位；窗口内更新 token 和 block 元数据，预备请求可在活动请求结束后补位。
 
+`--resident-reserve-only` 将候补限定为已有 GPU KV 的请求，按论文的候补选择方式运行。
+
 混合 prefill/decode 执行按程序优先级选批。`paper_chunked_prefill=true` 复用 vLLM 的 token 预算与前缀缓存块对齐规则，把长输入分到多个迭代。最后一段完成后才预留后续 decode 的 KV 槽位。默认整段 prefill，`max_num_batched_tokens` 需覆盖单条输入。预备请求占用 KV 显存，成为活动请求后参与 decode。
 
 抢占沿用原生 block 所有权转换。换出和换入分开处理，保留生成序列；实际批量传输由 `autellix/runtime/swap.py` 完成。预留窗口所需显存不足时会明确报错，需调整模型、显存预算、批次或窗口长度。

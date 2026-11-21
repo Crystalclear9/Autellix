@@ -113,6 +113,7 @@ def summarize(records, slo_targets=DEFAULT_SLO_TARGETS):
                 return {k: v for k, v in r["effective_engine_args"].items()
                         if k not in {"autellix_native_baseline", "autellix_swap_space", "autellix_host_kv_recompute",
                                      "autellix_cache_paused_kv", "autellix_window_activity", "autellix_refill_idle_slots",
+                                     "autellix_resident_reserve_only", "resident_reserve_only",
                                      "autellix_retain_running", "autellix_mix_prefill_decode",
                                      "autellix_mode", "preemption_mode", "batched_swap", "keep_resident_kv",
                                      "paper_chunked_prefill", "publish_activity_at_window", "refill_idle_slots"}}
