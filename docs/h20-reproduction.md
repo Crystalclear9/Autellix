@@ -142,7 +142,7 @@ SHA-256 已核对，记录位于 `data/autellix/import/migration-verification.js
 | §4.2.2 队列、抢占、防饥饿 | [`PaperPlan`](../integrations/vllm/paper.py) 按程序优先级选取全局批次，遇到 token 或 KV 容量限制时保留可接纳的队首。时间片用尽后降级，较低队列按程序历史和调用当前窗口的等待/服务比提升。请求压入 vLLM 的实际执行批次，CUDA event 记录模型时间。BFCL 1.92 的轨迹含 3,321 次提升和 1,365 次换出及恢复。 |
 | §4.2.2 N 步和 K 个预备请求 | [`SchedulingWindow`](../autellix/runtime/window.py) 冻结 N 步的优先次序，预填充或恢复 K 个候补请求，活动请求完成后窗口内补位。ShareGPT 1.92 记录了 74 次补位。接入层仍使用 vLLM 的逐步执行与 KV 元数据接口，保留每步的元数据构造和 CUDA 计时同步。 |
 | §4.3 路由与 §5 会话 | [`InferenceEngine`](../autellix/runtime/engine.py) 按副本的未完成调用数选择负载最低的引擎，超过 2,048 token 的请求复用程序亲和的副本。已测两个及四个 8B 副本，以及两个双卡 TP 的 70B 副本。 |
-| §5 聚合 KV 交换 | [`batched_swap`](../autellix/runtime/swap.py) 在 vLLM 的真实 KV 缓存路径上聚合跨层 K/V，以连续 pinned buffer 传输，每段上限 1 GiB。打包、解包用 PyTorch gather/scatter 和同步保护；论文使用定制 CUDA/C++ 内核。H20 的 8–512 块往返验收逐项一致，优化后微基准较原生 vLLM 快 1.14–1.30 倍。 |
+| §5 聚合 KV 交换 | [`PackedKVLayout`](../autellix/runtime/packed_kv.py) 接入两个后端的真实 KV 交换。每个载荷用一个 Triton kernel 完成跨层 GPU 打包或解包，再通过锁页缓冲区批量传输。此前的 PyTorch 路径保留作消融，其 H20 8–512 块往返微基准较原生 vLLM 快 1.14–1.30 倍。 |
 | §6 实验覆盖 | 8B 四类在线负载共 60 个 vLLM 实验，70B 四卡张量并行共 20 个；另有多副本、耗时拆分、KV 微基准和 SRPT 模拟。8B 离线 128 完成全组，1,000 与 4,000 有部分组合完成。论文使用 A100，本轮使用 H20，Falcon-180B 尚未运行。 |
 
 这是一次 Autellix 论文复现尝试。核心调度、路由和 KV 交换均接入了真实推理。实验中的
@@ -150,6 +150,38 @@ SHA-256 已核对，记录位于 `data/autellix/import/migration-verification.js
 分开覆盖论文 vLLM-opt 的三项优化。回放使用固定参考输出长度；本地 LATS 平均 320 次调用，
 论文为 159.7 次。论文在线吞吐比较固定程序级延迟下可承载的程序到达率，下表报告固定到达率的
 输出 token/s 与程序级延迟。 [Autellix 论文，§4–§6](https://arxiv.org/html/2502.13965v1#S4)
+
+## 按论文图号运行单卡实验
+
+`scripts/run_h20_paper_suite.py` 将实卡测量、模拟和每个配置的检查点组织在同一目录。它只接受
+一个物理卡号，逐组启动和关闭引擎。vLLM 和 SGLang 使用各自的 Python 环境，共用模型权重和
+准备好的轨迹。`--plan-only` 生成清单和配置，`--figures`、`--cases` 与 `--offline-sizes`
+选择本次执行的图和对照组。
+
+| 原论文 | 单卡工作流 |
+| --- | --- |
+| 图 4–6，负载动机 | 一小时 ShareGPT 到达记录、活动调用数、不同负载的排队占比，并按调用输出 token 数和每程序调用数统计阻塞 |
+| 图 7，前缀局部性 | 从 ShareGPT 和 LATS 的实际输入 token 逐块计算同程序及跨程序前缀复用机会 |
+| 图 11，工作负载分布 | 从 ShareGPT、BFCL、LATS 与 Mixed 回放提取程序长度与调用统计 |
+| 图 12、13，在线均值与尾延迟 | 四类负载的泊松到达率扫描，包含原生 vLLM、两种 vLLM-opt、同路径 FCFS、MLFQ、Autellix，以及原生 SGLang 和它的接入版。汇总同时记录到达窗口完成率和固定延迟目标内完成率 |
+| 图 14、15，多副本路由与扩展 | 原数据的多副本模拟。论文的多物理 GPU 性能依赖各副本拥有独立计算资源 |
+| 图 16，离线 makespan | 从同一 4,000 程序池抽取 1,000、2,000、3,000 和 4,000 个不同程序，每组同时提交，记录整批完成时间。对照包含三项组合优化的 FCFS、原生 vLLM、原生 SGLang、MLFQ 和两种 Autellix 接入。关闭 SQLite 的瞬时活动发布，调度和完成统计继续更新 |
+| 图 17，开销拆分 | vLLM-opt、MLFQ 和 Autellix 分别测量 ShareGPT、LATS 的模型、调度、KV 搬运和请求累计排队时间，按实际处理窗口排除预热 |
+| 图 18，最优调度对照 | ShareGPT 与 LATS 的等步长模拟，含可提前获知剩余服务量的 SRPT |
+| 图 19，KV 交换 | 跨层 fused 打包与解包，测原生 vLLM 搬运、PyTorch 聚合和 fused 路径。另有实际推理对照与 N=1 消融，SGLang 记录其自有 KV 池的传输时间 |
+
+图 12 的 Llama-3.1-70B 和 Falcon-180B 原配置分别使用 4 张和 8 张 A100。图 14 的副本组数
+分别为 4 和 2，图 15 比较独立引擎扩容。上述 GPU 结果与单卡 8B、CPU 模拟分别汇总。
+[Autellix 论文，第 6 节](https://arxiv.org/html/2502.13965v1#S6)
+
+`measured-comparisons.json` 以轨迹哈希、逐调用 token 数以及两端共同的 GPU、上下文、
+批次和 KV 容量核对配对，分别报告 makespan、程序完成率和归一化程序延迟。
+
+```bash
+python scripts/run_h20_paper_suite.py --model "$model" --datasets "$data/datasets" --gpu "$gpu" \
+  --run-dir "$data/runs/paper-replay" --vllm-python "$vp" --sglang-python "$sp" \
+  --vllm-preload "$lib/libcublas.so.12:$lib/libcublasLt.so.12"
+```
 
 ## vLLM Autellix 与原生 SGLang
 

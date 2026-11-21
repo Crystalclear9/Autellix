@@ -64,13 +64,15 @@ class RuntimeRegressions(unittest.TestCase):
 
     def test_window_activity_preserves_measured_waiting_time(self):
         timings = []
-        for publish_each_step, publish_at_window in ((True, False), (False, False), (False, True)):
+        for publish_each_step, publish_at_window, publish in (
+                (True, False, True), (False, False, True), (False, True, True), (False, True, False)):
             with tempfile.TemporaryDirectory() as directory:
                 table = ProgramTable(str(Path(directory, "state.db")))
                 clock = [0.]
                 controller = RuntimeScheduler(table, clock=lambda: clock[0],
                                               publish_waiting_each_step=publish_each_step,
-                                              publish_activity_at_window=publish_at_window)
+                                              publish_activity_at_window=publish_at_window,
+                                              publish_activity=publish)
                 table.open("p")
                 table.record_submission("a", "p", {})
                 controller.admit("a", "p")
@@ -86,9 +88,9 @@ class RuntimeRegressions(unittest.TestCase):
                 if publish_at_window:
                     self.assertEqual(table.describe()["p"]["calls"][0]["executed"], 0.)
                     controller.refresh()
-                    self.assertEqual(table.describe()["p"]["calls"][0]["executed"], 2.)
+                    self.assertEqual(table.describe()["p"]["calls"][0]["executed"], 2. if publish else 0.)
                 table.close()
-        self.assertEqual(timings, [(3., 5.)] * 3)
+        self.assertEqual(timings, [(3., 5.)] * 4)
 
     def test_program_token_latency_uses_dag_critical_path(self):
         from autellix.runtime.benchmark import run_workload
@@ -208,11 +210,14 @@ class RuntimeRegressions(unittest.TestCase):
                 window = SchedulingWindow(ctl, 1)
                 chosen, _ = window.select(["a", "b", "c"], [])
                 self.assertEqual(chosen, {"a", "b"})  # prefill reserve
+                self.assertFalse(window.can_continue_decode({"a"}, set()))
                 window.executed(is_prefill=True)
                 chosen, reserve = window.select(["a", "b", "c"], ["a", "b"])
                 self.assertEqual((chosen, reserve), ({"a"}, {"b"}))
+                self.assertTrue(window.can_continue_decode({"a"}, {"b"}))
                 window.executed()
                 ctl.finish("a")
+                self.assertFalse(window.can_continue_decode(set(), {"b"}))
                 chosen, _ = window.select(["b", "c"], ["b"])
                 self.assertEqual(chosen, {"b"})
                 self.assertEqual(window.remaining, 3)

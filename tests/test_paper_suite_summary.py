@@ -51,6 +51,12 @@ class PaperSuiteSummary(unittest.TestCase):
         point = summary.summarize(first + second, slo_targets=(.85,))["slo_points"][0]
         self.assertEqual(point["maximum_tested_rate_meeting_latency"], {"atlas": None, "native": .1})
 
+    def test_goodput_counts_programs_completed_inside_arrival_window(self):
+        result = summary.summarize(self.records(), slo_targets=(.7,))
+        point = result["observed_slo_points"][0]
+        self.assertEqual(point["maximum_arrival_window_completion_rate"]["p95"], {"atlas": .1, "native": None})
+        self.assertEqual(point["maximum_arrival_window_goodput"], {"atlas": .1, "native": 0.})
+
     def test_same_label_and_devices_can_be_reused_for_a_larger_model(self):
         small, large = self.records(), self.records()
         for row in large:
@@ -106,6 +112,25 @@ class PaperSuiteSummary(unittest.TestCase):
         comparison = summary.summarize([native, candidate])["comparisons"][0]
         self.assertEqual(comparison["baseline_condition"], "native")
         self.assertTrue(comparison["upstream_default_optimizations"])
+
+    def test_figure16_pairs_two_engines_and_independent_case_files(self):
+        native, candidate = self.records()
+        native.update(condition="sglang-native", rate=None, plan=dict(backend="sglang", workload_family="sharegpt",
+                      workload_kind="fig16-4-sglang-sglang-native", paper_figures=[16]),
+                      effective_engine_args=dict(dtype="bfloat16", context_length=32768,
+                                                 max_running_requests=16, max_total_tokens=65536))
+        candidate.update(condition="autellix", rate=None, elapsed_seconds=35, versions={"vllm": "0.6.1"},
+                         plan=dict(backend="vllm", workload_family="sharegpt", workload_kind="fig16-4-vllm-autellix",
+                                   paper_figures=[16]), effective_engine_args=dict(dtype="bfloat16", max_model_len=32768,
+                         max_num_seqs=16, block_size=16, num_gpu_blocks_override=4096))
+        result = summary.paper_matrix([native, candidate])
+        pair = result["comparisons"][0]
+        self.assertEqual(pair["baseline"], "sglang/sglang-native")
+        self.assertEqual(pair["candidate"], "vllm/autellix")
+        self.assertEqual(pair["makespan_change_pct"], -12.5)
+        candidate["calls"][0]["completion_tokens"] += 1
+        with self.assertRaisesRegex(ValueError, "mismatched trace or work"):
+            summary.paper_matrix([native, candidate])
 
 
 if __name__ == "__main__":

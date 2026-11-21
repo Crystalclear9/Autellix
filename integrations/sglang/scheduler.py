@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+from time import perf_counter
 
 
 def encode_request(pid, rid):
@@ -53,6 +54,7 @@ def install(cls, options):
     original_abort = cls.abort_request
     original_check_memory = cls.check_memory
     original_update_running = getattr(cls, "update_running_batch", None)
+    measure_timing = options.get("measure_timing", False)
 
     def init(self, *a, **kw):
         original_init(self, *a, **kw)
@@ -63,7 +65,8 @@ def install(cls, options):
         else:
             self.autellix = RuntimeScheduler(ProgramTable(options["table_path"]),
                                             PolicyConfig(**options["config"]), options.get("trace"),
-                                            publish_activity_at_window=options.get("publish_activity_at_window", False))
+                                            publish_activity_at_window=options.get("publish_activity_at_window", False),
+                                            publish_activity=options.get("publish_activity", True))
         self._autellix_steps = 0
         self._autellix_paper = self.autellix.config.implementation == "paper"
         if self._autellix_paper:
@@ -82,7 +85,9 @@ def install(cls, options):
         if options.get("host_bytes"):
             from .swap import HostKV
             self._autellix_host = HostKV(self.token_to_kv_pool_allocator, self.tree_cache, options["host_bytes"],
-                                         recompute_on_full=options.get("host_kv_recompute", False))
+                                         recompute_on_full=options.get("host_kv_recompute", False),
+                                         fused=options.get("fused_swap", False),
+                                         observe=self.autellix.emit if measure_timing else None)
         else:
             self._autellix_host = None
         # The underlying FCFS policy must not overwrite Autellix queue ordering.
@@ -131,6 +136,16 @@ def install(cls, options):
 
     def prefill_plan(self, restored_nodes):
         ctl = self.autellix
+        # SGLang owns a partial prefill outside the waiting and running queues.
+        # Finish its native continuation before selecting another prefill set.
+        if getattr(self, "chunked_req", None) is not None:
+            waiting = self.waiting_queue
+            self.waiting_queue = []
+            try:
+                ctl.emit("continue_prefill", rid=self.chunked_req.rid)
+                return original_prefill(self)
+            finally:
+                self.waiting_queue = waiting
         # Decode results retire requests before native update_running_batch
         # filters its tensors. We inspect this batch earlier, so apply the
         # native filter first, including on iterations without a priority refresh.
@@ -141,16 +156,19 @@ def install(cls, options):
             batch.batch_is_full = False
         self._autellix_steps += 1
         selected = None
-        if self._autellix_window is not None:
-            old_remaining = self._autellix_window.remaining
-            selected, _ = self._autellix_window.select(
-                [r.rid for r in batch.reqs + self.waiting_queue],
-                [r.rid for r in batch.reqs] + list(self._autellix_reserve))
+        window = self._autellix_window
+        if window is not None:
+            running = {r.rid for r in batch.reqs}
+            if self._autellix_paper and window.can_continue_decode(running, self._autellix_reserve):
+                ctl.emit("continue_plan", requests=[r.rid for r in batch.reqs])
+                return None
+            old_remaining = window.remaining
+            selected, _ = window.select(running.union(r.rid for r in self.waiting_queue),
+                                        running.union(self._autellix_reserve))
             for rid in list(self._autellix_reserve):
-                if rid not in self._autellix_window.cohort:
+                if rid not in window.cohort:
                     release_reserves(self, [rid])
-            if (self._autellix_paper and old_remaining > 0 and
-                    selected == {r.rid for r in batch.reqs}):
+            if self._autellix_paper and old_remaining > 0 and selected == running:
                 ctl.emit("continue_plan", requests=[r.rid for r in batch.reqs])
                 return None
         if selected is not None or (self._autellix_steps - 1) % ctl.config.schedule_interval == 0:
@@ -357,7 +375,13 @@ def install(cls, options):
         end.record()
         end.synchronize()
         if self.pp_size == 1:
-            self.autellix.executed(rids, start.elapsed_time(end) / 1000.)
+            seconds = start.elapsed_time(end) / 1000.
+            self.autellix.executed(rids, seconds)
+            if measure_timing:
+                phase = "decode"
+                if batch.forward_mode.is_extend():
+                    phase = "mixed" if getattr(batch, "decoding_reqs", None) else "prefill"
+                self.autellix.emit("model_phase_time", phase=phase, seconds=seconds, requests=rids)
         if self._autellix_window is not None:
             only_prefill = batch.forward_mode.is_extend() and not getattr(batch, "decoding_reqs", None)
             ctl = self.autellix
@@ -440,5 +464,19 @@ def install(cls, options):
     cls.process_batch_result = process
     cls.abort_request = abort
     cls.check_memory = check_memory
+    if measure_timing:
+        original_next = cls.get_next_batch_to_run
+
+        def timed_next(self):
+            host = self._autellix_host
+            before = host.transfer_seconds if host is not None else 0.
+            started = perf_counter()
+            batch = original_next(self)
+            if batch is not None or self.waiting_queue:
+                swap_seconds = host.transfer_seconds - before if host is not None else 0.
+                self.autellix.emit("schedule_time", seconds=max(0., perf_counter() - started - swap_seconds))
+            return batch
+
+        cls.get_next_batch_to_run = timed_next
     if original_update_running is not None:
         cls.update_running_batch = update_running

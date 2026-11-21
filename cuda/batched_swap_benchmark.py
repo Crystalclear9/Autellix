@@ -14,6 +14,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--iterations", type=int, default=10)
     parser.add_argument("--output")
     parser.add_argument("--baseline", choices=("vllm", "python"), default="vllm")
+    parser.add_argument("--fused", action="store_true", help="also measure fused cross-layer CUDA packing")
     args = parser.parse_args(argv)
     if min(args.blocks, args.block_bytes, args.layers, args.iterations) <= 0 or args.block_bytes % 2:
         parser.error("counts must be positive; block-bytes must be divisible by 2")
@@ -63,6 +64,20 @@ def main(argv: list[str] | None = None) -> int:
                   small_roundtrip_seconds=small_seconds, batched_roundtrip_seconds=batched_seconds,
                   small_GBps=size / small_seconds / 1e9, batched_GBps=size / batched_seconds / 1e9,
                   speedup=small_seconds / batched_seconds, config=vars(args))
+    if args.fused:
+        from autellix.runtime.packed_kv import PackedKVLayout
+
+        packed_source = PackedKVLayout(gpu, channels=2)
+        packed_target = PackedKVLayout(restored, channels=2)
+
+        def fused(source, destination):
+            packed = packed_source if source is gpu else packed_target
+            batched_swap(source, destination, mapping, packed=packed)
+
+        fused_seconds = measure(fused)
+        result.update(fused_roundtrip_seconds=fused_seconds, fused_GBps=size / fused_seconds / 1e9,
+                      fused_speedup_vs_native=small_seconds / fused_seconds,
+                      fused_speedup_vs_torch=batched_seconds / fused_seconds)
     print(json.dumps(result, indent=2))
     if args.output:
         from pathlib import Path

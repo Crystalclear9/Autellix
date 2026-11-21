@@ -33,6 +33,8 @@ def main():
     parser.add_argument("--host-kv-gib", type=float, help="Autellix host KV budget per engine or pipeline stage")
     parser.add_argument("--host-kv-recompute", action="store_true", help="recompute KV when the single-stage host budget fills")
     parser.add_argument("--cache-paused-kv", action="store_true", help="cache paused prefixes in the GPU radix tree")
+    parser.add_argument("--fused-swap", action="store_true", help="pack and unpack all CUDA KV layers with the fused kernel")
+    parser.add_argument("--chunked-prefill-size", type=int, help="use native SGLang chunked prefill in the Autellix arm")
     parser.add_argument("--publish-activity-at-window", action="store_true", help="publish the shared activity view at window boundaries")
     parser.add_argument("--refill-idle-slots", action="store_true", help="fill vacant batch slots after the prepared reserve is exhausted")
     parser.add_argument("--resident-reserve-only", action="store_true", help="choose reserve requests from KV already on GPU")
@@ -68,6 +70,10 @@ def main():
         candidate_options["autellix_host_kv_recompute"] = True
     if args.cache_paused_kv:
         candidate_options["autellix_cache_paused_kv"] = True
+    if args.fused_swap:
+        candidate_options["autellix_fused_swap"] = True
+    if args.chunked_prefill_size is not None:
+        candidate_options["chunked_prefill_size"] = args.chunked_prefill_size
     if args.publish_activity_at_window:
         candidate_options["autellix_window_activity"] = True
     if args.refill_idle_slots:

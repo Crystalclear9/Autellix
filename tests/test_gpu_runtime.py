@@ -95,7 +95,8 @@ class RealInferenceTests(unittest.TestCase):
     def test_real_generation_preemption_and_session_inheritance(self):
         if BACKEND == "vllm":
             args = dict(max_model_len=512, max_num_seqs=1, gpu_memory_utilization=.35,
-                        swap_space=.25, dtype="half", enforce_eager=True)
+                        swap_space=.25, dtype="half", enforce_eager=True,
+                        fused_swap=os.environ.get("AUTELLIX_TEST_FUSED_SWAP") == "1")
         else:
             args = dict(context_length=512, max_running_requests=1, mem_fraction_static=.35,
                         dtype="float16", random_seed=0)
@@ -236,6 +237,26 @@ class CUDASwapTests(unittest.TestCase):
             self.assertTrue(torch.all(cpu[:, 0] == -10).item())
         with self.assertRaises(IndexError):
             batched_swap(source, host, [(10, 0), (7, 0)])
+
+    def test_fused_kv_matches_selected_blocks_for_both_layouts(self):
+        import torch
+        from autellix.runtime.packed_kv import PackedKVLayout
+
+        indices = torch.tensor([7, 0, 4], device="cuda")
+        for channels in (1, 2):
+            prefix = (2,) if channels == 2 else ()
+            shape = (*prefix, 9, 3, 17)
+            source = [torch.randn(shape, device="cuda", dtype=torch.bfloat16) for _ in range(3)]
+            target = [torch.zeros_like(layer) for layer in source]
+            packer = PackedKVLayout(source, channels=channels, token_major=channels == 1)
+            unpacker = PackedKVLayout(target, channels=channels, token_major=channels == 1)
+            payload = torch.empty(packer.shape(len(indices)), device="cuda", dtype=torch.bfloat16)
+            packer.move(indices, payload, pack=True)
+            unpacker.move(indices, payload, pack=False)
+            axis = channels - 1
+            for original, restored in zip(source, target):
+                self.assertTrue(torch.equal(original.index_select(axis, indices), restored.index_select(axis, indices)))
+                self.assertEqual(restored.select(axis, 1).count_nonzero().item(), 0)
 
 
 if __name__ == "__main__":

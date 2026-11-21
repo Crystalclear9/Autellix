@@ -9,7 +9,10 @@ def can_keep_running(scheduler, pending, selected):
     for request in pending:
         request.init_next_round_input(cache)
     prefill_tokens = sum(request.extend_input_len for request in pending)
-    if prefill_tokens + len(running) >= scheduler.max_prefill_tokens:
+    chunk_budget = getattr(scheduler, "chunked_prefill_size", None)
+    iteration_tokens = (min(prefill_tokens, chunk_budget - len(running))
+                        if chunk_budget and chunk_budget > 0 else prefill_tokens)
+    if iteration_tokens + len(running) >= scheduler.max_prefill_tokens:
         return False
     config = scheduler.autellix.config
     horizon = config.schedule_interval if config.implementation == "paper" else float("inf")

@@ -38,7 +38,8 @@ def trial(model, device, engine_args, trace, arm, reserve=0, interval=8, quantum
             future.result(120)
             engine.end_session(sid)
         engine.wait_idle(30)
-        with GPUMonitor() as monitor:
+        devices = sorted({device.strip() for group in groups for device in group.split(",")})
+        with GPUMonitor(devices=devices) as monitor:
             result = run_workload(engine, trace, request_timeout=request_timeout, progress_interval=progress_interval)
         result["gpu_samples"] = monitor.samples
         result["gpu_sampling_errors"] = monitor.errors

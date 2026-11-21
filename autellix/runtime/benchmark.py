@@ -193,13 +193,15 @@ def run_workload(engine, programs, request_timeout=600, progress_interval=0):
             if remaining_calls[pid] == 0:
                 program_times[pid] = last_completion[pid] - start - arrivals[pid]
                 engine.end_session(sessions.pop(pid))
-        elapsed = time.monotonic() - start
+        stopped = time.monotonic()
+        elapsed = stopped - start
         tokens = sum(output_counts.values())
         token_latencies = {pid: critical_times[pid] / count if count else None for pid, count in output_counts.items()}
         arrival_end = max(arrivals.values())
         completion_times = {pid: completed - start for pid, completed in last_completion.items()}
         return dict(measurement="real_backend", policy=engine.policy.policy,
                     backend=[r.backend for r in engine.replicas], model=engine.model,
+                    workload_started_monotonic=start, workload_finished_monotonic=stopped,
                     elapsed_seconds=elapsed, completion_tokens=tokens,
                     output_tokens_per_second=tokens/elapsed,
                     completed_programs_per_second=len(programs)/elapsed,
@@ -214,7 +216,10 @@ def run_workload(engine, programs, request_timeout=600, progress_interval=0):
                     program_token_latencies=token_latencies,
                     arrival_times=arrivals,
                     programs=program_times,
-                    calls=[dict(workload_program=pid, workload_call=cid, **r) for (pid, cid), r in results.items()])
+                    calls=[dict(workload_program=pid, workload_call=cid,
+                                submitted_seconds=call_starts[pid, cid] - start,
+                                completed_seconds=completions[pid, cid] - start, **r)
+                           for (pid, cid), r in results.items()])
     finally:
         for future in pending:
             future.cancel()

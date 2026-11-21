@@ -75,7 +75,7 @@ policy = PolicyConfig(
 
 vLLM 的 paper 模式关闭异步输出处理，启用混合阶段执行，内部 `num_scheduler_steps=1`；Autellix 自己维护 N 步调度窗口。显式传入的 `num_scheduler_steps` 与 `PolicyConfig.schedule_interval` 保持一致。
 
-SGLang 适配设置 `disable_overlap_schedule=True`、`chunked_prefill_size=-1`、`page_size=1`。支持单卡与 `pp_size>1` 的流水线并行；TP、DP attention、LoRA、HiCache 和推测解码尚未接入 Autellix 调度。
+SGLang 适配设置 `disable_overlap_schedule=True`、`page_size=1`，`chunked_prefill_size` 默认 `-1`。支持单卡与 `pp_size>1` 的流水线并行；TP、DP attention、LoRA、HiCache 和推测解码尚未接入 Autellix 调度。
 
 | 单卡优化 | vLLM | SGLang |
 | --- | --- | --- |
@@ -83,13 +83,16 @@ SGLang 适配设置 `disable_overlap_schedule=True`、`chunked_prefill_size=-1`�
 | 窗口边界发布活动视图 | `publish_activity_at_window` | `autellix_window_activity` |
 | 补齐闲置槽位 | `refill_idle_slots` | `autellix_refill_idle_slots` |
 | 候补从驻留 KV 选择 | `resident_reserve_only` | `autellix_resident_reserve_only` |
-| 分块预填充 | `paper_chunked_prefill` 复用原生预算及块对齐 | 适配使用整段 prefill |
+| 分块预填充 | `paper_chunked_prefill` 复用原生预算及块对齐 | `chunked_prefill_size` 为正时接入原生分块，进行中的块优先续跑 |
+| 跨层 KV 打包 | `fused_swap` | `autellix_fused_swap` |
 
 活动视图延后写入 SQLite，优先级和调用完成统计仍使用逐步计量的服务时间。补位先使用已有
 候补请求，候补耗尽后才按已知优先级补空位。它保留已接纳次序和原窗口边界，遇到容量限制时
 等下一窗口再尝试接纳。H20 回放脚本通过 `--publish-activity-at-window` 与 `--refill-idle-slots`
 开启这些选项。SGLang 通过 `--cache-paused-kv` 开启 radix 保留，通过 `--optimized-kernels`
 使用原生后端选择的 attention 和 CUDA Graph。
+两个后端的回放脚本都使用 `--fused-swap` 选择 Triton 跨层打包。离线图 16 使用同一份
+完成统计，关闭用于副本路由的瞬时活动视图发布。
 `autellix_mix_prefill_decode=false` 把 prefill 和 decode 分开执行，可用于对照同一接纳策略下的模型执行成本。
 两个回放脚本均支持 `--resident-reserve-only`。该模式保持前 B 个活动请求的优先级顺序，
 K 个候补从余下请求中按同样的优先级选取，候补需已有驻留 KV。

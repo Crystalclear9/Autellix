@@ -1,5 +1,5 @@
 """Freeze policy order for N decode steps, with resident reserve refill."""
-from itertools import islice
+from heapq import nsmallest
 
 
 class SchedulingWindow:
@@ -24,18 +24,18 @@ class SchedulingWindow:
         boundary = self.remaining == 0 or not cohort
         if boundary:
             ctl.refresh()
-            ranked = sorted(available, key=ctl.key)
+            reserve_size = ctl.config.overprovision
             if self.resident_reserve_only:
-                tail = (rid for rid in islice(ranked, self.capacity, None) if rid in resident)
-                cohort = ranked[:self.capacity] + list(islice(tail, ctl.config.overprovision))
+                cohort = nsmallest(self.capacity, available, key=ctl.key)
+                cohort.extend(nsmallest(reserve_size, (available & resident).difference(cohort), key=ctl.key))
             else:
-                cohort = ranked[:self.capacity + ctl.config.overprovision]
+                cohort = nsmallest(self.capacity + reserve_size, available, key=ctl.key)
             self.remaining = ctl.config.schedule_interval
             self.capacity_limited = False
             ctl.emit("schedule_window", requests=cohort, decode_steps=self.remaining)
         elif self.refill_idle_slots and not self.capacity_limited and len(cohort) < self.capacity:
             spare = self.capacity - len(cohort)
-            refill = sorted(available.difference(cohort), key=ctl.key)[:spare]
+            refill = nsmallest(spare, available.difference(cohort), key=ctl.key)
             if refill:
                 # Use vacancies only. The admitted cohort keeps its order and
                 # the next priority refresh remains on its original boundary.
@@ -51,6 +51,11 @@ class SchedulingWindow:
         # it resident thereafter. Only capacity requests participate in decode.
         prepare = reserve - resident
         return active | prepare, reserve & resident
+
+    def can_continue_decode(self, running, prepared):
+        return (self.remaining > 0 and bool(running) and running == self.active
+                and self.reserve.issubset(prepared)
+                and (len(running) == self.capacity or self.capacity_limited or not self.refill_idle_slots))
 
     def executed(self, is_prefill=False):
         if not is_prefill:

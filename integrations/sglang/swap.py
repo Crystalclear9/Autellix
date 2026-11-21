@@ -1,22 +1,55 @@
 """Synchronous host swap for the pinned SGLang MHA token pool (page size 1)."""
+from time import perf_counter
+
+
 class HostKV:
     transfer_bytes = 16 * 1024 * 1024
 
-    def __init__(self, allocator, tree_cache, limit_bytes, recompute_on_full=False):
+    def __init__(self, allocator, tree_cache, limit_bytes, recompute_on_full=False, fused=False, observe=None):
         self.allocator, self.tree = allocator, tree_cache
         pool = allocator.get_kvcache()
         if not hasattr(pool, "k_buffer") or not hasattr(pool, "v_buffer"):
             raise ValueError("Autellix host swap requires an MHA KV pool")
         self.layers = list(pool.k_buffer) + list(pool.v_buffer)
+        self.packed = None
+        if fused:
+            from autellix.runtime.packed_kv import PackedKVLayout
+            self.packed = PackedKVLayout(self.layers, channels=1, token_major=True)
         self.limit_bytes = limit_bytes
         self.recompute_on_full = recompute_on_full
         self.used_bytes = 0
         self.saved = {}
+        self.observe = observe
+        self.transfer_seconds = 0.
+
+    def _record_transfer(self, direction, blocks, started):
+        if self.observe is not None:
+            seconds = perf_counter() - started
+            self.transfer_seconds += seconds
+            self.observe("kv_transfer", direction=direction, blocks=blocks, seconds=seconds)
 
     def discard(self, rid):
         entry = self.saved.pop(rid, None)
         if entry:
             self.used_bytes -= entry[1].numel() * entry[1].element_size()
+
+    def _move_packed(self, indices, host, *, pack):
+        import torch
+
+        layout = self.packed
+        count = max(1, self.transfer_bytes // layout.bytes_per_block)
+        stream = torch.cuda.current_stream(layout.device)
+        for start in range(0, len(indices), count):
+            end = min(start + count, len(indices))
+            staging = host[start:end]
+            if pack:
+                payload = torch.empty_like(staging, device=layout.device)
+                layout.move(indices[start:end], payload, pack=True)
+                staging.copy_(payload, non_blocking=True)
+            else:
+                payload = staging.to(layout.device, non_blocking=True)
+                layout.move(indices[start:end], payload, pack=False)
+            stream.synchronize()
 
     def save(self, rid, tokens, indices):
         import torch
@@ -28,19 +61,25 @@ class HostKV:
                 return False
             raise RuntimeError("Autellix SGLang host KV budget exhausted; increase autellix_swap_space")
         layer = self.layers[0]
-        host = torch.empty((len(self.layers), len(indices), *layer.shape[1:]),
+        started = perf_counter() if self.observe is not None else None
+        shape = (self.packed.shape(len(indices)) if self.packed is not None
+                 else (len(self.layers), len(indices), *layer.shape[1:]))
+        host = torch.empty(shape,
                            dtype=layer.dtype, device="cpu", pin_memory=layer.is_cuda)
         indices = indices.long()
-        chunk = max(1, self.transfer_bytes // (layer[0].numel() * layer.element_size()))
-        stream = torch.cuda.current_stream(layer.device)
-        # Keep only one chunk on the GPU, including while its DMA is in flight.
-        for target, layer in zip(host, self.layers):
-            for start in range(0, len(indices), chunk):
-                end = min(start + chunk, len(indices))
-                values = layer.index_select(0, indices[start:end])
-                target[start:end].copy_(values, non_blocking=True)
-                stream.synchronize()
-                del values
+        if self.packed is not None:
+            self._move_packed(indices, host, pack=True)
+        else:
+            chunk = max(1, self.transfer_bytes // (layer[0].numel() * layer.element_size()))
+            stream = torch.cuda.current_stream(layer.device)
+            for target, layer in zip(host, self.layers):
+                for start in range(0, len(indices), chunk):
+                    end = min(start + chunk, len(indices))
+                    values = layer.index_select(0, indices[start:end])
+                    target[start:end].copy_(values, non_blocking=True)
+                    stream.synchronize()
+                    del values
+        self._record_transfer("out", len(indices), started)
         self.saved[rid] = (list(tokens), host)
         self.used_bytes += size - old_size
         return True
@@ -72,13 +111,18 @@ class HostKV:
                 chunk = max(1, self.transfer_bytes // (layer[0].numel() * layer.element_size()))
                 stream = torch.cuda.current_stream(layer.device)
                 copy_indices = indices.long()
-                for layer, source in zip(self.layers, host):
-                    for start in range(0, needed, chunk):
-                        end = min(start + chunk, needed)
-                        values = source[prefix_len + start:prefix_len + end].to(layer.device, non_blocking=True)
-                        layer.index_copy_(0, copy_indices[start:end], values)
-                        stream.synchronize()
-                        del values
+                started = perf_counter() if self.observe is not None else None
+                if self.packed is not None:
+                    self._move_packed(copy_indices, host[prefix_len:], pack=False)
+                else:
+                    for layer, source in zip(self.layers, host):
+                        for start in range(0, needed, chunk):
+                            end = min(start + chunk, needed)
+                            values = source[prefix_len + start:prefix_len + end].to(layer.device, non_blocking=True)
+                            layer.index_copy_(0, copy_indices[start:end], values)
+                            stream.synchronize()
+                            del values
+                self._record_transfer("in", needed, started)
                 shared = self.tree.insert(tokens, torch.cat((prefix, indices)))
             except BaseException:
                 self.allocator.free(indices)

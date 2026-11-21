@@ -258,15 +258,16 @@ class RuntimeScheduler:
 
     def __init__(self, table: ProgramTable, config: PolicyConfig | None = None,
                  trace: str | None = None, clock=time.monotonic, publish_waiting_each_step=True,
-                 publish_activity_at_window=False):
+                 publish_activity_at_window=False, publish_activity=True):
         self.table = table
         self.config = config or PolicyConfig()
         self.calls: dict[str, RuntimeCall] = {}
         self.clock = clock
         self.counter = 0
         self.trace = trace
+        self.publish_activity = publish_activity
         self.publish_activity_at_window = publish_activity_at_window
-        self.publish_waiting_each_step = publish_waiting_each_step and not publish_activity_at_window
+        self.publish_waiting_each_step = publish_activity and publish_waiting_each_step and not publish_activity_at_window
         self._scheduled = set()
         if trace:
             Path(trace).parent.mkdir(parents=True, exist_ok=True)
@@ -288,9 +289,10 @@ class RuntimeScheduler:
         self.emit("admit", rid=rid, pid=pid, inherited=initial, queue=q, metadata=metadata or {})
 
     def _publish(self, calls):
-        self.table.update_activities([
-            (c.waited, c.executed, "running" if c.scheduled else "waiting", c.metadata.get("request_id", c.rid))
-            for c in calls])
+        if self.publish_activity:
+            self.table.update_activities([
+                (c.waited, c.executed, "running" if c.scheduled else "waiting", c.metadata.get("request_id", c.rid))
+                for c in calls])
 
     def _wait_until(self, call, now):
         delta = max(0., now - call.last_update)
@@ -301,23 +303,25 @@ class RuntimeScheduler:
 
     def refresh(self):
         now = self.clock()
-        totals = self.table.snapshot()
-        # Requeue simultaneous demotions/promotions in current queue FIFO order,
-        # not dictionary insertion order (which remembers initial admission).
-        for call in sorted(self.calls.values(), key=lambda c: (c.queue, c.order)):
+        totals = self.table.snapshot() if self.config.policy in {"plas", "atlas"} else {}
+        changes = []
+        for call in self.calls.values():
             self._wait_until(call, now)
-            if self.config.policy == "fcfs":
+            if self.config.policy == "fcfs" or (call.queue == 0 and call.quantum > 0):
                 continue
+            service, wait = totals.get(call.pid, (0., 0.))
+            starved = (wait + call.wait_window) / max(1e-9, service + call.run_window) >= self.config.beta
+            if call.quantum <= 0 or (call.queue and starved):
+                changes.append((call.queue, call.order, call, starved))
+        # Requeue simultaneous demotions/promotions in current queue FIFO order.
+        for _, _, call, starved in sorted(changes):
             if call.quantum <= 0:
                 call.queue = min(call.queue + 1, len(self.config.quanta) - 1)
                 call.quantum = self.config.quanta[call.queue]
                 self.counter += 1
                 call.order = self.counter
                 self.emit("demote", rid=call.rid, queue=call.queue)
-            service, wait = totals.get(call.pid, (0., 0.))
-            if self.config.policy == "mlfq":
-                service, wait = 0., 0.
-            if call.queue and (wait + call.wait_window) / max(1e-9, service + call.run_window) >= self.config.beta:
+            if call.queue and starved:
                 call.queue = 0
                 call.quantum = self.config.quanta[0]
                 call.wait_window = call.run_window = 0.

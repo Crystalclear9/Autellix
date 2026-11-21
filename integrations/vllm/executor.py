@@ -9,12 +9,13 @@ from autellix.runtime.swap import attach_cache_engine
 
 class AutellixWorker(Worker):
     batched_swap = True
+    fused_swap = False
 
     def initialize_cache(self, *args, **kwargs):
         result = super().initialize_cache(*args, **kwargs)
         if self.batched_swap:
             for cache in self.cache_engine:
-                attach_cache_engine(cache)
+                attach_cache_engine(cache, fused=self.fused_swap)
         return result
 
     def _get_worker_input_from_broadcast(self):
@@ -34,6 +35,10 @@ class AutellixNativeSwapWorker(AutellixWorker):
     batched_swap = False
 
 
+class AutellixFusedSwapWorker(AutellixWorker):
+    fused_swap = True
+
+
 class AutellixMPExecutor(MultiprocessingGPUExecutor):
     worker_class = AutellixWorker
 
@@ -43,3 +48,7 @@ class AutellixMPExecutor(MultiprocessingGPUExecutor):
 
 class AutellixNativeSwapMPExecutor(AutellixMPExecutor):
     worker_class = AutellixNativeSwapWorker
+
+
+class AutellixFusedSwapMPExecutor(AutellixMPExecutor):
+    worker_class = AutellixFusedSwapWorker

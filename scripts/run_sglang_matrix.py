@@ -68,13 +68,18 @@ def main():
     for rate in plan["rates"]:
         for repeat in range(plan.get("repeats", 1)):
             seed = plan.get("seed", 100) + repeat
-            if plan.get("programs"):
+            if plan.get("programs") and not plan.get("unique_programs"):
                 trace = sample_trace(programs, plan["programs"], rate, seed,
                                       equal_dataset_counts=plan.get("equal_dataset_counts", False))
             else:
                 trace = copy.deepcopy(programs)
                 rng = random.Random(seed)
                 rng.shuffle(trace)
+                if plan.get("programs"):
+                    count = plan["programs"]
+                    if count > len(trace):
+                        raise ValueError(f"requested {count} distinct programs from {len(trace)}")
+                    trace = trace[:count]
                 arrival = 0.
                 for i, program in enumerate(trace):
                     if i and rate is not None:

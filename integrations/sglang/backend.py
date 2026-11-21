@@ -31,9 +31,12 @@ class SGLangBackend:
         retain_running = engine_args.pop("autellix_retain_running", True)
         cache_paused_kv = engine_args.pop("autellix_cache_paused_kv", False)
         publish_activity_at_window = engine_args.pop("autellix_window_activity", False)
+        publish_activity = engine_args.pop("autellix_publish_activity", True)
         refill_idle_slots = engine_args.pop("autellix_refill_idle_slots", False)
         resident_reserve_only = engine_args.pop("autellix_resident_reserve_only", False)
         mix_prefill_decode = engine_args.pop("autellix_mix_prefill_decode", True)
+        fused_swap = engine_args.pop("autellix_fused_swap", False)
+        measure_timing = engine_args.pop("autellix_measure_timing", False)
         if legacy_gpu:
             # Explicit compatibility mode: native PyTorch ops, no CUDA JIT.
             engine_args.setdefault("dtype", "float32")
@@ -62,9 +65,12 @@ class SGLangBackend:
                        legacy_gpu=legacy_gpu, pipeline=pp > 1, prefix_attention=prefix_attention,
                        retain_running=retain_running, cache_paused_kv=cache_paused_kv and pp == 1,
                        publish_activity_at_window=publish_activity_at_window and config.implementation == "paper",
+                       publish_activity=publish_activity,
                        refill_idle_slots=refill_idle_slots and config.implementation == "paper",
                        resident_reserve_only=resident_reserve_only and config.implementation == "paper",
                        mix_prefill_decode=mix_prefill_decode,
+                       fused_swap=fused_swap,
+                       measure_timing=measure_timing,
                        attention_score_elements=score_elements,
                        mlp_chunk_size=mlp_chunk_size)
         target = entry.run_scheduler_process
@@ -82,7 +88,10 @@ class SGLangBackend:
             args.update(disable_cuda_graph=True, schedule_policy="fcfs", attention_backend="triton")
         args.update(engine_args)
         if not native_defaults:
-            args.update(disable_overlap_schedule=True, chunked_prefill_size=-1, page_size=1)
+            args.update(disable_overlap_schedule=True, page_size=1)
+            args.setdefault("chunked_prefill_size", -1)
+            if (args["chunked_prefill_size"] or 0) > 0 and (pp > 1 or legacy_gpu or config.implementation != "paper"):
+                raise ValueError("Autellix chunked prefill requires a modern single-GPU paper scheduler")
         options["capacity"] = args["max_running_requests"]
         if pp > 1:
             if options["capacity"] % pp:

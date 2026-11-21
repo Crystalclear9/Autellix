@@ -26,11 +26,13 @@ def summarize_trial(row, trace_root=None):
     for sample in row.get("gpu_samples", []):
         for gpu in sample["gpus"]:
             gpu_samples[gpu["index"]].append(gpu)
-    utilization = {index: dict(peak_memory_mib=max(s["used_mib"] for s in samples),
-                              total_mib=samples[0]["total_mib"],
-                              mean_utilization=sum(s["utilization"] for s in samples)/len(samples),
-                              peak_utilization=max(s["utilization"] for s in samples),
-                              samples=len(samples)) for index, samples in gpu_samples.items()}
+    utilization = {}
+    for index, samples in gpu_samples.items():
+        available = [s["utilization"] for s in samples if s["utilization"] is not None]
+        utilization[index] = dict(peak_memory_mib=max(s["used_mib"] for s in samples),
+                                  total_mib=samples[0]["total_mib"],
+                                  mean_utilization=sum(available) / len(available) if available else None,
+                                  peak_utilization=max(available, default=None), samples=len(samples))
     calls_by_engine = Counter(call["engine_id"] for call in row["calls"])
     request_ids = {encode_request(call["program_id"], call["request_id"]) for call in row["calls"]}
     workload_events = [event for event in traces if event.get("rid") in request_ids

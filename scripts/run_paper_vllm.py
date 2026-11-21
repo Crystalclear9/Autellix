@@ -43,6 +43,7 @@ def main():
     parser.add_argument("--resident-reserve-only", action="store_true", help="choose reserve requests from KV already on GPU")
     parser.add_argument("--cuda-graphs", action="store_true", help="enable the native decode CUDA graphs for all cases")
     parser.add_argument("--paper-chunked-prefill", action="store_true", help="use budgeted prefill along with Autellix windows")
+    parser.add_argument("--fused-swap", action="store_true", help="pack and unpack all CUDA KV layers with the fused kernel")
     parser.add_argument("--no-scheduler-trace", action="store_true", help="measure without per-step scheduler JSONL events")
     parser.add_argument("--cases", nargs="+", help="run only the listed cases")
     parser.add_argument("--label")
@@ -68,7 +69,7 @@ def main():
     candidate = dict(name="autellix", policy=policy, interval=args.interval, reserve=1,
                      quantum_scale=args.quantum_scale, boundary_scale=args.boundary_scale)
     options = {name: True for name in ("keep_resident_kv", "publish_activity_at_window", "refill_idle_slots",
-                                       "paper_chunked_prefill", "resident_reserve_only")
+                                       "paper_chunked_prefill", "resident_reserve_only", "fused_swap")
                if getattr(args, name)}
     if options:
         candidate["engine_args"] = options
@@ -84,6 +85,8 @@ def main():
     elif args.experiment == "swap":
         native_swap = {**candidate.get("engine_args", {}), "batched_swap": False}
         cases = [dict(candidate, name="native-swap", engine_args=native_swap), candidate]
+        if args.fused_swap:
+            cases.insert(1, dict(candidate, name="torch-swap", engine_args={**options, "fused_swap": False}))
     if args.cases:
         if set(args.cases) - {case["name"] for case in cases}:
             parser.error("unknown case for this experiment")

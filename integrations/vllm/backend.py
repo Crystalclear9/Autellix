@@ -17,7 +17,8 @@ class VLLMBackend:
                  measure_timing: bool = False, publish_waiting_each_step: bool = True,
                  keep_resident_kv: bool = False, publish_activity_at_window: bool = False,
                  refill_idle_slots: bool = False, paper_chunked_prefill: bool = False,
-                 resident_reserve_only: bool = False, **engine_args):
+                 resident_reserve_only: bool = False, fused_swap: bool = False,
+                 publish_activity: bool = True, **engine_args):
         if version("vllm") != "0.6.1":
             raise RuntimeError("this backend requires vllm==0.6.1")
         config = config or PolicyConfig()
@@ -58,14 +59,16 @@ class VLLMBackend:
             args["enable_chunked_prefill"] = True
             args.setdefault("max_num_batched_tokens", max(args.get("max_model_len", 2048), capacity + config.overprovision))
         if tp > 1 and not native:
-            from .executor import AutellixMPExecutor, AutellixNativeSwapMPExecutor
-            args["distributed_executor_backend"] = AutellixMPExecutor if batched_swap else AutellixNativeSwapMPExecutor
+            from .executor import AutellixFusedSwapMPExecutor, AutellixMPExecutor, AutellixNativeSwapMPExecutor
+            executor = AutellixFusedSwapMPExecutor if fused_swap else AutellixMPExecutor
+            args["distributed_executor_backend"] = executor if batched_swap else AutellixNativeSwapMPExecutor
         self.table = ProgramTable(table_path)
         self.controller = None
         if not native or observe_native:
             self.controller = RuntimeScheduler(self.table, config, trace,
                                                publish_waiting_each_step=publish_waiting_each_step,
-                                               publish_activity_at_window=publish_activity_at_window and paper)
+                                               publish_activity_at_window=publish_activity_at_window and paper,
+                                               publish_activity=publish_activity)
         self.engine = LLMEngine.from_engine_args(EngineArgs(model=model, **args))
         self.scheduler = self.engine.scheduler[0]
         if self.controller is None:
@@ -84,7 +87,7 @@ class VLLMBackend:
         worker = self.engine.model_executor.driver_worker
         if tp == 1 and batched_swap and not native:
             for cache in worker.cache_engine:
-                attach_cache_engine(cache)
+                attach_cache_engine(cache, fused=fused_swap)
         if measure_timing:
             controller = self.controller
             schedule = self.scheduler.schedule
