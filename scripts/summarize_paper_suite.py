@@ -7,7 +7,7 @@ from pathlib import Path
 import statistics
 
 
-DEFAULT_SLO_TARGETS = (.1, .25, .5, 1., 2., 4., 8.)
+DEFAULT_SLO_TARGETS = (.01, .02, .04, .08, .1, .25, .5, 1., 2., 4., 8.)
 
 
 def distribution(values):

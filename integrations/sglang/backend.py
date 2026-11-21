@@ -51,9 +51,6 @@ class SGLangBackend:
         if any(engine_args.get(k) for k in incompatible):
             raise ValueError("speculation, HiCache, LoRA, DP attention, and disabled radix cache are unsupported")
         from sglang.srt.entrypoints import engine as entry
-        self.loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(self.loop)
-        self.table = ProgramTable(table_path)
         host_bytes = int(engine_args.pop("autellix_swap_space", 1) * 1024**3)
         host_kv_recompute = engine_args.pop("autellix_host_kv_recompute", False)
         if host_bytes <= 0:
@@ -73,16 +70,16 @@ class SGLangBackend:
                        measure_timing=measure_timing,
                        attention_score_elements=score_elements,
                        mlp_chunk_size=mlp_chunk_size)
-        target = entry.run_scheduler_process
+        target = scheduler_target = entry.run_scheduler_process
         if self.native:
             if legacy_gpu or pp > 1:
                 from .legacy_gpu import run_native_scheduler_process
-                entry.run_scheduler_process = partial(run_native_scheduler_process, prefix_attention=prefix_attention,
-                                                      attention_score_elements=score_elements,
-                                                      mlp_chunk_size=mlp_chunk_size, legacy_gpu=legacy_gpu,
-                                                      pipeline=pp > 1)
+                scheduler_target = partial(run_native_scheduler_process, prefix_attention=prefix_attention,
+                                           attention_score_elements=score_elements,
+                                           mlp_chunk_size=mlp_chunk_size, legacy_gpu=legacy_gpu,
+                                           pipeline=pp > 1)
         else:
-            entry.run_scheduler_process = partial(run_scheduler_process, autellix_options=options)
+            scheduler_target = partial(run_scheduler_process, autellix_options=options)
         args = dict(max_running_requests=8)
         if not native_defaults:
             args.update(disable_cuda_graph=True, schedule_policy="fcfs", attention_backend="triton")
@@ -99,7 +96,11 @@ class SGLangBackend:
             args["max_micro_batch_size"] = options["capacity"] // pp + config.overprovision
         if config.overprovision:
             args["max_running_requests"] += config.overprovision * pp
+        self.loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self.loop)
+        self.table = ProgramTable(table_path)
         try:
+            entry.run_scheduler_process = scheduler_target
             self.engine = entry.Engine(model_path=model, **args)
         finally:
             entry.run_scheduler_process = target
