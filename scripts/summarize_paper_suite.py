@@ -108,6 +108,7 @@ def paper_matrix(records, slo_targets=DEFAULT_SLO_TARGETS):
                      condition=row["condition"], model=row["model"], devices=row["device_groups"],
                      resources=dict(zip(("dtype", "context_tokens", "batch_size", "kv_tokens"), resources)),
                      versions=row["versions"], programs=len(row["programs"]), rate=row["rate"], seed=row["seed"],
+                     planned_repeats=plan.get("repeats", 1),
                      trace_sha256=row["trace_sha256"], makespan_seconds=make,
                      token_latency=distribution(latencies.values()), output_tokens=row["completion_tokens"],
                      completed_programs_per_second=len(row["programs"]) / make,
@@ -157,8 +158,9 @@ def paper_matrix(records, slo_targets=DEFAULT_SLO_TARGETS):
             for stat in ("mean", "p95", "p99"):
                 rates = {}
                 for arm, grouped in arms.items():
-                    qualifying = [rows for rows in grouped.values() if all(
-                        row["token_latency"][stat] is not None and row["token_latency"][stat] <= target for row in rows)]
+                    qualifying = [rows for rows in grouped.values()
+                                  if all(len(rows) == row["planned_repeats"] and row["token_latency"][stat] is not None
+                                         and row["token_latency"][stat] <= target for row in rows)]
                     rates[arm] = max((statistics.mean(row["arrival_window_completed_programs_per_second"] for row in rows)
                                       for rows in qualifying if all(row["arrival_window_completed_programs_per_second"]
                                                                     is not None for row in rows)), default=None)

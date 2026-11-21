@@ -156,18 +156,36 @@ def simulate(args):
                 programs = load_programs_from_file(data, default_kind=family)[:count]
                 rows.append(dict(workload_analysis(programs), workload=family, status="ok",
                                  histograms=workload_histograms(programs)))
-            elif figure == 15:
-                for engines in (1, 2, 4):
+            elif figure == 14:
+                rates = (.04, .12, .24, .40, .70) if family == "sharegpt" else (.002, .004, .008, .016, .032)
+                for engines in (2, 4):
                     rows.extend(runner.sweep(workload=family, baseline_names=["autellix"],
-                                             arrival_rates=(.005, .01, .02, .04), engines=engines,
+                                             arrival_rates=rates, engines=engines,
+                                             load_balancers=("round-robin", "least-used", "autellix"),
+                                             num_programs=count, dataset_path=data))
+            elif figure == 15:
+                for engines in (1, 2, 4, 8):
+                    rows.extend(runner.sweep(workload=family, baseline_names=["autellix"],
+                                             arrival_rates=(.02, .04, .08, .12, .16, .24, .32, .48, .64, .96), engines=engines,
                                              num_programs=count, dataset_path=data))
             else:
-                preset = {14: "load-balancer", 18: "optimal-scheduling"}[figure]
-                rows.extend(runner.paper_preset(preset, workload=family, engines=4 if figure == 14 else 1,
-                                                num_programs=count, dataset_path=data))
+                rates = (.0008, .0016, .0032, .0064) if family == "lats" else (.005, .01, .02, .03, .04)
+                rows.extend(runner.sweep(workload=family, baseline_names=("fcfs", "round-robin", "mlfq", "autellix", "srpt"),
+                                         arrival_rates=rates, engines=1, num_programs=count,
+                                         dataset_path=data, fixed_steps=True))
         measurement = "workload_trace" if figure == 11 else "simulation"
         write_json(args.run_dir / f"fig{figure}-{measurement.replace('_', '-')}.json",
                    [dict(row, measurement=measurement, paper_figure=figure) for row in rows])
+        if figure == 15:
+            rates_by_slo = []
+            for engines in (1, 2, 4, 8):
+                for target in (.045, .05, .08, .1, .2, .4):
+                    eligible = [row for row in rows if row["status"] == "ok" and row["engines"] == engines
+                                and row["avg_token_latency"] <= target]
+                    rates_by_slo.append(dict(engines=engines, seconds_per_token_target=target,
+                                             maximum_tested_rate=max((r["arrival_rate"] for r in eligible), default=None),
+                                             maximum_completed_rate=max((r["throughput"] for r in eligible), default=None)))
+            write_json(args.run_dir / "fig15-slo-simulation.json", rates_by_slo)
 
 
 def main():
@@ -210,11 +228,16 @@ def main():
             parser.error("every selected case must exist in at least one requested figure")
         plans = [dict(plan, cases=[case for case in plan["cases"] if case["name"] in args.cases])
                  for plan in plans if any(case["name"] in args.cases for case in plan["cases"])]
-    results = []
+    manifest_path = out / "manifest.json"
+    manifest = (json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists()
+                else dict(device=args.gpu, gpu_plans={}, cpu_figures=[]))
+    if manifest["device"] != args.gpu:
+        parser.error("resume a results directory on its original physical GPU")
     for plan in plans:
         write_json(out / (plan["workload_kind"] + "-plan.json"), plan)
-    write_json(out / "manifest.json", dict(device=args.gpu, gpu_plans={p["workload_kind"]: p["paper_figures"] for p in plans},
-                                          cpu_figures=sorted(set(args.figures) & {7, 11, 14, 15, 18})))
+    manifest["gpu_plans"].update((p["workload_kind"], p["paper_figures"]) for p in plans)
+    manifest["cpu_figures"] = sorted(set(manifest["cpu_figures"]) | (set(args.figures) & {7, 11, 14, 15, 18}))
+    write_json(manifest_path, manifest)
     if args.plan_only:
         return 0
 
@@ -224,6 +247,8 @@ def main():
     venv = dict(env, LD_PRELOAD=args.vllm_preload) if args.vllm_preload else env
     interpreters = {"vllm": (args.vllm_python, venv), "sglang": (args.sglang_python, env)}
     statuses = {}
+    statuses_path = out / "exit-codes.json"
+    previous_statuses = (json.loads(statuses_path.read_text(encoding="utf-8")) if statuses_path.exists() else {})
 
     def gpu_run(name, cmd, run_env):
         pids = subprocess.check_output(["nvidia-smi", "-i", str(args.gpu), "--query-compute-apps=pid",
@@ -233,7 +258,7 @@ def main():
         print(f"START {name}", flush=True)
         with (out / (name + ".log")).open("w", encoding="utf-8") as log:
             statuses[name] = subprocess.run(cmd, cwd=root, env=run_env, stdout=log, stderr=subprocess.STDOUT).returncode
-        write_json(out / "exit-codes.json", statuses)
+        write_json(statuses_path, previous_statuses | statuses)
 
     simulate(args)
     if 19 in args.figures and "vllm" in args.backends:
@@ -248,8 +273,6 @@ def main():
         exe, run_env = interpreters[backend]
         gpu_run(name, [exe, str(root / "scripts/run_sglang_matrix.py"), "--plan", str(out / (name + "-plan.json")),
                        "--output", str(out / (name + ".json")), "--resume"], run_env)
-        if set(plan["paper_figures"]) & {12, 13, 16} and (out / (name + ".json")).exists():
-            results.append(out / (name + ".json"))
         if plan["scheduler_trace"] and (out / (name + ".json")).exists():
             with (out / (name + "-timing.log")).open("w", encoding="utf-8") as log:
                 subprocess.run([exe, str(root / "scripts/analyze_scheduler_trace.py"), str(out / (name + ".json")),
@@ -260,6 +283,8 @@ def main():
 
             rows = json.loads((out / (name + ".json")).read_text(encoding="utf-8"))
             write_json(out / (name + "-motivation.json"), motivation(rows))
+    results = [out / (name + ".json") for name, figures in manifest["gpu_plans"].items()
+               if set(figures) & {12, 13, 16} and (out / (name + ".json")).exists()]
     if results:
         rows = (row for path in results for row in json.loads(path.read_text(encoding="utf-8")))
         write_json(out / "measured-comparisons.json", paper_matrix(rows))
