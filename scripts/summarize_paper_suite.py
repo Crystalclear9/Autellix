@@ -70,6 +70,8 @@ def metrics(row):
                 elapsed_seconds=row["elapsed_seconds"],
                 arrival_horizon_seconds=horizon, drain_seconds=row["drain_seconds"],
                 completions_during_arrivals=row["completions_during_arrivals"],
+                arrival_window_completed_programs_per_second=(row["completions_during_arrivals"] / horizon
+                                                              if horizon > 0 else None),
                 maximum_submission_lag_seconds=max(row["first_submission_lag_seconds"].values()),
                 arrival_quartiles=quartiles, backlog_checkpoints=checkpoints,
                 calls_by_engine=dict(Counter(c["engine_id"] for c in row["calls"])), gpu=gpu, **cache)
@@ -92,7 +94,10 @@ def summarize(records, slo_targets=DEFAULT_SLO_TARGETS):
         native = next((row for row in group.values() if row["arm"] == "sglang-native"
                        and not row["effective_engine_args"].get("autellix_native_defaults")), None)
         if native is None:
-            native = next((group[name] for name in ("vllm", "vllm-opt", "program", "native-swap") if name in group), None)
+            native = next((row for row in group.values() if row["arm"] == "sglang-native"), None)
+        if native is None:
+            native = next((group[name] for name in ("vllm", "vllm-opt", "vllm-opt-multistep", "program", "native-swap")
+                           if name in group), None)
         if native is None:
             continue
         baseline = by_case[native["condition"]]
@@ -107,11 +112,15 @@ def summarize(records, slo_targets=DEFAULT_SLO_TARGETS):
                 # Native SGLang does not allocate the Autellix host KV cache.
                 return {k: v for k, v in r["effective_engine_args"].items()
                         if k not in {"autellix_native_baseline", "autellix_swap_space", "autellix_host_kv_recompute",
-                                     "autellix_mode", "preemption_mode", "batched_swap", "keep_resident_kv"}}
+                                     "autellix_cache_paused_kv", "autellix_window_activity", "autellix_refill_idle_slots",
+                                     "autellix_retain_running", "autellix_mix_prefill_decode",
+                                     "autellix_mode", "preemption_mode", "batched_swap", "keep_resident_kv",
+                                     "paper_chunked_prefill", "publish_activity_at_window", "refill_idle_slots"}}
             native_defaults = row["arm"] == "sglang-native" and row["effective_engine_args"].get("autellix_native_defaults", False)
+            baseline_defaults = native["effective_engine_args"].get("autellix_native_defaults", False)
             row_options, baseline_options = options(row), options(native)
-            if native_defaults:
-                for opt in ("autellix_native_defaults", "attention_backend", "sampling_backend"):
+            if native_defaults or baseline_defaults:
+                for opt in ("autellix_native_defaults", "attention_backend", "sampling_backend", "disable_cuda_graph"):
                     row_options.pop(opt, None)
                     baseline_options.pop(opt, None)
             paired = dict(same_trace=row["trace_sha256"] == native["trace_sha256"],
@@ -131,7 +140,7 @@ def summarize(records, slo_targets=DEFAULT_SLO_TARGETS):
                     response_delta_seconds=response-native["programs"][pid]))
             comparisons.append(dict(workload=key[0], rate=key[1], seed=key[2], devices=key[3], model=row["model"],
                 condition=row["condition"],
-                baseline_condition=native["condition"], upstream_default_optimizations=native_defaults,
+                baseline_condition=native["condition"], upstream_default_optimizations=native_defaults or baseline_defaults,
                 pairing=paired, programs=len(row["programs"]),
                 per_program=sorted(per_program, key=lambda p: -p["response_delta_seconds"]),
                 faster_programs=sum(row["programs"][p] < native["programs"][p] for p in row["programs"]),
@@ -149,20 +158,24 @@ def summarize(records, slo_targets=DEFAULT_SLO_TARGETS):
             configurations[trial["workload"], trial["model"], ranks, tuple(sorted(trial["versions"].items()))].append(trial)
     slo_points = []
     for (workload, model, ranks, versions), selected in sorted(configurations.items()):
+        by_condition_and_rate = defaultdict(lambda: defaultdict(list))
+        for trial in selected:
+            by_condition_and_rate[trial["condition"]][trial["rate"]].append(trial)
         for target in slo_targets:
-            qualified = {condition: [trial for trial in selected if trial["condition"] == condition
-                                     and trial["paper_token_latency"]["mean"] <= target]
-                         for condition in sorted({trial["condition"] for trial in selected})}
+            qualified = {
+                condition: {rate: rows for rate, rows in rates.items()
+                            if all(row["paper_token_latency"]["mean"] <= target for row in rows)}
+                for condition, rates in sorted(by_condition_and_rate.items())}
             slo_points.append(dict(workload=workload, model=model, ranks_per_replica=ranks, versions=dict(versions),
                                    mean_seconds_per_output_token_target=target,
                                    maximum_tested_rate_meeting_latency={
-                                       case: max((trial["rate"] for trial in rows), default=None)
-                                       for case, rows in qualified.items()},
+                                       case: max(rates, default=None) for case, rates in qualified.items()},
                                    maximum_completed_rate_meeting_latency={
-                                       case: max((trial["completed_programs_per_second"] for trial in rows), default=None)
-                                       for case, rows in qualified.items()}))
+                                       case: max((statistics.mean(trial["completed_programs_per_second"] for trial in rows)
+                                                  for rows in rates.values()), default=None)
+                                       for case, rates in qualified.items()}))
     return dict(trials=trials, comparisons=comparisons, slo_points=slo_points,
-                slo_definition="Largest measured offered rate satisfying mean program token latency; finite trace backlog and drain are reported separately.")
+                slo_definition="Largest measured offered rate with mean program token latency within target in every measured repeat; completed rates average repeats at each rate. Finite-trace backlog and drain are reported separately.")
 
 
 def main():

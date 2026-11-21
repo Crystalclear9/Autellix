@@ -24,6 +24,8 @@ def main():
     selection.add_argument("--all-programs", action="store_true", help="replay each offline program once")
     parser.add_argument("--rates", type=float, nargs="+")
     parser.add_argument("--batch-size", type=int, default=16)
+    parser.add_argument("--batch-tokens", type=int, default=32768)
+    parser.add_argument("--kv-blocks", type=int, help="set identical GPU KV capacity in 16-token blocks")
     parser.add_argument("--swap-gib", type=float, default=32)
     parser.add_argument("--seed", type=int, default=2026)
     parser.add_argument("--repeats", type=int, default=1)
@@ -38,6 +40,9 @@ def main():
                         help="keep preempted KV on GPU until another request needs its blocks")
     parser.add_argument("--publish-activity-at-window", action="store_true", help="publish the shared activity view at window boundaries")
     parser.add_argument("--refill-idle-slots", action="store_true", help="fill vacant batch slots after the prepared reserve is exhausted")
+    parser.add_argument("--cuda-graphs", action="store_true", help="enable the native decode CUDA graphs for all cases")
+    parser.add_argument("--paper-chunked-prefill", action="store_true", help="use budgeted prefill along with Autellix windows")
+    parser.add_argument("--no-scheduler-trace", action="store_true", help="measure without per-step scheduler JSONL events")
     parser.add_argument("--cases", nargs="+", help="run only the listed cases")
     parser.add_argument("--label")
     args = parser.parse_args()
@@ -61,7 +66,7 @@ def main():
 
     candidate = dict(name="autellix", policy=policy, interval=args.interval, reserve=1,
                      quantum_scale=args.quantum_scale, boundary_scale=args.boundary_scale)
-    options = {name: True for name in ("keep_resident_kv", "publish_activity_at_window", "refill_idle_slots")
+    options = {name: True for name in ("keep_resident_kv", "publish_activity_at_window", "refill_idle_slots", "paper_chunked_prefill")
                if getattr(args, name)}
     if options:
         candidate["engine_args"] = options
@@ -91,13 +96,17 @@ def main():
                 programs=0 if args.all_programs else count,
                 rates=[None] if args.experiment == "offline" else list(args.rates or rates),
                 seed=args.seed, repeats=args.repeats, request_timeout=args.request_timeout, compact_calls=True,
+                scheduler_trace=not args.no_scheduler_trace,
                 engine_args=dict(dtype="bfloat16", max_model_len=32768, tensor_parallel_size=tp_size,
-                                 max_num_seqs=args.batch_size, max_num_batched_tokens=32768,
+                                 max_num_seqs=args.batch_size, max_num_batched_tokens=args.batch_tokens,
                                  gpu_memory_utilization=.88, swap_space=args.swap_gib, seed=0,
+                                 enforce_eager=not args.cuda_graphs,
                                  observe_native=args.experiment == "timing", measure_timing=args.experiment == "timing"),
                 cases=cases)
     if args.window_activity:
         plan["engine_args"]["publish_waiting_each_step"] = False
+    if args.kv_blocks is not None:
+        plan["engine_args"]["num_gpu_blocks_override"] = args.kv_blocks
     if args.workload == "mixed" and not args.all_programs:
         plan["equal_dataset_counts"] = True
     plan_file, results = output / f"{label}-plan.json", output / f"{label}.json"

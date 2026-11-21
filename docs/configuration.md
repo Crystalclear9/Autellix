@@ -82,6 +82,7 @@ SGLang 适配设置 `disable_overlap_schedule=True`、`chunked_prefill_size=-1`�
 | 暂停期间保留 KV | `keep_resident_kv` 在有空余 GPU blocks 时保留暂停请求 | `autellix_cache_paused_kv` 把暂停请求的已计算前缀交给可回收的 GPU radix 缓存 |
 | 窗口边界发布活动视图 | `publish_activity_at_window` | `autellix_window_activity` |
 | 补齐闲置槽位 | `refill_idle_slots` | `autellix_refill_idle_slots` |
+| 分块预填充 | `paper_chunked_prefill` 复用原生预算及块对齐 | 适配使用整段 prefill |
 
 活动视图延后写入 SQLite，优先级和调用完成统计仍使用逐步计量的服务时间。补位先使用已有
 候补请求，候补耗尽后才按已知优先级补空位。它保留已接纳次序和原窗口边界，遇到容量限制时
@@ -104,7 +105,8 @@ Dynamo、替换标准模型算子。已测模型与配置见[验收记录](p40-v
 原生与 Autellix 两条路径都支持这个参数，性能回放双方使用相同值。
 
 `autellix_retain_running=true` 默认在选中的 prefill 与当前 N 步解码窗口能放入
-KV 预算时保留已选中的 decode；不足时按优先级释放。
+KV 预算时保留已选中的 decode。显存检查按实际 radix 路径锁定候选前缀，共享部分只扣一次。
+空间不足时按优先级释放。
 设为 false 可运行旧接纳方式的消融。`compare_sglang.py` 的 `--quantum-scale` 与
 `--boundary-scale` 分别缩放时间片和服务历史区间，后者缺省时沿用前者。
 

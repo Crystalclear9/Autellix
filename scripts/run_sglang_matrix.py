@@ -100,8 +100,10 @@ def main():
                             trace, case["policy"], reserve=case.get("reserve", 0),
                             interval=case.get("interval", 8), quantum_scale=case.get("quantum_scale", 1.),
                             boundary_scale=case.get("boundary_scale"), beta=case.get("beta", 8.),
-                            request_timeout=plan.get("request_timeout", 3600), progress_interval=30,
-                            routing=case.get("routing", "program"), backend=backend)
+                            request_timeout=plan.get("request_timeout", 3600),
+                            progress_interval=plan.get("progress_interval", 30),
+                            routing=case.get("routing", "program"), backend=backend,
+                            scheduler_trace=plan.get("scheduler_trace", True))
                 row.update(condition=case["name"], rate=rate, repeat=repeat, seed=seed,
                            wall_start=started, plan=plan,
                            trace_sha256=trace_hash, versions=versions)

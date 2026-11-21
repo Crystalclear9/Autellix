@@ -15,7 +15,7 @@
 
 默认 `paper` 模式由 `paper.py` 按全局优先级接纳请求，不使用原生 `_schedule()` 决定批次。窗口开始时预留后续 KV 槽位；窗口内更新 token 和 block 元数据，预备请求可在活动请求结束后补位。
 
-启用混合 prefill/decode 执行，避免原生阶段偏好覆盖请求优先级。接纳按整段 prefill 计算；输入超过 `max_num_batched_tokens` 会在接纳前报错，需增大该参数。预备请求占用 KV 显存，在补位前不消耗 decode token 配额。
+混合 prefill/decode 执行按程序优先级选批。`paper_chunked_prefill=true` 复用 vLLM 的 token 预算与前缀缓存块对齐规则，把长输入分到多个迭代。最后一段完成后才预留后续 decode 的 KV 槽位。默认整段 prefill，`max_num_batched_tokens` 需覆盖单条输入。预备请求占用 KV 显存，成为活动请求后参与 decode。
 
 抢占沿用原生 block 所有权转换。换出和换入分开处理，保留生成序列；实际批量传输由 `autellix/runtime/swap.py` 完成。预留窗口所需显存不足时会明确报错，需调整模型、显存预算、批次或窗口长度。
 
@@ -27,7 +27,7 @@
 
 ## 原生基准对照
 
-真实工作负载命令可选择以下原生模式，保留原生调度和 KV 传输，仅观测执行时间：
+真实工作负载命令可选择以下原生模式。性能回放保留原生调度和 KV 传输，`timing` 另启用执行计时。
 
 | 模式 | 配置 |
 | --- | --- |
@@ -35,7 +35,7 @@
 | `vllm-opt` | 前缀缓存和分块 prefill |
 | `vllm-opt-multistep` | 前缀缓存和原生多步执行 |
 
-vLLM 0.6.1 的分块 prefill 与原生多步执行使用两个独立配置，分别测试。`--native-opt-steps` 配置原生多步长度。
+vLLM 0.6.1 的分块 prefill 与原生多步执行使用两个独立配置，分别测试。用 `--interval` 配置原生多步长度和 Autellix 窗口长度。[vLLM 0.6.1 参数检查](https://github.com/vllm-project/vllm/blob/v0.6.1/vllm/engine/arg_utils.py#L900)
 
 ## 论文实验回放
 
@@ -70,8 +70,10 @@ python scripts/run_paper_vllm.py offline sharegpt \
 再用 `offline sharegpt --trace "$trace" --all-programs` 回放每条对话一次。
 基础模型的 tokenizer 可通过 `--chat-template` 读取现有的聊天模板。
 `--request-timeout` 按秒设置单次调用允许等待和执行的总时长，默认 14,400 秒。
-主对照使用相同的活动请求上限、BF16 和 eager 模式。Autellix 可额外预填充一个预备请求。
-`timing` 记录各阶段开销。
+各组使用相同活动请求上限和 BF16。`--cuda-graphs` 为各组启用原生 decode CUDA Graph，
+`--kv-blocks` 固定相同的 GPU KV block 数。`--paper-chunked-prefill` 为 Autellix 与 MLFQ
+启用分块，`--batch-tokens` 控制每步 token 预算。`--no-scheduler-trace` 用于性能对照，
+`timing` 配合默认开启的调度轨迹记录各阶段开销。
 使用 `scripts/summarize_paper_suite.py` 汇总各目录的测量 JSON，计时数据可用
 `scripts/analyze_scheduler_trace.py --state-root "$run/scheduler-state"` 读取。图 18 的等步长模拟使用
 `python -m autellix.cli paper-preset --preset optimal-scheduling --workload sharegpt --dataset "$trace"`，

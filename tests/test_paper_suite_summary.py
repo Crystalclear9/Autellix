@@ -42,6 +42,15 @@ class PaperSuiteSummary(unittest.TestCase):
         with self.assertRaises(ValueError):
             summary.summarize(rows)
 
+    def test_fixed_latency_rate_requires_all_repeats(self):
+        first = self.records()
+        second = copy.deepcopy(first)
+        for row in second:
+            row["seed"] = 43
+        second[1]["program_token_latencies"] = {p: .9 for p in second[1]["programs"]}
+        point = summary.summarize(first + second, slo_targets=(.85,))["slo_points"][0]
+        self.assertEqual(point["maximum_tested_rate_meeting_latency"], {"atlas": None, "native": .1})
+
     def test_same_label_and_devices_can_be_reused_for_a_larger_model(self):
         small, large = self.records(), self.records()
         for row in large:
@@ -89,6 +98,14 @@ class PaperSuiteSummary(unittest.TestCase):
         self.assertTrue(first["upstream_default_optimizations"])
         self.assertAlmostEqual(result["trials"][0]["completed_programs_per_second"], .1)
         self.assertIn("p99_paper_latency_change_pct", result["comparisons"][1])
+
+    def test_upstream_default_can_be_the_only_native_baseline(self):
+        native, candidate = self.records()
+        native["effective_engine_args"].update(autellix_native_defaults=True, attention_backend=None)
+        candidate["effective_engine_args"].update(disable_cuda_graph=False, autellix_cache_paused_kv=True)
+        comparison = summary.summarize([native, candidate])["comparisons"][0]
+        self.assertEqual(comparison["baseline_condition"], "native")
+        self.assertTrue(comparison["upstream_default_optimizations"])
 
 
 if __name__ == "__main__":

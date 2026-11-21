@@ -16,7 +16,7 @@ class VLLMBackend:
                  trace: str | None = None, batched_swap: bool = True, observe_native: bool = True,
                  measure_timing: bool = False, publish_waiting_each_step: bool = True,
                  keep_resident_kv: bool = False, publish_activity_at_window: bool = False,
-                 refill_idle_slots: bool = False, **engine_args):
+                 refill_idle_slots: bool = False, paper_chunked_prefill: bool = False, **engine_args):
         if version("vllm") != "0.6.1":
             raise RuntimeError("this backend requires vllm==0.6.1")
         config = config or PolicyConfig()
@@ -53,7 +53,7 @@ class VLLMBackend:
             args["max_num_seqs"] = capacity + config.overprovision
         if paper:
             # Mixed prefill/decode kernels, with admission controlled entirely
-            # by PaperPlan rather than native chunk-prefill scheduling.
+            # by PaperPlan. An explicit chunk budget can be below max_model_len.
             args["enable_chunked_prefill"] = True
             args.setdefault("max_num_batched_tokens", max(args.get("max_model_len", 2048), capacity + config.overprovision))
         if tp > 1 and not native:
@@ -76,7 +76,8 @@ class VLLMBackend:
         if paper:
             from .paper import PaperPlan
             self.scheduler._autellix_paper = PaperPlan(self.scheduler, self.controller, capacity, keep_resident_kv,
-                                                      refill_idle_slots=refill_idle_slots)
+                                                      refill_idle_slots=refill_idle_slots,
+                                                      chunked_prefill=paper_chunked_prefill)
             self.scheduler._autellix_window = self.scheduler._autellix_paper.window
         worker = self.engine.model_executor.driver_worker
         if tp == 1 and batched_swap and not native:
@@ -130,10 +131,10 @@ class VLLMBackend:
         runner = worker.model_runner
         original = runner.execute_model
         controller, scheduler = self.controller, self.scheduler
+        start, end = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
 
         def measured_execute(_runner, *a, **kw):
             rids = list(scheduler._autellix_execution)
-            start, end = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
             start.record()
             result = original(*a, **kw)
             end.record()
@@ -161,7 +162,8 @@ class VLLMBackend:
         tokens = prompt if isinstance(prompt, list) else self.tokenize(prompt)
         if len(tokens) >= self.engine.model_config.max_model_len:
             raise ValueError("prompt leaves no room for generation within max_model_len")
-        if (getattr(self.scheduler, "_autellix_paper", None) is not None and
+        plan = getattr(self.scheduler, "_autellix_paper", None)
+        if (plan is not None and not plan.chunked_prefill and
                 len(tokens) > self.scheduler.scheduler_config.max_num_batched_tokens):
             raise ValueError("prompt exceeds the paper-mode whole-prefill token budget; increase max_num_batched_tokens")
         if any(t < 0 or t >= self.engine.model_config.hf_config.vocab_size for t in tokens):

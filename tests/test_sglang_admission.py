@@ -8,11 +8,12 @@ class KeepRunningTests(unittest.TestCase):
     def test_preserve_when_current_decode_window_fits(self):
         req = lambda prompt, output, maximum: NS(rid="running", origin_input_ids=[1]*prompt, output_ids=[2]*output,
                                                 sampling_params=NS(max_new_tokens=maximum),
-                                                extend_input_len=prompt + output, init_next_round_input=lambda _: None)
+                                                extend_input_len=prompt + output, init_next_round_input=lambda _: None,
+                                                last_node=None)
         running, pending = req(50, 10, 100), req(80, 20, 100)
         scheduler = NS(running_batch=NS(reqs=[running]), server_args=NS(max_running_requests=2),
                        max_prefill_tokens=1024, token_to_kv_pool_allocator=NS(available_size=lambda: 100),
-                       tree_cache=NS(evictable_size=lambda: 20),
+                       tree_cache=NS(evictable_size=lambda: 20, inc_lock_ref=lambda _: None, dec_lock_ref=lambda _: None),
                        autellix=NS(config=NS(implementation="paper", schedule_interval=8)))
         self.assertTrue(can_keep_running(scheduler, [pending], {"running"}))  # 100 + 8 + 8 + 1 < 120
         self.assertEqual(pending.sampling_params.max_new_tokens, 100)
@@ -27,6 +28,19 @@ class KeepRunningTests(unittest.TestCase):
         scheduler.server_args.max_running_requests = 2
         scheduler.running_batch.reqs.append(NS(rid="victim"))
         self.assertTrue(can_keep_running(scheduler, [pending], {"running"}))
+
+    def test_two_prefills_charge_one_shared_radix_prefix(self):
+        locks = []
+        tree = NS(evictable_size=lambda: 0 if locks else 100,
+                  inc_lock_ref=locks.append, dec_lock_ref=locks.remove)
+        requests = [NS(rid=str(i), last_node="shared", origin_input_ids=[0] * 112, output_ids=[],
+                       extend_input_len=12, sampling_params=NS(max_new_tokens=50),
+                       init_next_round_input=lambda _: None) for i in range(2)]
+        scheduler = NS(running_batch=NS(reqs=[]), server_args=NS(max_running_requests=2),
+                       max_prefill_tokens=128, token_to_kv_pool_allocator=NS(available_size=lambda: 50),
+                       tree_cache=tree, autellix=NS(config=NS(implementation="paper", schedule_interval=8)))
+        self.assertTrue(can_keep_running(scheduler, requests, {r.rid for r in requests}))
+        self.assertEqual(locks, [])
 
 
 @unittest.skipUnless(find_spec("sglang"), "requires the pinned SGLang package")

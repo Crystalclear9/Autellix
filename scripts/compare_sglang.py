@@ -14,7 +14,8 @@ from autellix.runtime.telemetry import GPUMonitor
 
 
 def trial(model, device, engine_args, trace, arm, reserve=0, interval=8, quantum_scale=1., request_timeout=600,
-          boundary_scale=None, beta=8., progress_interval=0, routing="program", backend="sglang"):
+          boundary_scale=None, beta=8., progress_interval=0, routing="program", backend="sglang",
+          scheduler_trace=True):
     options = dict(engine_args)
     native = arm in {"sglang-native", "vllm", "vllm-opt", "vllm-opt-multistep"}
     if backend == "sglang":
@@ -29,7 +30,7 @@ def trial(model, device, engine_args, trace, arm, reserve=0, interval=8, quantum
                           quanta=tuple(x * quantum_scale for x in defaults.quanta), beta=beta)
     groups = device.split(";")
     with InferenceEngine([ReplicaConfig(backend, model, group, options) for group in groups],
-                         policy=policy, routing=routing) as engine:
+                         policy=policy, routing=routing, scheduler_trace=scheduler_trace) as engine:
         sessions = [engine.start_session() for _ in groups]
         futures = [engine.submit(sid, prompt="Warmup.", sampling={"temperature": 0, "max_tokens": 4})
                    for sid in sessions]

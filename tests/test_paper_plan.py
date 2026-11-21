@@ -1,4 +1,5 @@
 """Admission semantics independent of native phase-preference heuristics."""
+import sys
 import unittest
 from collections import deque
 from types import SimpleNamespace as NS
@@ -102,6 +103,21 @@ class PaperPlanTests(unittest.TestCase):
         self.assertEqual([g.seq_group.request_id for g in out.scheduled_seq_groups], ["high"])
         self.assertIn(low, self.s.running)
 
+    def test_one_barrier_batches_multiple_capacity_evictions(self):
+        self.ctl.config = PolicyConfig(overprovision=0)
+        self.priority.update(high=0, low=1, lowest=2)
+        low, lowest = Group("low"), Group("lowest")
+        self.s.running.extend([low, lowest])
+        self.s.waiting.append(Group("high", True))
+        self.s.block_manager.can_allocate = lambda _: self.status.LATER if self.s.running else self.status.OK
+        plan = PaperPlan(self.s, self.ctl, 1, keep_resident_kv=True)
+        out = plan.next_step()
+        self.assertEqual(len(out.blocks_to_swap_out), 2)
+        self.assertEqual(list(self.s.swapped), [lowest, low])
+        self.assertFalse(out.scheduled_seq_groups)
+        out = plan.next_step()
+        self.assertEqual([g.seq_group.request_id for g in out.scheduled_seq_groups], ["high"])
+
     def test_window_refills_without_readmitting_new_arrival(self):
         self.priority.update(a=0, b=1, urgent=-1)
         a, b = Group("a", True), Group("b", True)
@@ -168,11 +184,55 @@ class PaperPlanTests(unittest.TestCase):
         self.assertEqual(out.num_batched_tokens, 1)
         self.assertEqual([g.seq_group.request_id for g in out.scheduled_seq_groups], ["a"])
 
+    def test_full_prepared_window_does_not_rescan_backlog(self):
+        class UnreadableQueue(deque):
+            def __iter__(self):
+                raise AssertionError("a prepared decode step scanned the backlog")
+
+        self.ctl.config = PolicyConfig(schedule_interval=3, overprovision=0)
+        self.priority.update(a=0)
+        self.s.running.append(Group("a"))
+        plan = PaperPlan(self.s, self.ctl, 1, keep_resident_kv=True, refill_idle_slots=True)
+        plan.next_step()
+        plan.window.executed()
+        self.s.waiting = UnreadableQueue([Group("new", True)])
+        self.s.swapped = UnreadableQueue([Group("paused")])
+        out = plan.next_step()
+        self.assertEqual([g.seq_group.request_id for g in out.scheduled_seq_groups], ["a"])
+        self.assertEqual(len(self.refreshes), 1)
+
+    def test_chunked_prefill_can_exceed_single_iteration_token_budget(self):
+        class Budget:
+            def __init__(self, tokens, seqs):
+                self.remaining = tokens
+
+            def add_num_batched_tokens(self, rid, count):
+                self.remaining -= count
+
+        self.ctl.config = PolicyConfig(schedule_interval=3, overprovision=0)
+        self.priority.update(long=0)
+        group = Group("long", True)
+        group.seq.status = "waiting"
+        remaining = 10
+        group.seq.data.get_num_uncomputed_tokens = lambda: remaining
+        self.s.waiting.append(group)
+        self.s.scheduler_config = NS(max_num_batched_tokens=4, max_num_seqs=1)
+        self.s._get_num_new_tokens = lambda group, status, chunk, budget: min(remaining, budget.remaining)
+        plan = PaperPlan(self.s, self.ctl, 1, chunked_prefill=True)
+        with patch.object(sys.modules["vllm.core.scheduler"], "SchedulingBudget", Budget, create=True):
+            for count in (4, 4, 2):
+                out = plan.next_step()
+                self.assertEqual(out.num_batched_tokens, count)
+                self.assertEqual("long" in plan.reserved_slots, count == 2)
+                self.assertEqual("long" in plan.prepared, count == 2)
+                remaining -= count
+        self.assertEqual(len(self.refreshes), 1)
+
     def test_oversized_prefill_rejected_before_program_admission(self):
         from integrations.vllm.backend import VLLMBackend
         from unittest.mock import Mock
         backend = VLLMBackend.__new__(VLLMBackend)
-        backend.scheduler = NS(_autellix_paper=object(), scheduler_config=NS(max_num_batched_tokens=4))
+        backend.scheduler = NS(_autellix_paper=NS(chunked_prefill=False), scheduler_config=NS(max_num_batched_tokens=4))
         backend.engine = NS(model_config=NS(max_model_len=16, hf_config=NS(vocab_size=100)), add_request=Mock())
         backend.controller, backend.table = Mock(), Mock()
         with patch.dict("sys.modules", {"vllm": NS(SamplingParams=Mock())}):

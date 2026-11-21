@@ -23,6 +23,27 @@ DEVICE = os.environ.get("AUTELLIX_TEST_DEVICE", "0")
 @unittest.skipUnless(BACKEND and MODEL, "requires AUTELLIX_GPU_BACKEND and AUTELLIX_TEST_MODEL")
 class RealInferenceTests(unittest.TestCase):
     @unittest.skipUnless(BACKEND == "vllm", "requires vllm")
+    def test_chunked_prefill_matches_whole_prefill_with_graph_decode(self):
+        tokens = [1 + i % 11 for i in range(84)]
+        sampling = dict(temperature=0, max_tokens=8, ignore_eos=True)
+        outputs = []
+        policy = PolicyConfig(schedule_interval=4, overprovision=0)
+        for chunked, budget in ((False, 128), (True, 32)):
+            args = dict(max_model_len=512, max_num_batched_tokens=budget, max_num_seqs=1,
+                        gpu_memory_utilization=.35, swap_space=.25, dtype="half",
+                        enforce_eager=False, paper_chunked_prefill=chunked)
+            with InferenceEngine([ReplicaConfig("vllm", MODEL, device=DEVICE, engine_args=args)], policy=policy) as engine:
+                pid = engine.start_session()
+                result = engine.submit(pid, input_ids=tokens, sampling=sampling).result(180)
+                outputs.append(result["token_ids"])
+                self.assertEqual(len(outputs[-1]), 8)
+                steps = [e for e in map(json.loads, (engine.state_dir / "replica-0.jsonl").read_text().splitlines())
+                         if e["event"] == "plan_step" and not e["decode"]]
+                self.assertEqual([step["tokens"] for step in steps], [32, 32, 20] if chunked else [84])
+                engine.end_session(pid)
+        self.assertEqual(*outputs)
+
+    @unittest.skipUnless(BACKEND == "vllm", "requires vllm")
     def test_oversized_prefill_does_not_kill_replica(self):
         args = dict(max_model_len=512, max_num_batched_tokens=32, max_num_seqs=1,
                     gpu_memory_utilization=.35, swap_space=.25, dtype="half")

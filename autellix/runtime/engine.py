@@ -117,7 +117,7 @@ class InferenceEngine:
     """
 
     def __init__(self, replicas: list[ReplicaConfig], *, policy: PolicyConfig | None = None,
-                 state_dir: str | None = None, locality_threshold=2048, routing="program"):
+                 state_dir: str | None = None, locality_threshold=2048, routing="program", scheduler_trace=True):
         if not replicas:
             raise ValueError("at least one replica is required")
         if len({r.model for r in replicas}) != 1:
@@ -149,8 +149,9 @@ class InferenceEngine:
         self.ready = [concurrent.futures.Future() for _ in replicas]
         self.processes = []
         for index, replica in enumerate(replicas):
+            trace = str(self.state_dir / f"replica-{index}.jsonl") if scheduler_trace else None
             process = ctx.Process(target=_worker, args=(index, replica, self.policy,
-                self.table.path, str(self.state_dir / f"replica-{index}.jsonl"),
+                self.table.path, trace,
                 self.commands[index], self.events), name=f"autellix-{index}")
             process.start()
             self.processes.append(process)
