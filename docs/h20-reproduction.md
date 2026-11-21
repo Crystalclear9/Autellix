@@ -67,6 +67,29 @@ python scripts/run_paper_vllm.py offline sharegpt --model "$model" --device "$gp
 --quantum-scale 8 --swap-gib 384 --request-timeout 79200`，并指定独立的运行目录。
 原生 SGLang 对照沿用同一份输入、随机种子和批次上限，汇总时核对输入哈希和输出 token 数。
 
+## 单卡 Qwen3-32B
+
+在 `autellix-sglang` 环境中直接读取 `stu/ljh/models/Qwen3-32B` 的 BF16 权重。数据和
+结果沿用 `fjr` 的目录。ShareGPT 用 Qwen 模板重建完整会话，BFCL 保留已采集的工具反馈，
+LATS 保留搜索树，三类输入都用 Qwen tokenizer 编码。Mixed 从三类输入各取两个程序。
+
+```bash
+model="$HOME/stu/ljh/models/Qwen3-32B"
+out="$data/runs/paper-vllm-20261119"
+export CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES="$gpu"
+
+python scripts/prepare_h20_qwen32.py --model "$model" --datasets "$data/datasets" \
+  --run-dir "$out" --device "$gpu"
+for family in sharegpt bfcl sharegpt-offline128 lats mixed; do
+  python scripts/run_sglang_matrix.py --plan "$out/qwen32-$family-plan.json" \
+    --output "$out/qwen32-$family.json" --resume
+done
+```
+
+同一张卡依次运行匹配 Triton 配置的 SGLang、Autellix PLAS 或 ATLAS，以及采用上游默认优化的
+SGLang。功能验收使用 `check_prefill_priority_gpu.py --modern --mem-fraction-static .88`，
+分别验证 KV 换入换出与 `--host-kv-recompute`，检查恢复生成和连续生成的输出是否一致。
+
 ## 回放输入核对
 
 | 工作负载 | 程序池 | 平均调用数 / 论文 | 平均输出 token/调用 / 论文 | 最长完整上下文 |
