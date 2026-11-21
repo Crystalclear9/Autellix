@@ -166,8 +166,8 @@ def simulate(args):
             elif figure == 15:
                 for engines in (1, 2, 4, 8):
                     rows.extend(runner.sweep(workload=family, baseline_names=["autellix"],
-                                             arrival_rates=(.02, .04, .08, .12, .16, .24, .32, .48, .64, .96), engines=engines,
-                                             num_programs=count, dataset_path=data))
+                                             arrival_rates=(.08, .16, .32, .64, 1., 1.5, 2.5, 4., 6., 10.), engines=engines,
+                                             num_programs=512, dataset_path=data))
             else:
                 rates = (.0008, .0016, .0032, .0064) if family == "lats" else (.005, .01, .02, .03, .04)
                 rows.extend(runner.sweep(workload=family, baseline_names=("fcfs", "round-robin", "mlfq", "autellix", "srpt"),
@@ -184,7 +184,8 @@ def simulate(args):
                                 and row["avg_token_latency"] <= target]
                     rates_by_slo.append(dict(engines=engines, seconds_per_token_target=target,
                                              maximum_tested_rate=max((r["arrival_rate"] for r in eligible), default=None),
-                                             maximum_completed_rate=max((r["throughput"] for r in eligible), default=None)))
+                                             maximum_completed_rate=max((r["arrival_window_throughput"] for r in eligible),
+                                                                        default=None)))
             write_json(args.run_dir / "fig15-slo-simulation.json", rates_by_slo)
 
 

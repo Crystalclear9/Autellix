@@ -34,6 +34,9 @@ def result_record(
     latencies = [m.token_latency for m in result.program_metrics.values()]
     responses = [m.response_time for m in result.program_metrics.values()]
     makespan = max(1, result.makespan)
+    arrivals = [m.arrival_time for m in result.program_metrics.values()]
+    first, last = (min(arrivals), max(arrivals)) if arrivals else (0, 0)
+    completed_in_window = sum(m.finish_time <= last for m in result.program_metrics.values())
     return {
         "measurement": "simulation",
         "workload": workload,
@@ -49,6 +52,7 @@ def result_record(
         "makespan": result.makespan,
         "prefetched_calls": result.prefetched_calls,
         "throughput": len(result.program_metrics) / makespan,
+        "arrival_window_throughput": completed_in_window / (last - first) if last > first else 0.,
         "avg_token_latency": mean(latencies) if latencies else 0.0,
         "avg_critical_path_token_latency": mean(
             [m.critical_path_token_latency for m in result.program_metrics.values()]
