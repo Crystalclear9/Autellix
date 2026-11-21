@@ -32,6 +32,10 @@ def main():
     parser.add_argument("--boundary-scale", type=float, default=128)
     parser.add_argument("--host-kv-gib", type=float, help="Autellix host KV budget per engine or pipeline stage")
     parser.add_argument("--host-kv-recompute", action="store_true", help="recompute KV when the single-stage host budget fills")
+    parser.add_argument("--cache-paused-kv", action="store_true", help="cache paused prefixes in the GPU radix tree")
+    parser.add_argument("--publish-activity-at-window", action="store_true", help="publish the shared activity view at window boundaries")
+    parser.add_argument("--refill-idle-slots", action="store_true", help="fill vacant batch slots after the prepared reserve is exhausted")
+    parser.add_argument("--optimized-kernels", action="store_true", help="use SGLang's selected attention kernels and CUDA graphs")
     parser.add_argument("--native-default", type=float, nargs="*", metavar="RATE",
                         help="also measure upstream SGLang defaults at the listed rates, or at all rates")
     parser.add_argument("--fcfs-control", type=float, nargs="+", metavar="RATE",
@@ -56,13 +60,21 @@ def main():
     name = args.label or args.workload
     candidate = dict(name=policy, policy=policy, reserve=1, interval=8,
                      quantum_scale=args.quantum_scale, boundary_scale=args.boundary_scale)
-    host_kv = {}
+    candidate_options = {}
     if args.host_kv_gib is not None:
-        host_kv["autellix_swap_space"] = args.host_kv_gib
+        candidate_options["autellix_swap_space"] = args.host_kv_gib
     if args.host_kv_recompute:
-        host_kv["autellix_host_kv_recompute"] = True
-    if host_kv:
-        candidate["engine_args"] = host_kv
+        candidate_options["autellix_host_kv_recompute"] = True
+    if args.cache_paused_kv:
+        candidate_options["autellix_cache_paused_kv"] = True
+    if args.publish_activity_at_window:
+        candidate_options["autellix_window_activity"] = True
+    if args.refill_idle_slots:
+        candidate_options["autellix_refill_idle_slots"] = True
+    if args.optimized_kernels:
+        candidate_options.update(attention_backend=None, sampling_backend=None, disable_cuda_graph=False)
+    if candidate_options:
+        candidate["engine_args"] = candidate_options
     cases = [dict(name="native", policy="sglang-native", reserve=0), candidate]
     rates = list(args.rates or default_rates)
     if args.native_default is not None:

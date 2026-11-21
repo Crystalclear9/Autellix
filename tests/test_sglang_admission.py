@@ -7,7 +7,8 @@ from integrations.sglang.admission import can_keep_running
 class KeepRunningTests(unittest.TestCase):
     def test_preserve_when_current_decode_window_fits(self):
         req = lambda prompt, output, maximum: NS(rid="running", origin_input_ids=[1]*prompt, output_ids=[2]*output,
-                                                sampling_params=NS(max_new_tokens=maximum))
+                                                sampling_params=NS(max_new_tokens=maximum),
+                                                extend_input_len=prompt + output, init_next_round_input=lambda _: None)
         running, pending = req(50, 10, 100), req(80, 20, 100)
         scheduler = NS(running_batch=NS(reqs=[running]), server_args=NS(max_running_requests=2),
                        max_prefill_tokens=1024, token_to_kv_pool_allocator=NS(available_size=lambda: 100),

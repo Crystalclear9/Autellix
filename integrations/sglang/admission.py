@@ -6,6 +6,9 @@ def can_keep_running(scheduler, pending, selected):
     # Count whole pending prefixes, including cached tokens. This also covers
     # cache entries becoming non-evictable when native admission locks them.
     input_tokens = sum(len(r.origin_input_ids) + len(r.output_ids) for r in pending)
+    for request in pending:
+        request.init_next_round_input(scheduler.tree_cache)
+    prefill_tokens = sum(request.extend_input_len for request in pending)
     config = scheduler.autellix.config
     horizon = config.schedule_interval if config.implementation == "paper" else float("inf")
     future_tokens = sum(min(r.sampling_params.max_new_tokens, horizon) for r in pending)
@@ -14,5 +17,5 @@ def can_keep_running(scheduler, pending, selected):
     budget = (scheduler.token_to_kv_pool_allocator.available_size()
               + scheduler.tree_cache.evictable_size())
     return (len(running) + len(pending) <= scheduler.server_args.max_running_requests
-            and input_tokens + len(running) < scheduler.max_prefill_tokens
+            and prefill_tokens + len(running) < scheduler.max_prefill_tokens
             and input_tokens + future_tokens + len(running) < budget)

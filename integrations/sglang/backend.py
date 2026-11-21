@@ -29,6 +29,10 @@ class SGLangBackend:
         score_elements = engine_args.pop("autellix_attention_score_elements", 2**26)
         mlp_chunk_size = engine_args.pop("autellix_mlp_chunk_size", 0)
         retain_running = engine_args.pop("autellix_retain_running", True)
+        cache_paused_kv = engine_args.pop("autellix_cache_paused_kv", False)
+        publish_activity_at_window = engine_args.pop("autellix_window_activity", False)
+        refill_idle_slots = engine_args.pop("autellix_refill_idle_slots", False)
+        mix_prefill_decode = engine_args.pop("autellix_mix_prefill_decode", True)
         if legacy_gpu:
             # Explicit compatibility mode: native PyTorch ops, no CUDA JIT.
             engine_args.setdefault("dtype", "float32")
@@ -55,7 +59,11 @@ class SGLangBackend:
         options = dict(table_path=table_path, config=asdict(config), trace=trace,
                        host_bytes=host_bytes, host_kv_recompute=host_kv_recompute,
                        legacy_gpu=legacy_gpu, pipeline=pp > 1, prefix_attention=prefix_attention,
-                       retain_running=retain_running, attention_score_elements=score_elements,
+                       retain_running=retain_running, cache_paused_kv=cache_paused_kv and pp == 1,
+                       publish_activity_at_window=publish_activity_at_window and config.implementation == "paper",
+                       refill_idle_slots=refill_idle_slots and config.implementation == "paper",
+                       mix_prefill_decode=mix_prefill_decode,
+                       attention_score_elements=score_elements,
                        mlp_chunk_size=mlp_chunk_size)
         target = entry.run_scheduler_process
         if self.native:

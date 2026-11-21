@@ -130,6 +130,33 @@ class PaperPlanTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             PolicyConfig(implementation="silently-fallback")
 
+    def test_idle_refill_preserves_live_decode_and_window_boundary(self):
+        self.ctl.config = PolicyConfig(schedule_interval=3, overprovision=0)
+        self.priority.update(a=1, b=0)
+        active = Group("a")
+        self.s.running.append(active)
+        plan = PaperPlan(self.s, self.ctl, 2, keep_resident_kv=True, refill_idle_slots=True)
+        plan.next_step()
+        plan.window.executed()
+        self.s.waiting.append(Group("b", True))
+        out = plan.next_step()
+        self.assertEqual({g.seq_group.request_id for g in out.scheduled_seq_groups}, {"a", "b"})
+        self.assertEqual(plan.window.cohort, ["a", "b"])
+        self.assertEqual(plan.window.remaining, 2)
+        self.assertEqual(len(self.refreshes), 1)
+
+    def test_idle_refill_does_not_bypass_capacity_limited_prefix(self):
+        self.ctl.config = PolicyConfig(schedule_interval=3, overprovision=0)
+        self.priority.update(a=0, b=1)
+        self.s.scheduler_config.max_num_batched_tokens = 5
+        self.s.waiting.extend([Group("a", True), Group("b", True)])
+        plan = PaperPlan(self.s, self.ctl, 2, keep_resident_kv=True, refill_idle_slots=True)
+        plan.next_step()
+        self.assertEqual(plan.window.cohort, ["a"])
+        out = plan.next_step()
+        self.assertEqual([g.seq_group.request_id for g in out.scheduled_seq_groups], ["a"])
+        self.assertEqual(len(self.refreshes), 1)
+
     def test_resident_reserve_does_not_consume_decode_token_budget(self):
         self.priority.update(a=0, reserve=1)
         self.s.scheduler_config.max_num_batched_tokens = 1

@@ -1,7 +1,9 @@
 """Freeze policy order for N decode steps, with resident reserve refill."""
 class SchedulingWindow:
-    def __init__(self, controller, capacity):
+    def __init__(self, controller, capacity, refill_idle_slots=False):
         self.controller, self.capacity = controller, capacity
+        self.refill_idle_slots = refill_idle_slots
+        self.capacity_limited = False
         self.remaining = 0
         self.cohort = []
         self.active = set()
@@ -19,7 +21,16 @@ class SchedulingWindow:
             ctl.refresh()
             cohort = sorted(available, key=ctl.key)[:self.capacity + ctl.config.overprovision]
             self.remaining = ctl.config.schedule_interval
+            self.capacity_limited = False
             ctl.emit("schedule_window", requests=cohort, decode_steps=self.remaining)
+        elif self.refill_idle_slots and not self.capacity_limited and len(cohort) < self.capacity:
+            spare = self.capacity - len(cohort)
+            refill = sorted(available.difference(cohort), key=ctl.key)[:spare]
+            if refill:
+                # Use vacancies only. The admitted cohort keeps its order and
+                # the next priority refresh remains on its original boundary.
+                cohort.extend(refill)
+                ctl.emit("refill_idle", requests=refill, remaining_steps=self.remaining)
         active = set(cohort[:self.capacity])
         reserve = set(cohort[self.capacity:])
         if not boundary:
@@ -42,6 +53,7 @@ class SchedulingWindow:
 
     def retain_prefix(self, length):
         """Algorithm 1's first non-fitting request ends admission this window."""
+        self.capacity_limited = True
         self.cohort = self.cohort[:length]
         self.active = set(self.cohort[:self.capacity])
         self.reserve = set(self.cohort[self.capacity:])

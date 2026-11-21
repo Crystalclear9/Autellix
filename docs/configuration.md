@@ -77,6 +77,19 @@ vLLM 的 paper 模式关闭异步输出处理，启用混合阶段执行，内�
 
 SGLang 适配设置 `disable_overlap_schedule=True`、`chunked_prefill_size=-1`、`page_size=1`。支持单卡与 `pp_size>1` 的流水线并行；TP、DP attention、LoRA、HiCache 和推测解码尚未接入 Autellix 调度。
 
+| 单卡优化 | vLLM | SGLang |
+| --- | --- | --- |
+| 暂停期间保留 KV | `keep_resident_kv` 在有空余 GPU blocks 时保留暂停请求 | `autellix_cache_paused_kv` 把暂停请求的已计算前缀交给可回收的 GPU radix 缓存 |
+| 窗口边界发布活动视图 | `publish_activity_at_window` | `autellix_window_activity` |
+| 补齐闲置槽位 | `refill_idle_slots` | `autellix_refill_idle_slots` |
+
+活动视图延后写入 SQLite，优先级和调用完成统计仍使用逐步计量的服务时间。补位先使用已有
+候补请求，候补耗尽后才按已知优先级补空位。它保留已接纳次序和原窗口边界，遇到容量限制时
+等下一窗口再尝试接纳。H20 回放脚本通过 `--publish-activity-at-window` 与 `--refill-idle-slots`
+开启这些选项。SGLang 通过 `--cache-paused-kv` 开启 radix 保留，通过 `--optimized-kernels`
+使用原生后端选择的 attention 和 CUDA Graph。
+`autellix_mix_prefill_decode=false` 把 prefill 和 decode 分开执行，可用于对照同一接纳策略下的模型执行成本。
+
 PP 配置中，B=`max_running_requests` 是整个副本的活动容量，按 PP 阶段数均分到微批次，B 取 PP 的整数倍。K 是每个微批次的预备数，原生槽位总数为 B+PP×K。各阶段使用相同 token 容量，仅保存本阶段层的 KV。`SGLANG_PP_LAYER_PARTITION` 可指定分层，例如 Qwen3-32B 的 `20,22,22`。
 
 SGLang 可显式设置 `autellix_legacy_gpu=true`（默认关闭），用于实验性 P40 兼容。

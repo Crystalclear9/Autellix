@@ -14,6 +14,7 @@ def main():
     parser.add_argument("--device", default="1")
     parser.add_argument("--output", required=True)
     parser.add_argument("--host-kv-recompute", action="store_true")
+    parser.add_argument("--cache-paused-kv", action="store_true")
     parser.add_argument("--modern", action="store_true", help="use SGLang's Triton path")
     parser.add_argument("--mem-fraction-static", type=float, default=.35)
     args = parser.parse_args()
@@ -26,6 +27,8 @@ def main():
             options.update(autellix_legacy_gpu=False, dtype="float16", sampling_backend="pytorch")
         if args.host_kv_recompute:
             options.update(autellix_swap_space=.00001, autellix_host_kv_recompute=True)
+        if args.cache_paused_kv:
+            options.update(autellix_cache_paused_kv=True, autellix_window_activity=True)
         policy = PolicyConfig(policy="plas", schedule_interval=1, overprovision=reserve,
                               boundaries=(0, .001, .002, math.inf), quanta=(.0001, .0002, .0004), beta=1e12)
         with InferenceEngine([ReplicaConfig("sglang", args.model, args.device, options)], policy=policy) as engine:
@@ -42,7 +45,9 @@ def main():
             assert ra["text"] == rr["text"]
             events = [json.loads(line) for line in (engine.state_dir / "replica-0.jsonl").read_text().splitlines()]
             counts = Counter(e["event"] for e in events)
-            if args.host_kv_recompute:
+            if args.cache_paused_kv:
+                assert counts["pause_cached"] > 0 and counts["swap_out"] == 0, counts
+            elif args.host_kv_recompute:
                 assert counts["recompute_retract"] > 0 and counts["swap_out"] == 0, counts
             else:
                 assert counts["defer_prefill"] > 0, counts

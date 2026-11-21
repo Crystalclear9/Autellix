@@ -62,20 +62,22 @@ def install(cls, options):
             configure(self, options)
         else:
             self.autellix = RuntimeScheduler(ProgramTable(options["table_path"]),
-                                            PolicyConfig(**options["config"]), options.get("trace"))
+                                            PolicyConfig(**options["config"]), options.get("trace"),
+                                            publish_activity_at_window=options.get("publish_activity_at_window", False))
         self._autellix_steps = 0
         self._autellix_paper = self.autellix.config.implementation == "paper"
         if self._autellix_paper:
             # Mixed execution prevents native prefill preference from excluding
             # higher-priority decodes already admitted by the global plan.
-            self.is_mixed_chunk = True
+            self.is_mixed_chunk = options.get("mix_prefill_decode", True)
             self.new_token_ratio = self.init_new_token_ratio = 1.0
         self._autellix_rids = {}
         self._autellix_reserve = {}
         self._autellix_window = None
         if options.get("capacity") and self.pp_size == 1:
             from autellix.runtime.window import SchedulingWindow
-            self._autellix_window = SchedulingWindow(self.autellix, options["capacity"])
+            self._autellix_window = SchedulingWindow(self.autellix, options["capacity"],
+                                                      refill_idle_slots=options.get("refill_idle_slots", False))
         if options.get("host_bytes"):
             from .swap import HostKV
             self._autellix_host = HostKV(self.token_to_kv_pool_allocator, self.tree_cache, options["host_bytes"],
@@ -113,8 +115,10 @@ def install(cls, options):
         if self.pp_size > 1:
             other_reserves = {rid for reserves in self._autellix_reserves
                               if reserves is not self._autellix_reserve for rid in reserves}
-        held = [req for req in self.waiting_queue if req.rid in other_reserves]
-        self.waiting_queue = [req for req in self.waiting_queue if req.rid not in other_reserves]
+        held = []
+        if other_reserves:
+            held = [req for req in self.waiting_queue if req.rid in other_reserves]
+            self.waiting_queue = [req for req in self.waiting_queue if req.rid not in other_reserves]
         try:
             return prefill_plan(self, restored_nodes)
         finally:
@@ -177,21 +181,25 @@ def install(cls, options):
                 victims = [i for i, r in enumerate(batch.reqs) if r.rid not in keep]
                 # Use the pinned engine's native retraction ownership rules.
                 # Generated output_ids are preserved by reset_for_retract().
-                lengths = batch.seq_lens.cpu().tolist()
+                lengths = batch.seq_lens.cpu().tolist() if victims else ()
                 retracted = []
                 for i in victims:
                     req = batch.reqs[i]
-                    if (len(self._autellix_reserve) < ctl.config.overprovision and
-                            (self._autellix_window is None or req.rid in self._autellix_window.reserve)):
-                        # Preserve computed GPU KV as a locked radix prefix;
-                        # only the request slot is released. Unlike recompute,
-                        # admission can reuse all previously computed tokens.
+                    reserve = (len(self._autellix_reserve) < ctl.config.overprovision and
+                               (self._autellix_window is None or req.rid in self._autellix_window.reserve))
+                    if reserve or options.get("cache_paused_kv"):
+                        # Transfer ownership to radix. A reserve holds a lock;
+                        # other paused prefixes are reclaimed under pressure.
                         req.fill_ids = (req.origin_input_ids + req.output_ids)[:lengths[i]]
-                        req._autellix_reserved_tokens = list(req.fill_ids)
                         batch.tree_cache.cache_unfinished_req(req)
-                        self._autellix_reserve[req.rid] = req.last_node
                         batch.req_to_token_pool.free(req.req_pool_idx)
-                        ctl.emit("reserve", rid=req.rid)
+                        if reserve:
+                            req._autellix_reserved_tokens = list(req.fill_ids)
+                            self._autellix_reserve[req.rid] = req.last_node
+                            ctl.emit("reserve", rid=req.rid)
+                        else:
+                            batch.tree_cache.dec_lock_ref(req.last_node)
+                            ctl.emit("pause_cached", rid=req.rid, tokens=lengths[i])
                     else:
                         if self._autellix_host is not None:
                             all_indices = batch.req_to_token_pool.req_to_token[req.req_pool_idx, :lengths[i]]
@@ -211,8 +219,10 @@ def install(cls, options):
                     batch.batch_is_full = False
                     self._extend_requests_to_queue(retracted, is_retracted=True)
         slots = max(0, self.server_args.max_running_requests - len(self.running_batch.reqs))
+        order = ({rid: i for i, rid in enumerate(self._autellix_window.cohort)}
+                 if selected is not None and self._autellix_paper else None)
         ready = sorted((r for r in self.waiting_queue if selected is None or r.rid in selected),
-                       key=lambda r: ctl.key(r.rid))[:slots]
+                       key=lambda r: ctl.key(r.rid) if order is None else order[r.rid])[:slots]
         if self._autellix_paper and self._autellix_window is not None and not ready:
             # Decode continuation: no native prefill admission / priority pass.
             return None
@@ -263,7 +273,8 @@ def install(cls, options):
             # Keep a promoted reserve pinned until native admission acquires
             # its own prefix lock; restoring another request must not evict it.
         held = [r for r in self.waiting_queue if (selected is not None and r.rid not in selected) or r.rid in blocked]
-        self.waiting_queue = [r for r in self.waiting_queue if r not in held]
+        held_ids = {r.rid for r in held}
+        self.waiting_queue = [r for r in self.waiting_queue if r.rid not in held_ids]
         def release_prepared(rid):
             for entry in restored_nodes[:]:
                 if entry[0] == rid:
@@ -275,7 +286,8 @@ def install(cls, options):
                 for req in released:
                     release_prepared(req.rid)
                 held.extend(released)
-                self.waiting_queue = [r for r in self.waiting_queue if r not in released]
+                released_ids = {r.rid for r in released}
+                self.waiting_queue = [r for r in self.waiting_queue if r.rid not in released_ids]
         try:
             hold_released_reserves()
             if self._autellix_paper and ready:

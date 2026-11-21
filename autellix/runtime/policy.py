@@ -257,14 +257,16 @@ class RuntimeScheduler:
     """
 
     def __init__(self, table: ProgramTable, config: PolicyConfig | None = None,
-                 trace: str | None = None, clock=time.monotonic, publish_waiting_each_step=True):
+                 trace: str | None = None, clock=time.monotonic, publish_waiting_each_step=True,
+                 publish_activity_at_window=False):
         self.table = table
         self.config = config or PolicyConfig()
         self.calls: dict[str, RuntimeCall] = {}
         self.clock = clock
         self.counter = 0
         self.trace = trace
-        self.publish_waiting_each_step = publish_waiting_each_step
+        self.publish_activity_at_window = publish_activity_at_window
+        self.publish_waiting_each_step = publish_waiting_each_step and not publish_activity_at_window
         self._scheduled = set()
         if trace:
             Path(trace).parent.mkdir(parents=True, exist_ok=True)
@@ -341,7 +343,8 @@ class RuntimeScheduler:
         for call in affected:
             self._wait_until(call, now)
             call.scheduled = call.rid in selected
-        self._publish(affected)
+        if not self.publish_activity_at_window:
+            self._publish(affected)
         self.emit("batch", requests=list(rids))
 
     def executed(self, rids, seconds: float):
@@ -355,7 +358,8 @@ class RuntimeScheduler:
             call.quantum -= seconds
             call.scheduled = False
             call.last_update = now
-        self._publish(self.calls[rid] for rid in rids)
+        if not self.publish_activity_at_window:
+            self._publish(self.calls[rid] for rid in rids)
         self.emit("execute", requests=list(rids), seconds=seconds)
 
     def finish(self, rid: str, reason="finished") -> dict:

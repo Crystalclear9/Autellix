@@ -8,9 +8,9 @@ from autellix.runtime.window import SchedulingWindow
 
 
 class PaperPlan:
-    def __init__(self, scheduler, controller, capacity, keep_resident_kv=False):
+    def __init__(self, scheduler, controller, capacity, keep_resident_kv=False, refill_idle_slots=False):
         self.scheduler, self.controller = scheduler, controller
-        self.window = SchedulingWindow(controller, capacity)
+        self.window = SchedulingWindow(controller, capacity, refill_idle_slots=refill_idle_slots)
         self.keep_resident_kv = keep_resident_kv
         self.prepared = set()
         self.reserved_slots = set()

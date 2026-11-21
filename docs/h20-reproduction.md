@@ -205,6 +205,38 @@ PLAS 保留 KV 组的吞吐低 15.3%，平均程序级延迟高 20.8%。
 之外，涉及换入换出、调度与排队。八组的输入哈希和输出 token 数已逐组核对。计划、结果和运行日志
 保存在 `data/autellix/runs/paper-vllm-20261119/bfcl-aligned-20261121.tar.gz`。
 
+### 改进后的单卡回放
+
+Llama-3.1-8B BF16、H20 3 号卡、活动批次上限 16。SGLang 的 KV 容量为 262,144 token。
+优化组将暂停请求的 KV 交给可回收的 GPU radix 缓存，在窗口边界发布 SQLite 活动视图，
+启用原生 attention 与 CUDA Graph，并将时间片倍率从 2 提至 8。原生组启用上游默认优化。
+
+| 负载（程序/秒） | 原生 SGLang（token/s） | 优化后 Autellix（token/s） | 吞吐变化 | 平均毫秒/token，原生 / Autellix |
+| --- | ---: | ---: | ---: | ---: |
+| BFCL 1.92 | 349.13 | 301.90 | −13.5% | 50.04 / 53.05 |
+| ShareGPT 1.92 | 448.28 | 408.53 | −8.9% | 12.29 / 14.50 |
+| LATS 0.28 | 682.57 | 621.30 | −9.0% | 7.50 / 8.30 |
+| Mixed 0.48 | 545.64 | 499.15 | −8.5% | 11.16 / 12.47 |
+
+同轮 BFCL 的旧 Autellix 配置为 159.55 token/s，发生 1,011 次主机 KV 换出。启用 radix
+保留和窗口写入后主机换出归零，吞吐升至 215.59 token/s。时间片倍率和执行配置的联合调整
+把吞吐进一步推至 301.90 token/s。即使主机换出归零，本轮 BFCL 的计划中仍有 529 次撤回
+发生在窗口内已有的请求上，其中包含候补转换。这是继续检查 prefill 容量估计和批次形状的依据。
+vLLM 的配对保留相同的 KV 与策略配置，只调整活动视图写入频率，吞吐由 293.35 升至 302.15 token/s。
+
+本地 Figure 2 模拟用相同的四个程序和双槽批次，FCFS、MLFQ、PLAS 的累计等待分别是 18、19、14，
+论文示意为 18、18、12。两组均观察到 PLAS 降低累计等待。[Autellix 论文，图 2](https://arxiv.org/html/2502.13965v1#S1)
+
+在 `autellix-sglang` 环境中运行下面的命令，可在 BFCL 上回放启用补齐的版本，并保留原生对照。
+`model`、`data`、`gpu` 沿用前面的单卡设置。
+
+```bash
+python scripts/run_h20_paper.py bfcl --model "$model" --datasets "$data/datasets" \
+  --run-dir "$data/runs/h20-bfcl-refill" --device "$gpu" --programs 48 --rates 1.92 \
+  --native-default --host-kv-gib 32 --host-kv-recompute --quantum-scale 8 \
+  --cache-paused-kv --publish-activity-at-window --refill-idle-slots --optimized-kernels
+```
+
 ## SGLang 适配的单卡配对
 
 下表以同资源、同 Triton 配置的原生 SGLang 为基准。响应和秒/token 越低越好，

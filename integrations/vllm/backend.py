@@ -15,7 +15,8 @@ class VLLMBackend:
     def __init__(self, model: str, table_path: str, config: PolicyConfig | None = None,
                  trace: str | None = None, batched_swap: bool = True, observe_native: bool = True,
                  measure_timing: bool = False, publish_waiting_each_step: bool = True,
-                 keep_resident_kv: bool = False, **engine_args):
+                 keep_resident_kv: bool = False, publish_activity_at_window: bool = False,
+                 refill_idle_slots: bool = False, **engine_args):
         if version("vllm") != "0.6.1":
             raise RuntimeError("this backend requires vllm==0.6.1")
         config = config or PolicyConfig()
@@ -62,7 +63,8 @@ class VLLMBackend:
         self.controller = None
         if not native or observe_native:
             self.controller = RuntimeScheduler(self.table, config, trace,
-                                               publish_waiting_each_step=publish_waiting_each_step)
+                                               publish_waiting_each_step=publish_waiting_each_step,
+                                               publish_activity_at_window=publish_activity_at_window and paper)
         self.engine = LLMEngine.from_engine_args(EngineArgs(model=model, **args))
         self.scheduler = self.engine.scheduler[0]
         if self.controller is None:
@@ -73,7 +75,8 @@ class VLLMBackend:
             self.scheduler._autellix_window = SchedulingWindow(self.controller, capacity)
         if paper:
             from .paper import PaperPlan
-            self.scheduler._autellix_paper = PaperPlan(self.scheduler, self.controller, capacity, keep_resident_kv)
+            self.scheduler._autellix_paper = PaperPlan(self.scheduler, self.controller, capacity, keep_resident_kv,
+                                                      refill_idle_slots=refill_idle_slots)
             self.scheduler._autellix_window = self.scheduler._autellix_paper.window
         worker = self.engine.model_executor.driver_worker
         if tp == 1 and batched_swap and not native:

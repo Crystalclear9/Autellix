@@ -64,13 +64,15 @@ class RuntimeRegressions(unittest.TestCase):
 
     def test_window_activity_preserves_measured_waiting_time(self):
         timings = []
-        for publish_each_step in (True, False):
+        for publish_each_step, publish_at_window in ((True, False), (False, False), (False, True)):
             with tempfile.TemporaryDirectory() as directory:
                 table = ProgramTable(str(Path(directory, "state.db")))
                 clock = [0.]
                 controller = RuntimeScheduler(table, clock=lambda: clock[0],
-                                              publish_waiting_each_step=publish_each_step)
+                                              publish_waiting_each_step=publish_each_step,
+                                              publish_activity_at_window=publish_at_window)
                 table.open("p")
+                table.record_submission("a", "p", {})
                 controller.admit("a", "p")
                 controller.admit("b", "p")
                 for tick in (1., 3.):
@@ -81,8 +83,12 @@ class RuntimeRegressions(unittest.TestCase):
                 clock[0] = 5.
                 controller.begin(["b"])
                 timings.append((controller.calls["a"].waited, controller.calls["b"].waited))
+                if publish_at_window:
+                    self.assertEqual(table.describe()["p"]["calls"][0]["executed"], 0.)
+                    controller.refresh()
+                    self.assertEqual(table.describe()["p"]["calls"][0]["executed"], 2.)
                 table.close()
-        self.assertEqual(timings, [(3., 5.), (3., 5.)])
+        self.assertEqual(timings, [(3., 5.)] * 3)
 
     def test_program_token_latency_uses_dag_critical_path(self):
         from autellix.runtime.benchmark import run_workload

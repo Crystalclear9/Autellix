@@ -36,6 +36,8 @@ def main():
                         help="publish unscheduled calls' waiting time at scheduling windows")
     parser.add_argument("--keep-resident-kv", action="store_true",
                         help="keep preempted KV on GPU until another request needs its blocks")
+    parser.add_argument("--publish-activity-at-window", action="store_true", help="publish the shared activity view at window boundaries")
+    parser.add_argument("--refill-idle-slots", action="store_true", help="fill vacant batch slots after the prepared reserve is exhausted")
     parser.add_argument("--cases", nargs="+", help="run only the listed cases")
     parser.add_argument("--label")
     args = parser.parse_args()
@@ -59,8 +61,10 @@ def main():
 
     candidate = dict(name="autellix", policy=policy, interval=args.interval, reserve=1,
                      quantum_scale=args.quantum_scale, boundary_scale=args.boundary_scale)
-    if args.keep_resident_kv:
-        candidate["engine_args"] = {"keep_resident_kv": True}
+    options = {name: True for name in ("keep_resident_kv", "publish_activity_at_window", "refill_idle_slots")
+               if getattr(args, name)}
+    if options:
+        candidate["engine_args"] = options
     baselines = [dict(name=name, policy=name, interval=steps, engine_args={"preemption_mode": None}) for name, steps in (
         ("vllm", 1), ("vllm-opt", 1), ("vllm-opt-multistep", args.interval))]
     mlfq = dict(candidate, name="mlfq", policy="mlfq")

@@ -120,7 +120,7 @@ class CompletedDecodeTests(unittest.TestCase):
                 def __init__(self):
                     self.policy = SimpleNamespace()
                     self.server_args = SimpleNamespace(max_running_requests=2)
-                    self.max_prefill_tokens = 1024
+                    self.max_prefill_tokens = 8
                     self.token_to_kv_pool_allocator = SimpleNamespace(available_size=lambda: 2048)
                     self.tree_cache = SimpleNamespace(evictable_size=lambda: 0)
                     self.waiting_queue = []
@@ -143,7 +143,8 @@ class CompletedDecodeTests(unittest.TestCase):
                 for rid in ("higher", "running"):
                     scheduler.autellix.admit(rid, "p")
                 req = lambda rid: SimpleNamespace(rid=rid, origin_input_ids=[1]*10, output_ids=[2],
-                                                 sampling_params=SimpleNamespace(max_new_tokens=8))
+                                                 sampling_params=SimpleNamespace(max_new_tokens=8),
+                                                 extend_input_len=2, init_next_round_input=lambda _: None)
                 scheduler.waiting_queue = [req("higher")]
                 scheduler.running_batch = SimpleNamespace(reqs=[req("running")], filter_batch=lambda: None,
                     seq_lens=SimpleNamespace(cpu=lambda: SimpleNamespace(tolist=lambda: [10])))
