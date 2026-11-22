@@ -332,15 +332,20 @@ def install(cls, options):
             while result is None and slots and len(self.waiting_queue) > 1 and restored_nodes:
                 victim = self.waiting_queue.pop()
                 held.append(victim)
+                blocked.add(victim.rid)
                 release_prepared(victim.rid)
                 ctl.emit("defer_prefill", rid=victim.rid, reason="higher_prefill_capacity")
                 self.running_batch.batch_is_full = False
                 result = original_prefill(self)
         finally:
             self.waiting_queue.extend(held)
-        # A partial prefill consumed this step's chunk budget. Retry the
-        # remaining cohort after it completes without retracting its decodes.
-        if self._autellix_paper and self._autellix_window is not None and getattr(self, "chunked_req", None) is None:
+        # Native NO_TOKEN/slot exhaustion sets batch_is_full; hitting only
+        # the per-forward prefill budget can leave a batch and pending work.
+        # Keep those requests in the cohort for the next iteration.
+        forward_limited = (self.pp_size == 1 and result is not None
+                           and not self.running_batch.batch_is_full and not blocked)
+        if (self._autellix_paper and self._autellix_window is not None and not forward_limited
+                and getattr(self, "chunked_req", None) is None):
             admitted = {r.rid for r in self.running_batch.reqs}
             if result is not None:
                 admitted.update(r.rid for r in result.reqs)

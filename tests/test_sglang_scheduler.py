@@ -10,7 +10,12 @@ from integrations.sglang.scheduler import encode_request, install
 
 
 class CompletedDecodeTests(unittest.TestCase):
-    def test_partial_prefill_preserves_the_decode_cohort(self):
+    def test_per_step_prefill_budget_preserves_the_decode_cohort(self):
+        for admission_limit in ("partial", "chunk_budget", "kv_capacity"):
+            with self.subTest(admission_limit=admission_limit):
+                self._check_prefill_admission_limit(admission_limit)
+
+    def _check_prefill_admission_limit(self, admission_limit):
         with tempfile.TemporaryDirectory() as directory:
             class Native:
                 def __init__(self):
@@ -34,7 +39,10 @@ class CompletedDecodeTests(unittest.TestCase):
                     else:
                         request = self.waiting_queue.pop(0)
                         if request.rid == "first":
-                            self.chunked_req = request
+                            if admission_limit == "partial":
+                                self.chunked_req = request
+                            elif admission_limit == "kv_capacity":
+                                self.running_batch.batch_is_full = True
                     return SimpleNamespace(reqs=[request, *self.running_batch.reqs])
 
             with patch.dict("sys.modules", {"torch": Mock()}):
@@ -53,9 +61,14 @@ class CompletedDecodeTests(unittest.TestCase):
                 scheduler.running_batch = SimpleNamespace(reqs=[running], filter_batch=lambda: None)
                 self.assertEqual(scheduler.get_new_batch_prefill().reqs, [first, running])
                 window = scheduler._autellix_window
+                if admission_limit == "kv_capacity":
+                    self.assertEqual(window.cohort, ["first"])
+                    self.assertTrue(window.capacity_limited)
+                    return
                 self.assertEqual(window.cohort, ["first", "second", "running"])
                 self.assertFalse(window.capacity_limited)
-                self.assertEqual(scheduler.get_new_batch_prefill().reqs, [first, running])
+                if admission_limit == "partial":
+                    self.assertEqual(scheduler.get_new_batch_prefill().reqs, [first, running])
                 scheduler.running_batch.reqs = [first, running]
                 self.assertEqual(scheduler.get_new_batch_prefill().reqs, [second, first, running])
 

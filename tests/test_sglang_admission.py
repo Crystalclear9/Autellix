@@ -45,6 +45,25 @@ class KeepRunningTests(unittest.TestCase):
 
 @unittest.skipUnless(find_spec("sglang"), "requires the pinned SGLang package")
 class NativeAdmissionBudgetTests(unittest.TestCase):
+    def test_full_forward_budget_is_distinct_from_full_kv_pool(self):
+        from sglang.srt.managers import schedule_policy as native
+        tree = NS(disable=False, evictable_size=lambda: 0,
+                  inc_lock_ref=lambda _: None, dec_lock_ref=lambda _: None)
+        sampling = NS(ignore_eos=False, max_new_tokens=8)
+        running = NS(reqs=[NS(sampling_params=sampling, output_ids=[])])
+        for available, input_budget, chunk_budget, expected, admitted in (
+            (2048, 16, 4, native.AddReqResult.OTHER, 1),
+            (2048, 4, None, native.AddReqResult.OTHER, 1),
+            (12, 16, 4, native.AddReqResult.NO_TOKEN, 0),
+        ):
+            req = NS(extend_input_len=3, host_hit_length=0, prefix_indices=[],
+                     last_node="node", sampling_params=sampling)
+            allocator = NS(available_size=lambda: available)
+            adder = native.PrefillAdder(1, tree, allocator, running, 1., input_budget, chunk_budget, 1)
+            self.assertEqual(adder.add_one_req(req, False), expected)
+            self.assertEqual(len(adder.can_run_list), admitted)
+            self.assertIsNone(adder.new_chunked_req)
+
     def test_window_budget_admits_without_shortening_generation(self):
         from sglang.srt.managers import schedule_policy as native
         original = native.CLIP_MAX_NEW_TOKENS_ESTIMATION
