@@ -20,7 +20,8 @@ def fake_transport_worker(index, replica, policy, table_path, trace, commands, e
                 os._exit(3)
             if payload["sampling"].get("hold"):
                 continue
-            events.put((index, "progress", rid, {"text": "worker"}))
+            if not replica.engine_args.get("completion_only"):
+                events.put((index, "progress", rid, {"text": "worker"}))
             events.put((index, "result", rid, {"text": "worker result", "token_ids": [7],
                         "prompt_tokens": len(payload["prompt"]), "finish_reason": "stop", "metrics": {}}))
         if command == "cancel":
@@ -53,6 +54,16 @@ class IPCTransportTests(unittest.TestCase):
             state = engine.state_dir
             self.assertTrue((state / "programs.sqlite").is_file())
         self.assertFalse(state.exists())
+
+    def test_completion_only_preserves_final_result_without_recording_ttft(self):
+        replica = ReplicaConfig("vllm", "fake", engine_args={"completion_only": True})
+        with InferenceEngine([replica], scheduler_trace=False) as engine:
+            pid = engine.start_session()
+            future = engine.submit(pid, input_ids=[1])
+            result = future.result(10)
+            self.assertEqual(result["token_ids"], [7])
+            self.assertIsNone(result["ttft_seconds"])
+            self.assertTrue(future.progress.empty())
 
     def test_short_balances_long_pins_and_cancel_releases_load(self):
         pid = self.engine.start_session()

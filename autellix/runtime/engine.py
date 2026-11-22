@@ -18,13 +18,16 @@ from .policy import PolicyConfig, ProgramTable
 
 class InferenceFuture(concurrent.futures.Future):
     """Final result plus a bounded, coalesced stream of cumulative outputs."""
-    def __init__(self):
+    def __init__(self, completion_only=False):
         super().__init__()
         self.progress = queue.Queue(maxsize=1)
         self.submitted_at = time.monotonic()
         self.first_token_at = None
+        self.completion_only = completion_only
 
     def update(self, value):
+        if self.completion_only:
+            return
         if self.first_token_at is None and value.get("text"):
             self.first_token_at = time.monotonic()
         try:
@@ -236,7 +239,7 @@ class InferenceEngine:
             json.dumps(context)  # validate before admission or updating load
             self.table.set_context(rid, context)
             self.table.record_submission(rid, pid, context)
-            future = InferenceFuture()
+            future = InferenceFuture(completion_only=self.replicas[index].engine_args.get("completion_only", False))
             self.pending[rid] = (future, pid, index, call_id)
             session["calls"].add(call_id)
             self.loads[index] += 1

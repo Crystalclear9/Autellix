@@ -20,7 +20,7 @@ class VLLMBackend:
                  resident_reserve_only: bool = False, fused_swap: bool = False,
                  publish_activity: bool = True, recompute_on_swap_full: bool = False,
                  resident_decode_headroom: bool = False, qwen3_fused_qk_rope: bool = False,
-                 exact_prefix_cache: bool | None = None, **engine_args):
+                 exact_prefix_cache: bool | None = None, completion_only: bool = False, **engine_args):
         if version("vllm") != "0.6.1":
             raise RuntimeError("this backend requires vllm==0.6.1")
         config = config or PolicyConfig()
@@ -75,6 +75,8 @@ class VLLMBackend:
                                                publish_activity_at_window=publish_activity_at_window and paper,
                                                publish_activity=publish_activity)
         self.engine = LLMEngine.from_engine_args(EngineArgs(model=model, **args))
+        if completion_only:
+            self.engine.step_return_finished_only = True
         self.scheduler = self.engine.scheduler[0]
         prefix_cache = None
         supports_exact_prefix = (args["use_v2_block_manager"] and args["enable_prefix_caching"] and

@@ -64,25 +64,32 @@ class RealInferenceTests(unittest.TestCase):
         config = PolicyConfig(policy="fcfs", schedule_interval=1, overprovision=0)
         sampling = dict(temperature=0, max_tokens=4, ignore_eos=True)
         with tempfile.TemporaryDirectory(prefix="autellix-prefix-") as directory:
+            trace = Path(directory, "schedule.jsonl")
             backend = VLLMBackend(MODEL, str(Path(directory, "state.sqlite")), config,
+                                  trace=str(trace),
                                   dtype=VLLM_DTYPE, gpu_memory_utilization=VLLM_MEMORY,
-                                  max_num_seqs=2, max_model_len=512, max_num_batched_tokens=32,
-                                  num_gpu_blocks_override=64, swap_space=.25, enforce_eager=False,
+                                  max_num_seqs=2, max_model_len=128, max_num_batched_tokens=32,
+                                  block_size=16, num_gpu_blocks_override=8, swap_space=.25, enforce_eager=False,
                                   paper_chunked_prefill=True, refill_idle_slots=True,
                                   qwen3_fused_qk_rope=True)
             try:
-                prompt = backend.tokenize("Remember: the answer is Paris.\n" * 10 + "The capital of France is")
-                self.assertGreater(len(prompt), 64)
+                prompt = backend.tokenize("Remember: the answer is Paris.\n" * 10 + "The capital of France is")[:65]
+                self.assertEqual(len(prompt), 65)
                 for pid in ("first", "second", "serial"):
                     backend.table.open(pid)
                 backend.add("a", "first", prompt, sampling)
                 backend.step()
                 backend.add("b", "second", prompt, sampling)
-                next_seq = backend.scheduler.waiting[0].get_seqs()[0]
+                next_group = backend.scheduler.waiting[0]
+                next_seq = next_group.get_seqs()[0]
                 self.assertEqual(backend.scheduler._autellix_paper.prefix_cache.reusable_tokens(next_seq), 32)
+                self.assertEqual(backend.scheduler.block_manager.get_num_free_gpu_blocks(), 3)
                 outputs = {}
                 while backend.has_work():
                     outputs.update((row["request_id"], row["token_ids"]) for row in backend.step() if row["finished"])
+                steps = (event for event in map(json.loads, trace.read_text().splitlines())
+                         if event["event"] == "plan_step")
+                self.assertTrue(any(set(step["requests"]) == {"a", "b"} for step in steps))
                 backend.add("c", "serial", prompt, sampling)
                 while backend.has_work():
                     outputs.update((row["request_id"], row["token_ids"]) for row in backend.step() if row["finished"])

@@ -62,3 +62,24 @@ class PrefixCacheTests(unittest.TestCase):
         self.assertEqual(self.prefix.reusable_tokens(second), 48)
         self.allocate(second, other)
         self.assertEqual(len(self.manager.get_common_computed_block_ids([second])), 3)
+
+    def test_active_prefix_reduces_new_pages_needed_for_admission(self):
+        from vllm.core.block_manager_v2 import BlockSpaceManagerV2
+        from vllm.core.interfaces import AllocStatus
+        from integrations.vllm.prefix import ChunkedPrefixCache
+
+        self.manager = BlockSpaceManagerV2(16, 8, 8, enable_caching=True)
+        original_can_allocate = self.manager.can_allocate
+        prefix = ChunkedPrefixCache(self.manager)
+        first, initial = self.make_group(1)
+        second, next_group = self.make_group(2)
+        self.allocate(first, initial)
+        # Uncomputed blocks cannot provide reservation credit.
+        self.assertEqual(self.manager.can_allocate(next_group), AllocStatus.LATER)
+        self.manager.mark_blocks_as_computed(initial, 64)
+        self.assertEqual(original_can_allocate(next_group), AllocStatus.LATER)
+        self.assertEqual(self.manager.can_allocate(next_group), AllocStatus.OK)
+        free_before = self.manager.get_num_free_gpu_blocks()
+        self.allocate(second, next_group)
+        self.assertEqual(free_before - self.manager.get_num_free_gpu_blocks(), 1)
+        self.assertEqual(prefix.reusable_tokens(second), 64)

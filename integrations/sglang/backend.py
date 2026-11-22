@@ -13,10 +13,11 @@ from .scheduler import encode_request, run_scheduler_process
 class SGLangBackend:
     """SGLang 0.4.9.post6 with hooks installed in its spawned GPU scheduler."""
 
-    def __init__(self, model, table_path, config=None, trace=None, **engine_args):
+    def __init__(self, model, table_path, config=None, trace=None, completion_only=False, **engine_args):
         if version("sglang") != "0.4.9.post6":
             raise RuntimeError("this integration requires sglang==0.4.9.post6")
         config = config or PolicyConfig()
+        self.completion_only = completion_only
         self.native = engine_args.pop("autellix_native_baseline", False)
         native_defaults = engine_args.pop("autellix_native_defaults", False)
         pp = engine_args.get("pp_size", 1)
@@ -120,7 +121,7 @@ class SGLangBackend:
             sampling["max_new_tokens"] = sampling.pop("max_tokens")
         internal = encode_request(pid, rid)
         inputs = {"input_ids": prompt} if isinstance(prompt, list) else {"text": prompt}
-        request = GenerateReqInput(rid=internal, sampling_params=sampling, stream=True, **inputs)
+        request = GenerateReqInput(rid=internal, sampling_params=sampling, stream=not self.completion_only, **inputs)
 
         async def generate():
             gen = self.engine.tokenizer_manager.generate_request(request, None)
@@ -128,7 +129,8 @@ class SGLangBackend:
                 result = None
                 async for part in gen:
                     result = part
-                    self.updates.append({"request_id": rid, "finished": False, "text": part.get("text", "")})
+                    if not self.completion_only:
+                        self.updates.append({"request_id": rid, "finished": False, "text": part.get("text", "")})
                 if result is None:
                     raise RuntimeError("SGLang returned no output")
                 # Tokenizer output and GPU completion accounting cross separate IPC paths.

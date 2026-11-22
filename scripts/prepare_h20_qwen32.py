@@ -59,9 +59,9 @@ def write_json(path, value):
 
 def write_comparison_plans(model, inputs, destination, device, bfcl_rates,
                            resident_decode_headroom, qwen3_fused_qk_rope, exact_prefix_cache,
-                           programs, seed, graph_context):
+                           programs, seed, graph_context, completion_only, capacity):
     destination.mkdir(parents=True, exist_ok=True)
-    context, capacity, batch, kv_tokens, block = 32768, 8, 2048, 65536, 16
+    context, batch, kv_tokens, block = 32768, 2048, 65536, 16
     vllm = dict(dtype="bfloat16", max_model_len=context, max_num_seqs=capacity,
                 max_num_batched_tokens=batch, block_size=block, tensor_parallel_size=1,
                 num_gpu_blocks_override=kv_tokens // block, gpu_memory_utilization=.93,
@@ -74,6 +74,8 @@ def write_comparison_plans(model, inputs, destination, device, bfcl_rates,
                   max_total_tokens=kv_tokens, chunked_prefill_size=batch, max_prefill_tokens=batch,
                   tp_size=1, pp_size=1, dp_size=1, mem_fraction_static=.93, random_seed=0,
                   autellix_native_defaults=True)
+    if completion_only:
+        vllm["completion_only"] = sglang["completion_only"] = True
     paper = dict(paper_chunked_prefill=True, keep_resident_kv=True, refill_idle_slots=True,
                  resident_reserve_only=True, recompute_on_swap_full=True, fused_swap=True)
     if resident_decode_headroom:
@@ -119,6 +121,10 @@ def main():
     parser.add_argument("--comparison-seed", type=int, default=2026)
     parser.add_argument("--graph-context", type=int,
                         help="override the vLLM CUDA graph context length in comparison plans")
+    parser.add_argument("--completion-only", action="store_true",
+                        help="return final completions and skip intermediate updates for both engines")
+    parser.add_argument("--comparison-batch-size", type=int, default=8,
+                        help="active requests per single-card comparison engine")
     args = parser.parse_args()
     if args.device < 0:
         parser.error("device must be a nonnegative GPU index")
@@ -126,6 +132,8 @@ def main():
         parser.error("BFCL rates must be finite and positive")
     if args.comparison_programs < 1:
         parser.error("--comparison-programs must be positive")
+    if args.comparison_batch_size < 1:
+        parser.error("--comparison-batch-size must be positive")
     if args.graph_context is not None and not 1 <= args.graph_context <= 32768:
         parser.error("--graph-context requires a value from 1 to 32768")
 
@@ -133,7 +141,8 @@ def main():
     if args.comparison_inputs:
         write_comparison_plans(model, args.comparison_inputs, args.run_dir, args.device, args.bfcl_rates,
                                args.resident_decode_headroom, args.qwen3_fused_qk_rope, args.exact_prefix_cache,
-                               args.comparison_programs, args.comparison_seed, args.graph_context)
+                               args.comparison_programs, args.comparison_seed, args.graph_context,
+                               args.completion_only, args.comparison_batch_size)
         return
 
     from transformers import AutoTokenizer

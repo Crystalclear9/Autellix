@@ -1,5 +1,6 @@
 """Computed-prefix accounting for the synchronous vLLM 0.6.1 scheduler."""
 from vllm.core.block.prefix_caching_block import PrefixCachingBlock
+from vllm.core.interfaces import AllocStatus
 from vllm.sequence import SequenceStatus
 from vllm.utils import Device
 
@@ -12,6 +13,7 @@ class ChunkedPrefixCache:
         self.allocator = allocator
         free_block = allocator._free_block_id
         swap_in = manager.swap_in
+        can_allocate = manager.can_allocate
 
         def release(block):
             block_id = block.block_id
@@ -40,10 +42,24 @@ class ChunkedPrefixCache:
                 self._mark(seq, 0, seq.data.get_num_computed_tokens())
             return restored
 
+        def allocate_status(group):
+            status = can_allocate(group)
+            if status != AllocStatus.LATER:
+                return status
+            seq = group.get_seqs(status=SequenceStatus.WAITING)[0]
+            required = (seq.data.get_len() + self.block_size - 1) // self.block_size
+            shared = sum(allocator._block_tracker[block_id].active for block_id in self._waiting_blocks(seq))
+            # Unreferenced cache entries already count as free in the allocator.
+            # Reusing an active block consumes no additional physical page.
+            if required - shared + manager.watermark_blocks <= manager.get_num_free_gpu_blocks():
+                return AllocStatus.OK
+            return status
+
         allocator._free_block_id = release
         allocator.get_computed_block_ids = contiguous
         manager.mark_blocks_as_computed = self.mark
         manager.swap_in = restore
+        manager.can_allocate = allocate_status
 
     def _mark(self, seq, previous_tokens, total_tokens):
         start, end = previous_tokens // self.block_size, total_tokens // self.block_size
@@ -66,16 +82,7 @@ class ChunkedPrefixCache:
         computed = seq.data.get_num_computed_tokens()
         block_size = self.block_size
         if seq.status == SequenceStatus.WAITING:
-            token_ids = seq.get_token_ids()
-            prefix = 0
-            previous = None
-            for start in range(0, len(token_ids) - block_size, block_size):
-                previous = PrefixCachingBlock.hash_block_tokens(
-                    start == 0, previous, token_ids[start:start + block_size])
-                block_id = self.allocator._cached_blocks.get(previous)
-                if block_id is None or not self.allocator.block_is_computed(block_id):
-                    break
-                prefix += block_size
+            prefix = sum(1 for _ in self._waiting_blocks(seq)) * block_size
         elif seq.status == SequenceStatus.RUNNING:
             prefix = len(self.manager.get_common_computed_block_ids([seq])) * block_size
         else:
@@ -83,3 +90,15 @@ class ChunkedPrefixCache:
         # The last prompt block still supplies the logits for the first token.
         last_full_prefix = ((seq.data.get_len() - 1) // block_size) * block_size
         return max(0, min(prefix, last_full_prefix) - computed)
+
+    def _waiting_blocks(self, seq):
+        tokens = seq.get_token_ids()
+        block_size = self.block_size
+        previous = None
+        for start in range(0, len(tokens) - block_size + 1, block_size):
+            previous = PrefixCachingBlock.hash_block_tokens(
+                start == 0, previous, tokens[start:start + block_size])
+            block_id = self.allocator._cached_blocks.get(previous)
+            if block_id is None or not self.allocator.block_is_computed(block_id):
+                break
+            yield block_id
