@@ -42,6 +42,18 @@ class PaperSuiteSummary(unittest.TestCase):
         with self.assertRaises(ValueError):
             summary.summarize(rows)
 
+    def test_first_batch_wait_uses_submission_order(self):
+        row = self.records()[1]
+        earlier = dict(row["calls"][0], submitted_seconds=0.,
+                       metrics=dict(wait_before_first_batch=2., waited=7.))
+        later = dict(earlier, workload_call="1", submitted_seconds=7.,
+                     metrics=dict(wait_before_first_batch=10., waited=10.))
+        row["calls"][:1] = [later, earlier]
+        wait = summary.metrics(row)["first_call_wait_seconds"]
+        self.assertEqual(wait["samples"], 1)
+        self.assertEqual(wait["before_first_batch"]["mean"], 2.)
+        self.assertEqual(wait["between_batches"]["mean"], 5.)
+
     def test_fixed_latency_rate_requires_all_repeats(self):
         first = self.records()
         second = copy.deepcopy(first)
@@ -139,6 +151,9 @@ class PaperSuiteSummary(unittest.TestCase):
         self.assertEqual(pair["baseline"], "sglang/sglang-native")
         self.assertEqual(pair["candidate"], "vllm/autellix")
         self.assertEqual(pair["makespan_change_pct"], -12.5)
+        variant = dict(candidate, condition="plas-experiment", arm="plas", elapsed_seconds=30)
+        pairs = summary.paper_matrix([native, candidate, variant])["comparisons"]
+        self.assertEqual({p["candidate"] for p in pairs}, {"vllm/autellix", "vllm/plas-experiment"})
         candidate["calls"][0]["completion_tokens"] += 1
         with self.assertRaisesRegex(ValueError, "mismatched trace or work"):
             summary.paper_matrix([native, candidate])

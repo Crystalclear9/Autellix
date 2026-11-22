@@ -248,6 +248,8 @@ class RuntimeCall:
     wait_window: float = 0.0
     scheduled: bool = False
     metadata: dict = field(default_factory=dict)
+    decode_steps: int = 0
+    wait_before_first_batch: float | None = None
 
 
 class RuntimeScheduler:
@@ -260,13 +262,14 @@ class RuntimeScheduler:
 
     def __init__(self, table: ProgramTable, config: PolicyConfig | None = None,
                  trace: str | None = None, clock=time.monotonic, publish_waiting_each_step=True,
-                 publish_activity_at_window=False, publish_activity=True):
+                 publish_activity_at_window=False, publish_activity=True, min_decode_steps=0):
         self.table = table
         self.config = config or PolicyConfig()
         self.calls: dict[str, RuntimeCall] = {}
         self.clock = clock
         self.counter = 0
         self.trace = trace
+        self.min_decode_steps = min_decode_steps
         self.publish_activity = publish_activity
         self.publish_activity_at_window = publish_activity_at_window
         self.publish_waiting_each_step = publish_activity and publish_waiting_each_step and not publish_activity_at_window
@@ -310,17 +313,19 @@ class RuntimeScheduler:
         changes = []
         for call in self.calls.values():
             self._wait_until(call, now)
-            if self.config.policy == "fcfs" or (call.queue == 0 and call.quantum > 0):
+            expired = call.quantum <= 0 and call.decode_steps >= self.min_decode_steps
+            if self.config.policy == "fcfs" or (call.queue == 0 and not expired):
                 continue
             service, wait = totals.get(call.pid, (0., 0.))
             starved = (wait + call.wait_window) / max(1e-9, service + call.run_window) >= self.config.beta
-            if call.quantum <= 0 or (call.queue and starved):
-                changes.append((call.queue, call.order, call, starved))
+            if expired or (call.queue and starved):
+                changes.append((call.queue, call.order, call, expired, starved))
         # Requeue simultaneous demotions/promotions in current queue FIFO order.
-        for _, _, call, starved in sorted(changes):
-            if call.quantum <= 0:
+        for _, _, call, expired, starved in sorted(changes):
+            if expired:
                 call.queue = min(call.queue + 1, len(self.config.quanta) - 1)
                 call.quantum = self.config.quanta[call.queue]
+                call.decode_steps = 0
                 self.counter += 1
                 call.order = self.counter
                 self.emit("demote", rid=call.rid, queue=call.queue)
@@ -328,6 +333,7 @@ class RuntimeScheduler:
                 call.queue = 0
                 call.quantum = self.config.quanta[0]
                 call.wait_window = call.run_window = 0.
+                call.decode_steps = 0
                 self.counter += 1
                 call.order = self.counter
                 self.emit("promote", rid=call.rid, queue=0)
@@ -354,15 +360,19 @@ class RuntimeScheduler:
             self._publish(affected)
         self.emit("batch", requests=list(rids))
 
-    def executed(self, rids, seconds: float):
+    def executed(self, rids, seconds: float, *, prefill_count: int | None = None):
         if not math.isfinite(seconds) or seconds < 0:
             raise ValueError("execution time must be finite and nonnegative")
         now = self.clock()
-        for rid in rids:
+        for index, rid in enumerate(rids):
             call = self.calls[rid]
+            if call.wait_before_first_batch is None:
+                call.wait_before_first_batch = call.waited
             call.executed += seconds
             call.run_window += seconds
             call.quantum -= seconds
+            if prefill_count is not None and index >= prefill_count:
+                call.decode_steps += 1
             call.scheduled = False
             call.last_update = now
         if not self.publish_activity_at_window:

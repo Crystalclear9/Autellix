@@ -224,3 +224,39 @@ class RuntimeRegressions(unittest.TestCase):
                 self.assertNotIn("c", window.cohort)
             finally:
                 table.close()
+
+    def test_demotion_waits_for_the_calls_own_decode_steps(self):
+        table = ProgramTable(":memory:")
+        self.addCleanup(table.close)
+        table.open("p")
+        config = PolicyConfig(policy="plas", beta=1e6)
+        ctl = RuntimeScheduler(table, config, min_decode_steps=2)
+        ctl.admit("prompt", "p")
+        ctl.admit("decode", "p")
+
+        for step in range(2):
+            ctl.begin(["prompt", "decode"])
+            ctl.executed(["prompt", "decode"], 1., prefill_count=1)
+            ctl.refresh()
+            self.assertEqual(ctl.calls["prompt"].queue, 0)
+            self.assertEqual(ctl.calls["decode"].queue, step)
+        self.assertEqual(ctl.calls["decode"].decode_steps, 0)
+        self.assertEqual(ctl.finish("prompt")["executed"], 2.)
+        self.assertEqual(table.snapshot()["p"][0], 2.)
+
+    def test_first_batch_wait_is_recorded_separately_from_later_pauses(self):
+        table = ProgramTable(":memory:")
+        self.addCleanup(table.close)
+        table.open("p")
+        clock = [0.]
+        ctl = RuntimeScheduler(table, clock=lambda: clock[0], publish_activity=False)
+        ctl.admit("r", "p")
+        for before, after in ((2., 3.), (7., 8.)):
+            clock[0] = before
+            ctl.begin(["r"])
+            clock[0] = after
+            ctl.executed(["r"], 1.)
+
+        metrics = ctl.finish("r")
+        self.assertEqual(metrics["wait_before_first_batch"], 2.)
+        self.assertEqual(metrics["waited"] - metrics["wait_before_first_batch"], 4.)

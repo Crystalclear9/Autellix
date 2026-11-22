@@ -60,7 +60,7 @@ def write_json(path, value):
 def write_comparison_plans(model, inputs, destination, device, bfcl_rates,
                            resident_decode_headroom, qwen3_fused_qk_rope, exact_prefix_cache,
                            programs, seed, graph_context, completion_only, capacity, fcfs_control,
-                           *, repeats=1, quantum_scale=16, beta=8.0):
+                           *, repeats=1, quantum_scale=16, beta=8.0, min_decode_steps=0):
     destination.mkdir(parents=True, exist_ok=True)
     context, batch, kv_tokens, block = 32768, 2048, 65536, 16
     vllm = dict(dtype="bfloat16", max_model_len=context, max_num_seqs=capacity,
@@ -90,6 +90,9 @@ def write_comparison_plans(model, inputs, destination, device, bfcl_rates,
     vllm_cases = [native, plas]
     if fcfs_control:
         vllm_cases.append(dict(plas, name="fcfs-control", policy="fcfs"))
+    if min_decode_steps:
+        vllm_cases.append(dict(plas, name="plas-decode-window",
+                               engine_args=dict(paper, min_decode_steps=min_decode_steps)))
     for family, rates, figures in (("bfcl", bfcl_rates, [12, 13]), ("sharegpt", [None], [16])):
         trace = (inputs / f"qwen32-{family}-trace.json").resolve(strict=True)
         label = f"qwen32-{family}"
@@ -139,6 +142,8 @@ def main():
                         help="scale PLAS time slices in vLLM comparison plans")
     parser.add_argument("--comparison-beta", type=float, default=8,
                         help="set the PLAS wait-to-service ratio for priority promotion")
+    parser.add_argument("--comparison-min-decode-steps", type=int, default=0,
+                        help="add a PLAS comparison with this many decode steps required before demotion")
     args = parser.parse_args()
     if args.device < 0:
         parser.error("device must be a nonnegative GPU index")
@@ -150,6 +155,8 @@ def main():
         parser.error("--comparison-batch-size must be positive")
     if args.comparison_repeats < 1:
         parser.error("--comparison-repeats must be positive")
+    if args.comparison_min_decode_steps < 0:
+        parser.error("--comparison-min-decode-steps must be nonnegative")
     for option, value in (("--comparison-quantum-scale", args.comparison_quantum_scale),
                           ("--comparison-beta", args.comparison_beta)):
         if not math.isfinite(value) or value <= 0:
@@ -164,7 +171,7 @@ def main():
                                args.comparison_programs, args.comparison_seed, args.graph_context,
                                args.completion_only, args.comparison_batch_size, args.fcfs_control,
                                repeats=args.comparison_repeats, quantum_scale=args.comparison_quantum_scale,
-                               beta=args.comparison_beta)
+                               beta=args.comparison_beta, min_decode_steps=args.comparison_min_decode_steps)
         return
 
     from transformers import AutoTokenizer

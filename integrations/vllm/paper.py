@@ -36,17 +36,19 @@ class PaperPlan:
             # this does not change admission priority or the selected batch.
             groups.sort(key=lambda g: not g.seq_group.is_prefill())
             s._autellix_execution = [g.seq_group.request_id for g in groups]
-            s._autellix_is_prefill = not any(not g.seq_group.is_prefill() for g in groups)
+            s._autellix_num_prefill = sum(g.seq_group.is_prefill() for g in groups)
+            s._autellix_is_prefill = s._autellix_num_prefill == len(groups)
             # vLLM's statistics consume logical progress, including cached tokens.
             num_tokens = sum(g.token_chunk_size for g in groups)
             uncached_tokens = sum(uncached_counts.get(g.seq_group.request_id, g.token_chunk_size)
                                   for g in groups) if uncached_counts else num_tokens
             ctl.emit("plan_step", requests=s._autellix_execution,
-                     decode=not s._autellix_is_prefill, remaining=window.remaining, tokens=uncached_tokens)
+                     decode=not s._autellix_is_prefill, prefill_count=s._autellix_num_prefill,
+                     remaining=window.remaining, tokens=uncached_tokens)
             ctl.begin(s._autellix_execution)
             return SchedulerOutputs(
                 scheduled_seq_groups=groups,
-                num_prefill_groups=sum(g.seq_group.is_prefill() for g in groups),
+                num_prefill_groups=s._autellix_num_prefill,
                 num_batched_tokens=num_tokens,
                 blocks_to_swap_in=incoming, blocks_to_swap_out=outgoing,
                 blocks_to_copy=copies, ignored_seq_groups=ignored,

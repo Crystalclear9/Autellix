@@ -128,6 +128,13 @@ PLAS 相同。BFCL 的独立 12 程序组使用 `--comparison-programs 12 --comp
 `--comparison-repeats` 让两个后端使用相同的连续种子，并轮换每次的组内执行顺序。
 在独立运行目录使用 `--comparison-quantum-scale` 或 `--comparison-beta` 做单因素对照，分别改变
 PLAS 时间片长度和等待时间与服务时间的提级比例，保持原生组与 GPU 预算相同。
+BFCL 的 `--bfcl-rates .12 .24 .48` 让同一批程序在三个到达率下分别回放。用
+`summarize_paper_suite.py --slo .20` 读取原始检查点，可以比较达到 200 毫秒/token 时的到达
+窗口完成率。带调度记账的组还记录 `first_call_wait_seconds`，把每个程序首轮调用的
+排队拆成首次 GPU 批次前的等待和首次执行后的累计等待。
+`--comparison-min-decode-steps 8` 额外生成 `plas-decode-window` 对照。时间片耗尽后，
+调用在当前队列至少实际解码 8 步，才可在窗口边界降级。程序服务时间按原来的 GPU
+执行时间累计，原始 PLAS 组也会在同一个计划中执行。
 
 同一张卡依次运行匹配 Triton 配置的 SGLang、Autellix PLAS 或 ATLAS，以及采用上游默认优化的
 SGLang。功能验收使用 `check_prefill_priority_gpu.py --modern --mem-fraction-static .88`，

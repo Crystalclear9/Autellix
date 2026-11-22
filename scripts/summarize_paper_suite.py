@@ -32,6 +32,24 @@ def paper_token_latencies(row):
     return token_times, paper_metric
 
 
+def first_call_waits(calls):
+    first_calls = {}
+    for call in calls:
+        if "submitted_seconds" not in call:
+            continue
+        pid = call["workload_program"]
+        if pid not in first_calls or call["submitted_seconds"] < first_calls[pid]["submitted_seconds"]:
+            first_calls[pid] = call
+    waits = [call.get("metrics", {}) for call in first_calls.values()]
+    waits = [m for m in waits if m.get("wait_before_first_batch") is not None and m.get("waited") is not None]
+    if not waits:
+        return {}
+    return {"first_call_wait_seconds": dict(
+        samples=len(waits),
+        before_first_batch=distribution(m["wait_before_first_batch"] for m in waits),
+        between_batches=distribution(m["waited"] - m["wait_before_first_batch"] for m in waits))}
+
+
 def metrics(row):
     kind = row["plan"].get("workload_kind", "sharegpt")
     token_times, paper_metric = paper_token_latencies(row)
@@ -80,7 +98,8 @@ def metrics(row):
                                                 if at <= horizon],
                 maximum_submission_lag_seconds=max(row["first_submission_lag_seconds"].values()),
                 arrival_quartiles=quartiles, backlog_checkpoints=checkpoints,
-                calls_by_engine=dict(Counter(c["engine_id"] for c in row["calls"])), gpu=gpu, **cache)
+                calls_by_engine=dict(Counter(c["engine_id"] for c in row["calls"])), gpu=gpu,
+                **cache, **first_call_waits(row["calls"]))
 
 
 def paper_matrix(records, slo_targets=DEFAULT_SLO_TARGETS, *, strict=True):
@@ -105,7 +124,7 @@ def paper_matrix(records, slo_targets=DEFAULT_SLO_TARGETS, *, strict=True):
         make = row["elapsed_seconds"]
         horizon = row["arrival_horizon_seconds"]
         point = dict(figures=figures, workload=plan["workload_family"], backend=backend,
-                     condition=row["condition"], model=row["model"], devices=row["device_groups"],
+                     condition=row["condition"], policy=row.get("arm"), model=row["model"], devices=row["device_groups"],
                      resources=dict(zip(("dtype", "context_tokens", "batch_size", "kv_tokens"), resources)),
                      versions=row["versions"], engine_args=opts,
                      programs=len(row["programs"]), rate=row["rate"], seed=row["seed"],
@@ -114,7 +133,8 @@ def paper_matrix(records, slo_targets=DEFAULT_SLO_TARGETS, *, strict=True):
                      token_latency=distribution(latencies.values()), output_tokens=row["completion_tokens"],
                      completed_programs_per_second=len(row["programs"]) / make,
                      arrival_window_completed_programs_per_second=(row["completions_during_arrivals"] / horizon
-                                                                   if horizon else None))
+                                                                   if horizon else None),
+                     **first_call_waits(row["calls"]))
         trials.append(point)
         slot = at_load[config, row["rate"], row["seed"]]
         if arm in slot:
@@ -132,10 +152,9 @@ def paper_matrix(records, slo_targets=DEFAULT_SLO_TARGETS, *, strict=True):
             if baseline_arm not in slot:
                 continue
             reference_lengths, reference = slot[baseline_arm]
-            for arm in ("vllm/autellix", "sglang/autellix"):
-                if arm not in slot:
+            for arm, (lengths, point) in slot.items():
+                if point["condition"] != "autellix" and point["policy"] not in {"plas", "atlas"}:
                     continue
-                lengths, point = slot[arm]
                 reason = None
                 if point["trace_sha256"] != reference["trace_sha256"] or lengths != reference_lengths:
                     reason = "mismatched trace or work"

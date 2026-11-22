@@ -20,7 +20,8 @@ class VLLMBackend:
                  resident_reserve_only: bool = False, fused_swap: bool = False,
                  publish_activity: bool = True, recompute_on_swap_full: bool = False,
                  resident_decode_headroom: bool = False, qwen3_fused_qk_rope: bool = False,
-                 exact_prefix_cache: bool | None = None, completion_only: bool = False, **engine_args):
+                 exact_prefix_cache: bool | None = None, completion_only: bool = False,
+                 min_decode_steps: int = 0, **engine_args):
         if version("vllm") != "0.6.1":
             raise RuntimeError("this backend requires vllm==0.6.1")
         config = config or PolicyConfig()
@@ -29,6 +30,8 @@ class VLLMBackend:
             raise ValueError("invalid autellix_mode")
         native = mode != "autellix"
         paper = not native and config.implementation == "paper"
+        if type(min_decode_steps) is not int or min_decode_steps < 0 or (min_decode_steps and not paper):
+            raise ValueError("min_decode_steps requires vLLM paper mode and a nonnegative integer")
         if engine_args.get("pipeline_parallel_size", 1) != 1:
             raise ValueError("pipeline parallelism is not supported; use tensor parallelism")
         tp = engine_args.get("tensor_parallel_size", 1)
@@ -73,7 +76,8 @@ class VLLMBackend:
             self.controller = RuntimeScheduler(self.table, config, trace,
                                                publish_waiting_each_step=publish_waiting_each_step,
                                                publish_activity_at_window=publish_activity_at_window and paper,
-                                               publish_activity=publish_activity)
+                                               publish_activity=publish_activity,
+                                               min_decode_steps=min_decode_steps)
         self.engine = LLMEngine.from_engine_args(EngineArgs(model=model, **args))
         if completion_only:
             self.engine.step_return_finished_only = True
@@ -171,7 +175,10 @@ class VLLMBackend:
             end.synchronize()
             if rids:
                 seconds = start.elapsed_time(end) / 1000.
-                controller.executed(rids, seconds)
+                # PaperPlan orders prefills before decodes. Service includes the
+                # whole forward, even when demotion requires decode progress.
+                prefill_count = scheduler._autellix_num_prefill if min_decode_steps else None
+                controller.executed(rids, seconds, prefill_count=prefill_count)
                 if measure_timing:
                     controller.emit("model_phase_time", phase=scheduler._autellix_timed_phase,
                                     seconds=seconds, requests=rids)
