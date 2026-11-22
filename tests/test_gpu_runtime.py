@@ -44,6 +44,34 @@ class RealInferenceTests(unittest.TestCase):
         self.assertEqual(*outputs)
 
     @unittest.skipUnless(BACKEND == "vllm", "requires vllm")
+    def test_full_prefill_chunk_preserves_resident_decode(self):
+        args = dict(max_model_len=512, max_num_batched_tokens=32, max_num_seqs=2,
+                    gpu_memory_utilization=.35, swap_space=.25, dtype="half",
+                    paper_chunked_prefill=True, keep_resident_kv=True)
+        config = PolicyConfig(policy="plas", boundaries=(0, 1e-8, math.inf), quanta=(1e6, 1e6),
+                              schedule_interval=4, overprovision=0, beta=1e12)
+        sampling = dict(temperature=0, ignore_eos=True)
+        with InferenceEngine([ReplicaConfig("vllm", MODEL, device=DEVICE, engine_args=args)], policy=config) as engine:
+            resident_pid, new_pid = engine.start_session(), engine.start_session()
+            engine.submit(resident_pid, input_ids=[21], sampling=dict(sampling, max_tokens=1)).result(180)
+            resident = engine.submit(resident_pid, input_ids=[25] * 16, sampling=dict(sampling, max_tokens=256))
+            resident.progress.get(timeout=180)
+            new = engine.submit(new_pid, input_ids=[37] * 84, sampling=dict(sampling, max_tokens=4))
+            resident_result, new_result = resident.result(180), new.result(180)
+            self.assertEqual([resident_result["completion_tokens"], new_result["completion_tokens"]], [256, 4])
+            old_rid, new_rid = resident_result["request_id"], new_result["request_id"]
+            events = list(map(json.loads, (engine.state_dir / "replica-0.jsonl").read_text().splitlines()))
+            start = next(i for i, event in enumerate(events) if event["event"] == "schedule_window"
+                         and event["requests"] == [new_rid, old_rid])
+            stop = next((i for i in range(start + 1, len(events)) if events[i]["event"] == "schedule_window"), len(events))
+            steps = [e for e in events[start:stop] if e["event"] == "plan_step"]
+            self.assertEqual([e["tokens"] for e in steps[:2]], [32, 32])
+            self.assertEqual(steps[2]["requests"], [new_rid, old_rid])
+            self.assertTrue(steps[2]["decode"])
+            for pid in (resident_pid, new_pid):
+                engine.end_session(pid)
+
+    @unittest.skipUnless(BACKEND == "vllm", "requires vllm")
     def test_oversized_prefill_does_not_kill_replica(self):
         args = dict(max_model_len=512, max_num_batched_tokens=32, max_num_seqs=1,
                     gpu_memory_utilization=.35, swap_space=.25, dtype="half")

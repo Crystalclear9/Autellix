@@ -141,14 +141,15 @@ class PaperPlan:
                 if chunk == 0:
                     if not groups:
                         raise RuntimeError("token budget must allow one prefix-cache block")
-                    window.retain_prefix(index)
+                    # This forward consumed the chunk budget. The remaining
+                    # cohort can still fit in a later forward of this window.
                     break
                 partial = chunk < count
                 count = chunk
             if tokens + count > s.scheduler_config.max_num_batched_tokens:
-                if groups:
+                if groups and not self.chunked_prefill:
                     window.retain_prefix(index)
-                break  # Algorithm 1: stop at the first request that cannot fit.
+                break
             lookahead = window.remaining if rid not in self.reserved_slots and not partial else 0
             status = allocation_status(group, lookahead)
             if status != AllocStatus.OK:

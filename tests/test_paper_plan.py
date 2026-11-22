@@ -1,5 +1,4 @@
 """Admission semantics independent of native phase-preference heuristics."""
-import sys
 import unittest
 from collections import deque
 from types import SimpleNamespace as NS
@@ -24,11 +23,19 @@ class Group:
         pass
 
 
+class Budget:
+    def __init__(self, tokens, seqs):
+        self.remaining = tokens
+
+    def add_num_batched_tokens(self, rid, count):
+        self.remaining -= count
+
+
 class PaperPlanTests(unittest.TestCase):
     def setUp(self):
         self.status = NS(OK=0, LATER=1, NEVER=2)
         self.modules = patch.dict("sys.modules", {
-            "vllm.core.scheduler": NS(SchedulerOutputs=NS, ScheduledSequenceGroup=NS),
+            "vllm.core.scheduler": NS(SchedulerOutputs=NS, ScheduledSequenceGroup=NS, SchedulingBudget=Budget),
             "vllm.core.interfaces": NS(AllocStatus=self.status),
             "vllm.sequence": NS(SequenceStatus=NS(FINISHED_IGNORED=9))})
         self.modules.start()
@@ -238,13 +245,6 @@ class PaperPlanTests(unittest.TestCase):
         self.assertEqual(len(self.refreshes), 1)
 
     def test_chunked_prefill_can_exceed_single_iteration_token_budget(self):
-        class Budget:
-            def __init__(self, tokens, seqs):
-                self.remaining = tokens
-
-            def add_num_batched_tokens(self, rid, count):
-                self.remaining -= count
-
         self.ctl.config = PolicyConfig(schedule_interval=3, overprovision=0)
         self.priority.update(long=0)
         group = Group("long", True)
@@ -255,14 +255,69 @@ class PaperPlanTests(unittest.TestCase):
         self.s.scheduler_config = NS(max_num_batched_tokens=4, max_num_seqs=1)
         self.s._get_num_new_tokens = lambda group, status, chunk, budget: min(remaining, budget.remaining)
         plan = PaperPlan(self.s, self.ctl, 1, chunked_prefill=True)
-        with patch.object(sys.modules["vllm.core.scheduler"], "SchedulingBudget", Budget, create=True):
-            for count in (4, 4, 2):
-                out = plan.next_step()
-                self.assertEqual(out.num_batched_tokens, count)
-                self.assertEqual("long" in plan.reserved_slots, count == 2)
-                self.assertEqual("long" in plan.prepared, count == 2)
-                remaining -= count
+        for count in (4, 4, 2):
+            out = plan.next_step()
+            self.assertEqual(out.num_batched_tokens, count)
+            self.assertEqual("long" in plan.reserved_slots, count == 2)
+            self.assertEqual("long" in plan.prepared, count == 2)
+            remaining -= count
         self.assertEqual(len(self.refreshes), 1)
+
+    def test_chunk_budget_keeps_pending_prefill_and_resident_decode_in_window(self):
+        self.ctl.config = PolicyConfig(schedule_interval=3, overprovision=0)
+        self.priority.update(first=0, pending=1, running=2)
+        first, pending, running = Group("first", True), Group("pending", True), Group("running")
+        first.seq.status = pending.seq.status = "waiting"
+        pending.seq.data.get_num_uncomputed_tokens = lambda: 1
+        self.s.waiting.extend([first, pending])
+        self.s.running.append(running)
+        self.s.scheduler_config = NS(max_num_batched_tokens=4, max_num_seqs=3)
+        self.s._get_num_new_tokens = lambda group, status, chunk, budget: min(
+            group.seq.data.get_num_uncomputed_tokens(), budget.remaining)
+        plan = PaperPlan(self.s, self.ctl, 3, chunked_prefill=True)
+
+        first_step = plan.next_step()
+        self.assertEqual([g.seq_group for g in first_step.scheduled_seq_groups], [first])
+        self.assertEqual(plan.window.cohort, ["first", "pending", "running"])
+        first.prefill = False
+        second_step = plan.next_step()
+        self.assertEqual([g.seq_group for g in second_step.scheduled_seq_groups], [pending, first, running])
+        self.assertFalse(second_step.blocks_to_swap_out)
+        self.assertEqual(len(self.refreshes), 1)
+
+    def test_full_prefill_budget_keeps_resident_decode_in_window(self):
+        self.ctl.config = PolicyConfig(schedule_interval=3, overprovision=0)
+        self.priority.update(first=0, running=1)
+        first, running = Group("first", True), Group("running")
+        first.seq.status = "waiting"
+        self.s.waiting.append(first)
+        self.s.running.append(running)
+        self.s.scheduler_config = NS(max_num_batched_tokens=4, max_num_seqs=2)
+        self.s._get_num_new_tokens = lambda group, status, chunk, budget: budget.remaining
+        plan = PaperPlan(self.s, self.ctl, 2, chunked_prefill=True)
+
+        plan.next_step()
+        first.prefill = False
+        out = plan.next_step()
+        self.assertFalse(out.blocks_to_swap_out)
+        self.assertEqual([g.seq_group for g in out.scheduled_seq_groups], [first, running])
+
+    def test_chunked_plan_still_shrinks_at_true_kv_pressure(self):
+        self.ctl.config = PolicyConfig(schedule_interval=3, overprovision=0)
+        self.priority.update(first=0, blocked=1)
+        first, blocked = Group("first"), Group("blocked", True)
+        blocked.seq.status = "waiting"
+        self.s.running.append(first)
+        self.s.waiting.append(blocked)
+        self.s.scheduler_config.max_num_seqs = 2
+        self.s._get_num_new_tokens = lambda *args: 4
+        self.s.block_manager.can_allocate = lambda _: self.status.LATER
+        plan = PaperPlan(self.s, self.ctl, 2, chunked_prefill=True)
+
+        out = plan.next_step()
+        self.assertEqual([g.seq_group for g in out.scheduled_seq_groups], [first])
+        self.assertEqual(plan.window.cohort, ["first"])
+        self.assertTrue(plan.window.capacity_limited)
 
     def test_oversized_prefill_rejected_before_program_admission(self):
         from integrations.vllm.backend import VLLMBackend

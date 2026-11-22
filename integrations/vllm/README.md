@@ -19,6 +19,8 @@
 
 混合 prefill/decode 执行按程序优先级选批。`paper_chunked_prefill=true` 复用 vLLM 的 token 预算与前缀缓存块对齐规则，把长输入分到多个迭代。最后一段完成后才预留后续 decode 的 KV 槽位。默认整段 prefill，`max_num_batched_tokens` 需覆盖单条输入。预备请求占用 KV 显存，成为活动请求后参与 decode。
 
+分块 prefill 耗尽当步 token 预算时，待接纳请求和已入选的 decode 留在窗口内。实际 KV 空间不足时，调度窗口按优先级收缩。
+
 抢占沿用原生 block 所有权转换。换出和换入分开处理，保留生成序列；实际批量传输由 `autellix/runtime/swap.py` 完成。预留窗口所需显存不足时会明确报错，需调整模型、显存预算、批次或窗口长度。
 
 ## 配置
