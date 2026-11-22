@@ -18,6 +18,8 @@ from autellix.runtime import InferenceEngine, ReplicaConfig, PolicyConfig
 BACKEND = os.environ.get("AUTELLIX_GPU_BACKEND")
 MODEL = os.environ.get("AUTELLIX_TEST_MODEL")
 DEVICE = os.environ.get("AUTELLIX_TEST_DEVICE", "0")
+VLLM_MEMORY = float(os.environ.get("AUTELLIX_TEST_VLLM_MEMORY", ".35"))
+VLLM_DTYPE = os.environ.get("AUTELLIX_TEST_VLLM_DTYPE", "half")
 
 
 @unittest.skipUnless(BACKEND and MODEL, "requires AUTELLIX_GPU_BACKEND and AUTELLIX_TEST_MODEL")
@@ -30,7 +32,7 @@ class RealInferenceTests(unittest.TestCase):
         policy = PolicyConfig(schedule_interval=4, overprovision=0)
         for chunked, budget in ((False, 128), (True, 32)):
             args = dict(max_model_len=512, max_num_batched_tokens=budget, max_num_seqs=1,
-                        gpu_memory_utilization=.35, swap_space=.25, dtype="half",
+                        gpu_memory_utilization=VLLM_MEMORY, swap_space=.25, dtype=VLLM_DTYPE,
                         enforce_eager=False, paper_chunked_prefill=chunked)
             with InferenceEngine([ReplicaConfig("vllm", MODEL, device=DEVICE, engine_args=args)], policy=policy) as engine:
                 pid = engine.start_session()
@@ -123,8 +125,8 @@ class RealInferenceTests(unittest.TestCase):
     def test_real_generation_preemption_and_session_inheritance(self):
         recompute = BACKEND == "vllm" and os.environ.get("AUTELLIX_TEST_RECOMPUTE") == "1"
         if BACKEND == "vllm":
-            args = dict(max_model_len=512, max_num_seqs=1, gpu_memory_utilization=.35,
-                        swap_space=.25, dtype="half", enforce_eager=True,
+            args = dict(max_model_len=512, max_num_seqs=1, gpu_memory_utilization=VLLM_MEMORY,
+                        swap_space=.25, dtype=VLLM_DTYPE, enforce_eager=True,
                         fused_swap=os.environ.get("AUTELLIX_TEST_FUSED_SWAP") == "1")
             if recompute:
                 args.update(swap_space=0, recompute_on_swap_full=True)

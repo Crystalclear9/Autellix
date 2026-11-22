@@ -22,6 +22,10 @@ AUTELLIX_GPU_BACKEND=vllm AUTELLIX_TEST_MODEL=/absolute/path/to/model \
 
 SGLang 将后端变量改为 `sglang`。`AUTELLIX_TEST_REPLICAS=1` 验证双进程路由和取消。`AUTELLIX_TEST_CUDA_SWAP=1` 验证实际 KV 传输。`AUTELLIX_TEST_IMPLEMENTATION=compat` 验证旧模式。
 
+vLLM 的分块 prefill 和抢占恢复回归可通过 `AUTELLIX_TEST_VLLM_MEMORY=.86`、
+`AUTELLIX_TEST_VLLM_DTYPE=bfloat16` 使用单卡 Qwen3-32B。用 `AUTELLIX_TEST_DEVICE`
+指定物理卡，`AUTELLIX_TEST_FUSED_SWAP=1` 走批量 CUDA KV 搬运。
+
 `AUTELLIX_TEST_TP=1` 验证 vLLM 张量并行中的抢占和 KV 恢复。用 `AUTELLIX_TEST_TP_DEVICES=0,2` 指定两张物理卡。`AUTELLIX_TEST_TP_NATIVE_SWAP=1` 使用原生 KV 搬运执行同一回归。
 
 三张 P40 的流水线回归：
