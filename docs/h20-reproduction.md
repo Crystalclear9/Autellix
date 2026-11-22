@@ -174,10 +174,9 @@ SHA-256 已核对，记录位于 `data/autellix/import/migration-verification.js
 分别为 4 和 2，图 15 比较独立引擎扩容。上述 GPU 结果与单卡 8B、CPU 模拟分别汇总。
 [Autellix 论文，第 6 节](https://arxiv.org/html/2502.13965v1#S6)
 
-`measured-comparisons.json` 以轨迹哈希、逐调用 token 数以及两端共同的 GPU、上下文、
-批次和 KV 容量核对配对，在每个图 12、13、16 的运行计划退出后更新。汇总包含
-makespan、程序完成率、归一化程序延迟，以及对应的引擎参数。跨目录的已完成试验可用
-`summarize_paper_suite.py --matrix-only` 汇总。
+每组完成后直接保存原始结果和续跑检查点。跨目录核对时，`summarize_paper_suite.py --matrix-only`
+以轨迹哈希、逐调用 token 数及共同的 GPU、上下文、批次和 KV 容量核对配对，再计算
+makespan、程序完成率和归一化程序延迟。
 
 单卡矩阵的失败尝试保存在 `*-failures.json`。显卡空闲时继续执行其余组，
 下次续跑从尚未产生成功记录的组恢复。计时汇总的退出码单独写入 `exit-codes.json`。

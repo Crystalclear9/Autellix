@@ -8,7 +8,6 @@ import subprocess
 import sys
 
 from run_h20_paper import WORKLOADS
-from summarize_paper_suite import paper_matrix
 
 
 FIGURES = (4, 5, 6, 7, 11, 12, 13, 14, 15, 16, 17, 18, 19)
@@ -24,14 +23,6 @@ def write_json(path, value):
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(value, indent=2), encoding="utf-8")
     tmp.replace(path)
-
-
-def summarize_measured(out, manifest):
-    results = [out / f"{name}.json" for name, figures in manifest["gpu_plans"].items()
-               if set(figures) & {12, 13, 16} and (out / f"{name}.json").exists()]
-    if results:
-        rows = (row for path in results for row in json.loads(path.read_text(encoding="utf-8")))
-        write_json(out / "measured-comparisons.json", paper_matrix(rows, strict=False))
 
 
 def cases_for(backend, family):
@@ -286,8 +277,6 @@ def main():
         exe, run_env = interpreters[backend]
         gpu_run(name, [exe, str(root / "scripts/run_sglang_matrix.py"), "--plan", str(out / (name + "-plan.json")),
                        "--output", str(out / (name + ".json")), "--resume", "--keep-going"], run_env)
-        if set(plan["paper_figures"]) & {12, 13, 16}:
-            summarize_measured(out, manifest)
         if plan["scheduler_trace"] and (out / (name + ".json")).exists():
             with (out / (name + "-timing.log")).open("w", encoding="utf-8") as log:
                 statuses[f"{name}-timing"] = subprocess.run(
