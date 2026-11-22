@@ -59,7 +59,7 @@ def write_json(path, value):
 
 def write_comparison_plans(model, inputs, destination, device, bfcl_rates,
                            resident_decode_headroom, qwen3_fused_qk_rope, exact_prefix_cache,
-                           programs, seed, graph_context, completion_only, capacity):
+                           programs, seed, graph_context, completion_only, capacity, fcfs_control):
     destination.mkdir(parents=True, exist_ok=True)
     context, batch, kv_tokens, block = 32768, 2048, 65536, 16
     vllm = dict(dtype="bfloat16", max_model_len=context, max_num_seqs=capacity,
@@ -84,6 +84,9 @@ def write_comparison_plans(model, inputs, destination, device, bfcl_rates,
                   engine_args=dict(preemption_mode=None))
     plas = dict(name="autellix", policy="plas", reserve=1, interval=8, quantum_scale=16,
                 boundary_scale=128, engine_args=paper)
+    vllm_cases = [native, plas]
+    if fcfs_control:
+        vllm_cases.append(dict(plas, name="fcfs-control", policy="fcfs"))
     for family, rates, figures in (("bfcl", bfcl_rates, [12, 13]), ("sharegpt", [None], [16])):
         trace = (inputs / f"qwen32-{family}-trace.json").resolve(strict=True)
         label = f"qwen32-{family}"
@@ -94,7 +97,7 @@ def write_comparison_plans(model, inputs, destination, device, bfcl_rates,
                       compact_calls=True, request_timeout=3600, scheduler_trace=False)
         capture = graph_context or (8192 if family == "sharegpt" else context)
         write_json(destination / f"{label}-vllm-plan.json", dict(
-            common, backend="vllm", engine_args=dict(vllm, max_seq_len_to_capture=capture), cases=[native, plas]))
+            common, backend="vllm", engine_args=dict(vllm, max_seq_len_to_capture=capture), cases=vllm_cases))
         write_json(destination / f"{label}-sglang-plan.json", dict(
             common, backend="sglang", engine_args=sglang,
             cases=[dict(name="sglang-native", policy="sglang-native")]))
@@ -125,6 +128,8 @@ def main():
                         help="return final completions and skip intermediate updates for both engines")
     parser.add_argument("--comparison-batch-size", type=int, default=8,
                         help="active requests per single-card comparison engine")
+    parser.add_argument("--fcfs-control", action="store_true",
+                        help="also run the Autellix execution path with FCFS priorities")
     args = parser.parse_args()
     if args.device < 0:
         parser.error("device must be a nonnegative GPU index")
@@ -142,7 +147,7 @@ def main():
         write_comparison_plans(model, args.comparison_inputs, args.run_dir, args.device, args.bfcl_rates,
                                args.resident_decode_headroom, args.qwen3_fused_qk_rope, args.exact_prefix_cache,
                                args.comparison_programs, args.comparison_seed, args.graph_context,
-                               args.completion_only, args.comparison_batch_size)
+                               args.completion_only, args.comparison_batch_size, args.fcfs_control)
         return
 
     from transformers import AutoTokenizer

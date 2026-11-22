@@ -122,6 +122,9 @@ ShareGPT 的 24 程序复测使用 `--comparison-programs 24 --comparison-seed 2
 `--graph-context` 按同一轨迹对照。两个工作负载的模型上下文上限均为 32,768 token。
 `--comparison-batch-size` 同时调整两个引擎的活动批次上限。用 `--completion-only`
 比较非流式程序回放，两个引擎均直接返回最终结果，程序级延迟的计算维持一致。
+`--fcfs-control` 在同一 Autellix 执行路径上增加 FCFS 对照，前缀缓存、候补和窗口设置与
+PLAS 相同。BFCL 的独立 12 程序组使用 `--comparison-programs 12 --comparison-seed 2089
+--comparison-batch-size 4 --bfcl-rates .48 --resident-decode-headroom --fcfs-control`。
 
 同一张卡依次运行匹配 Triton 配置的 SGLang、Autellix PLAS 或 ATLAS，以及采用上游默认优化的
 SGLang。功能验收使用 `check_prefill_priority_gpu.py --modern --mem-fraction-static .88`，

@@ -125,6 +125,7 @@ def paper_matrix(records, slo_targets=DEFAULT_SLO_TARGETS, *, strict=True):
 
     pairs, unmatched = [], []
     reference_arms = ("vllm/vllm", "vllm/vllm-opt", "vllm/vllm-opt-multistep", "vllm/fcfs-combined",
+                      "vllm/fcfs-control",
                       "vllm/mlfq", "sglang/sglang-native", "sglang/fcfs-combined", "sglang/mlfq")
     for slot in at_load.values():
         for baseline_arm in reference_arms:
