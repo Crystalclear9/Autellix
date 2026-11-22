@@ -5,7 +5,9 @@ import hashlib
 import json
 import os
 import random
+import subprocess
 import time
+import traceback
 from importlib.metadata import version
 from pathlib import Path
 
@@ -47,14 +49,24 @@ def completed_trials(records, plan, versions):
     return completed
 
 
-def main():
+def write_checkpoint(path, records):
+    checkpoint = path.with_suffix(path.suffix + ".tmp")
+    checkpoint.write_text(json.dumps(records, indent=2), encoding="utf-8")
+    checkpoint.replace(path)
+
+
+def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--plan", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--resume", action="store_true", help="reuse completed trials with unchanged inputs and settings")
-    args = parser.parse_args()
+    parser.add_argument("--keep-going", action="store_true", help="record failed trials and continue on the assigned GPU")
+    args = parser.parse_args(argv)
     plan = json.loads(Path(args.plan).read_text())
     backend = plan.get("backend", "sglang")
+    device = str(plan.get("device", "0"))
+    if args.keep_going and not device.isdecimal():
+        parser.error("--keep-going requires one physical GPU index")
     if "layer_partition" in plan:
         os.environ["SGLANG_PP_LAYER_PARTITION"] = ",".join(map(str, plan["layer_partition"]))
     elif plan["engine_args"].get("pp_size", 1) == 1:
@@ -65,6 +77,9 @@ def main():
     versions = {name: version(name) for name in (backend, "torch", "transformers")}
     records = json.loads(destination.read_text()) if args.resume and destination.exists() else []
     completed = completed_trials(records, plan, versions)
+    failures_path = destination.with_name(f"{destination.stem}-failures.json")
+    failures = json.loads(failures_path.read_text()) if args.resume and failures_path.exists() else []
+    failed = False
     for rate in plan["rates"]:
         for repeat in range(plan.get("repeats", 1)):
             seed = plan.get("seed", 100) + repeat
@@ -100,15 +115,30 @@ def main():
                     continue
                 print(f"START rate={rate} repeat={repeat} case={case['name']}", flush=True)
                 started = time.time()
-                row = trial(plan["model"], plan.get("device", "0"),
-                            {**plan["engine_args"], **case.get("engine_args", {})},
-                            trace, case["policy"], reserve=case.get("reserve", 0),
-                            interval=case.get("interval", 8), quantum_scale=case.get("quantum_scale", 1.),
-                            boundary_scale=case.get("boundary_scale"), beta=case.get("beta", 8.),
-                            request_timeout=plan.get("request_timeout", 3600),
-                            progress_interval=plan.get("progress_interval", 30),
-                            routing=case.get("routing", "program"), backend=backend,
-                            scheduler_trace=plan.get("scheduler_trace", True))
+                try:
+                    row = trial(plan["model"], device, {**plan["engine_args"], **case.get("engine_args", {})},
+                                trace, case["policy"], reserve=case.get("reserve", 0),
+                                interval=case.get("interval", 8), quantum_scale=case.get("quantum_scale", 1.),
+                                boundary_scale=case.get("boundary_scale"), beta=case.get("beta", 8.),
+                                request_timeout=plan.get("request_timeout", 3600),
+                                progress_interval=plan.get("progress_interval", 30),
+                                routing=case.get("routing", "program"), backend=backend,
+                                scheduler_trace=plan.get("scheduler_trace", True))
+                except Exception as exc:
+                    if not args.keep_going:
+                        raise
+                    failed = True
+                    failures.append(dict(condition=case["name"], rate=rate, repeat=repeat, seed=seed,
+                                         wall_start=started, trace_sha256=trace_hash, versions=versions,
+                                         plan=plan, error=f"{type(exc).__name__}: {exc}"))
+                    write_checkpoint(failures_path, failures)
+                    traceback.print_exc()
+                    print(f"FAILED rate={rate} repeat={repeat} case={case['name']}", flush=True)
+                    pids = subprocess.check_output(["nvidia-smi", "-i", device, "--query-compute-apps=pid",
+                                                    "--format=csv,noheader,nounits"], text=True)
+                    if any(pid.strip().isdecimal() for pid in pids.splitlines()):
+                        raise RuntimeError(f"GPU {device} is still occupied after failed trial") from exc
+                    continue
                 row.update(condition=case["name"], rate=rate, repeat=repeat, seed=seed,
                            wall_start=started, plan=plan,
                            trace_sha256=trace_hash, versions=versions)
@@ -117,16 +147,15 @@ def main():
                         call.pop("text", None)
                         call.pop("token_ids", None)
                 records.append(row)
-                checkpoint = destination.with_suffix(destination.suffix + ".tmp")
-                checkpoint.write_text(json.dumps(records, indent=2), encoding="utf-8")
-                checkpoint.replace(destination)
+                write_checkpoint(destination, records)
                 token_times, _ = paper_token_latencies(row)
                 mean = distribution(token_times.values())["mean"]
                 token_latency = f"{mean:.6f}" if mean is not None else "n/a"
                 print(f"DONE case={case['name']} tok/s={row['output_tokens_per_second']:.3f} "
                       f"latency={row['program_latency_seconds']['mean']:.3f} "
                       f"s/token={token_latency}", flush=True)
+    return int(failed)
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

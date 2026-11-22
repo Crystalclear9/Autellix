@@ -1,8 +1,11 @@
 import importlib.util
 import copy
+import json
 import sys
+from tempfile import TemporaryDirectory
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
 try:
@@ -43,6 +46,33 @@ class MatrixResumeTests(unittest.TestCase):
                 matrix.completed_trials([row], plan, versions)
         with self.assertRaises(ValueError):
             matrix.completed_trials([row, row], row["plan"], row["versions"])
+
+    def test_failure_leaves_other_arms_runnable_and_resumes_only_the_failed_arm(self):
+        with TemporaryDirectory() as directory:
+            plan_path = Path(directory, "plan.json")
+            output = Path(directory, "result.json")
+            plan_path.write_text(json.dumps(dict(model="8B", workload="sharegpt.json", device="3",
+                rates=[.02], engine_args={}, cases=[dict(name="first", policy="plas"),
+                                                  dict(name="second", policy="fcfs")])))
+            argv = ["--plan", str(plan_path), "--output", str(output), "--resume", "--keep-going"]
+            row = dict(response_seconds_per_output_token={"program": .12}, output_tokens_per_second=12,
+                       program_latency_seconds={"mean": 1})
+            with (patch.object(matrix, "version", return_value="pinned"),
+                  patch.object(matrix, "load_workloads", return_value=[{"program_id": "program"}]),
+                  patch.object(matrix.subprocess, "check_output", return_value=""),
+                  patch.object(matrix, "trial", side_effect=[RuntimeError("host KV exhausted"), row.copy()])):
+                self.assertEqual(matrix.main(argv), 1)
+            self.assertEqual([x["condition"] for x in json.loads(output.read_text())], ["second"])
+            errors = json.loads(output.with_name("result-failures.json").read_text())
+            self.assertEqual([(e["condition"], e["error"]) for e in errors],
+                             [("first", "RuntimeError: host KV exhausted")])
+            with (patch.object(matrix, "version", return_value="pinned"),
+                  patch.object(matrix, "load_workloads", return_value=[{"program_id": "program"}]),
+                  patch.object(matrix, "trial", return_value=row.copy()) as retry):
+                self.assertEqual(matrix.main(argv), 0)
+            retry.assert_called_once()
+            self.assertEqual(retry.call_args.args[4], "plas")
+            self.assertEqual({x["condition"] for x in json.loads(output.read_text())}, {"first", "second"})
 
 
 if __name__ == "__main__":

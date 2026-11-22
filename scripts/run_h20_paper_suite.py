@@ -285,14 +285,16 @@ def main():
         name, backend = plan["workload_kind"], plan["backend"]
         exe, run_env = interpreters[backend]
         gpu_run(name, [exe, str(root / "scripts/run_sglang_matrix.py"), "--plan", str(out / (name + "-plan.json")),
-                       "--output", str(out / (name + ".json")), "--resume"], run_env)
+                       "--output", str(out / (name + ".json")), "--resume", "--keep-going"], run_env)
         if set(plan["paper_figures"]) & {12, 13, 16}:
             summarize_measured(out, manifest)
         if plan["scheduler_trace"] and (out / (name + ".json")).exists():
             with (out / (name + "-timing.log")).open("w", encoding="utf-8") as log:
-                subprocess.run([exe, str(root / "scripts/analyze_scheduler_trace.py"), str(out / (name + ".json")),
-                                "--output", str(out / (name + "-timing.json"))],
-                               cwd=root, env=run_env, stdout=log, stderr=subprocess.STDOUT, check=True)
+                statuses[f"{name}-timing"] = subprocess.run(
+                    [exe, str(root / "scripts/analyze_scheduler_trace.py"), str(out / (name + ".json")),
+                     "--output", str(out / (name + "-timing.json"))],
+                    cwd=root, env=run_env, stdout=log, stderr=subprocess.STDOUT).returncode
+            write_json(statuses_path, previous_statuses | statuses)
         if set(plan["paper_figures"]) & {4, 5, 6} and (out / (name + ".json")).exists():
             from analyze_paper_motivation import motivation
 
