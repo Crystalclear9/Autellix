@@ -56,6 +56,8 @@ class ChunkedPrefixCache:
                 allocator._touched_blocks.remove(block_id)
 
     def mark(self, group, chunk_size):
+        # vLLM calls this after building the batch metadata. Its synchronous
+        # worker completes the forward before another batch can reuse these pages.
         for seq in group.get_seqs(status=SequenceStatus.RUNNING):
             computed = seq.data.get_num_computed_tokens()
             self._mark(seq, computed, computed + chunk_size)

@@ -77,13 +77,13 @@ class VLLMBackend:
         self.engine = LLMEngine.from_engine_args(EngineArgs(model=model, **args))
         self.scheduler = self.engine.scheduler[0]
         prefix_cache = None
-        supports_exact_prefix = (args["enable_prefix_caching"] and
+        supports_exact_prefix = (args["use_v2_block_manager"] and args["enable_prefix_caching"] and
                                  self.engine.model_config.get_sliding_window() is None)
         if exact_prefix_cache is None:
             exact_prefix_cache = paper and paper_chunked_prefill and supports_exact_prefix
         if exact_prefix_cache:
             if not supports_exact_prefix:
-                raise ValueError("exact_prefix_cache requires full-context prefix caching")
+                raise ValueError("exact_prefix_cache requires full-context prefix caching with block manager v2")
             from .prefix import ChunkedPrefixCache
             prefix_cache = ChunkedPrefixCache(self.scheduler.block_manager)
         if self.controller is None:

@@ -68,7 +68,8 @@ class RealInferenceTests(unittest.TestCase):
                                   dtype=VLLM_DTYPE, gpu_memory_utilization=VLLM_MEMORY,
                                   max_num_seqs=2, max_model_len=512, max_num_batched_tokens=32,
                                   num_gpu_blocks_override=64, swap_space=.25, enforce_eager=False,
-                                  paper_chunked_prefill=True, exact_prefix_cache=True, qwen3_fused_qk_rope=True)
+                                  paper_chunked_prefill=True, refill_idle_slots=True,
+                                  qwen3_fused_qk_rope=True)
             try:
                 prompt = backend.tokenize("Remember: the answer is Paris.\n" * 10 + "The capital of France is")
                 self.assertGreater(len(prompt), 64)

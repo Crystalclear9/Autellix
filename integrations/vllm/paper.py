@@ -37,6 +37,7 @@ class PaperPlan:
             groups.sort(key=lambda g: not g.seq_group.is_prefill())
             s._autellix_execution = [g.seq_group.request_id for g in groups]
             s._autellix_is_prefill = not any(not g.seq_group.is_prefill() for g in groups)
+            # vLLM's statistics consume logical progress, including cached tokens.
             num_tokens = sum(g.token_chunk_size for g in groups)
             uncached_tokens = sum(uncached_counts.get(g.seq_group.request_id, g.token_chunk_size)
                                   for g in groups) if uncached_counts else num_tokens
