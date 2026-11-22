@@ -59,14 +59,13 @@ def write_json(path, value):
 
 def write_comparison_plans(model, inputs, destination, device, bfcl_rates,
                            resident_decode_headroom, qwen3_fused_qk_rope, exact_prefix_cache,
-                           programs, seed):
+                           programs, seed, graph_context):
     destination.mkdir(parents=True, exist_ok=True)
     context, capacity, batch, kv_tokens, block = 32768, 8, 2048, 65536, 16
     vllm = dict(dtype="bfloat16", max_model_len=context, max_num_seqs=capacity,
                 max_num_batched_tokens=batch, block_size=block, tensor_parallel_size=1,
                 num_gpu_blocks_override=kv_tokens // block, gpu_memory_utilization=.93,
-                swap_space=16, enforce_eager=False, max_seq_len_to_capture=context,
-                seed=0, publish_activity=False)
+                swap_space=16, enforce_eager=False, seed=0, publish_activity=False)
     if qwen3_fused_qk_rope:
         vllm["qwen3_fused_qk_rope"] = True
     if exact_prefix_cache:
@@ -91,8 +90,9 @@ def write_comparison_plans(model, inputs, destination, device, bfcl_rates,
                       programs=programs, unique_programs=True, rates=rates, seed=seed, repeats=1,
                       paper_figures=figures,
                       compact_calls=True, request_timeout=3600, scheduler_trace=False)
-        write_json(destination / f"{label}-vllm-plan.json",
-                   dict(common, backend="vllm", engine_args=vllm, cases=[native, plas]))
+        capture = graph_context or (8192 if family == "sharegpt" else context)
+        write_json(destination / f"{label}-vllm-plan.json", dict(
+            common, backend="vllm", engine_args=dict(vllm, max_seq_len_to_capture=capture), cases=[native, plas]))
         write_json(destination / f"{label}-sglang-plan.json", dict(
             common, backend="sglang", engine_args=sglang,
             cases=[dict(name="sglang-native", policy="sglang-native")]))
@@ -117,6 +117,8 @@ def main():
     parser.add_argument("--comparison-programs", type=int, default=16,
                         help="distinct programs sampled from each comparison trace")
     parser.add_argument("--comparison-seed", type=int, default=2026)
+    parser.add_argument("--graph-context", type=int,
+                        help="override the vLLM CUDA graph context length in comparison plans")
     args = parser.parse_args()
     if args.device < 0:
         parser.error("device must be a nonnegative GPU index")
@@ -124,12 +126,14 @@ def main():
         parser.error("BFCL rates must be finite and positive")
     if args.comparison_programs < 1:
         parser.error("--comparison-programs must be positive")
+    if args.graph_context is not None and not 1 <= args.graph_context <= 32768:
+        parser.error("--graph-context requires a value from 1 to 32768")
 
     model = args.model.resolve(strict=True)
     if args.comparison_inputs:
         write_comparison_plans(model, args.comparison_inputs, args.run_dir, args.device, args.bfcl_rates,
                                args.resident_decode_headroom, args.qwen3_fused_qk_rope, args.exact_prefix_cache,
-                               args.comparison_programs, args.comparison_seed)
+                               args.comparison_programs, args.comparison_seed, args.graph_context)
         return
 
     from transformers import AutoTokenizer

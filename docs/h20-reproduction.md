@@ -118,6 +118,8 @@ t=0 提交，比较整批耗时和尾延迟。对照使用同一个随机种子�
 沿用同一程序集合和批次预算。
 ShareGPT 的 24 程序复测使用 `--comparison-programs 24 --comparison-seed 2029`；
 从已有的 128 程序轨迹取样，与默认种子下的 16 个程序互不重叠。
+默认 CUDA Graph 捕获范围为 ShareGPT 8,192 token 和 BFCL 32,768 token，可用
+`--graph-context` 按同一轨迹对照。两个工作负载的模型上下文上限均为 32,768 token。
 
 同一张卡依次运行匹配 Triton 配置的 SGLang、Autellix PLAS 或 ATLAS，以及采用上游默认优化的
 SGLang。功能验收使用 `check_prefill_priority_gpu.py --modern --mem-fraction-static .88`，
