@@ -59,7 +59,8 @@ def write_json(path, value):
 
 def write_comparison_plans(model, inputs, destination, device, bfcl_rates,
                            resident_decode_headroom, qwen3_fused_qk_rope, exact_prefix_cache,
-                           programs, seed, graph_context, completion_only, capacity, fcfs_control):
+                           programs, seed, graph_context, completion_only, capacity, fcfs_control,
+                           *, repeats=1, quantum_scale=16, beta=8.0):
     destination.mkdir(parents=True, exist_ok=True)
     context, batch, kv_tokens, block = 32768, 2048, 65536, 16
     vllm = dict(dtype="bfloat16", max_model_len=context, max_num_seqs=capacity,
@@ -82,8 +83,10 @@ def write_comparison_plans(model, inputs, destination, device, bfcl_rates,
         paper["resident_decode_headroom"] = True
     native = dict(name="vllm-opt", policy="vllm-opt", interval=1,
                   engine_args=dict(preemption_mode=None))
-    plas = dict(name="autellix", policy="plas", reserve=1, interval=8, quantum_scale=16,
+    plas = dict(name="autellix", policy="plas", reserve=1, interval=8, quantum_scale=quantum_scale,
                 boundary_scale=128, engine_args=paper)
+    if beta != 8.0:
+        plas["beta"] = beta
     vllm_cases = [native, plas]
     if fcfs_control:
         vllm_cases.append(dict(plas, name="fcfs-control", policy="fcfs"))
@@ -92,7 +95,7 @@ def write_comparison_plans(model, inputs, destination, device, bfcl_rates,
         label = f"qwen32-{family}"
         common = dict(model=str(model), device=str(device), workload=str(trace), workload_family=family,
                       workload_kind=label, experiment="offline" if rates == [None] else "online",
-                      programs=programs, unique_programs=True, rates=rates, seed=seed, repeats=1,
+                      programs=programs, unique_programs=True, rates=rates, seed=seed, repeats=repeats,
                       paper_figures=figures,
                       compact_calls=True, request_timeout=3600, scheduler_trace=False)
         capture = graph_context or (8192 if family == "sharegpt" else context)
@@ -122,6 +125,8 @@ def main():
     parser.add_argument("--comparison-programs", type=int, default=16,
                         help="distinct programs sampled from each comparison trace")
     parser.add_argument("--comparison-seed", type=int, default=2026)
+    parser.add_argument("--comparison-repeats", type=int, default=1,
+                        help="paired repeats with successive seeds and rotating case order")
     parser.add_argument("--graph-context", type=int,
                         help="override the vLLM CUDA graph context length in comparison plans")
     parser.add_argument("--completion-only", action="store_true",
@@ -130,6 +135,10 @@ def main():
                         help="active requests per single-card comparison engine")
     parser.add_argument("--fcfs-control", action="store_true",
                         help="also run the Autellix execution path with FCFS priorities")
+    parser.add_argument("--comparison-quantum-scale", type=float, default=16,
+                        help="scale PLAS time slices in vLLM comparison plans")
+    parser.add_argument("--comparison-beta", type=float, default=8,
+                        help="set the PLAS wait-to-service ratio for priority promotion")
     args = parser.parse_args()
     if args.device < 0:
         parser.error("device must be a nonnegative GPU index")
@@ -139,6 +148,12 @@ def main():
         parser.error("--comparison-programs must be positive")
     if args.comparison_batch_size < 1:
         parser.error("--comparison-batch-size must be positive")
+    if args.comparison_repeats < 1:
+        parser.error("--comparison-repeats must be positive")
+    for option, value in (("--comparison-quantum-scale", args.comparison_quantum_scale),
+                          ("--comparison-beta", args.comparison_beta)):
+        if not math.isfinite(value) or value <= 0:
+            parser.error(f"{option} must be finite and positive")
     if args.graph_context is not None and not 1 <= args.graph_context <= 32768:
         parser.error("--graph-context requires a value from 1 to 32768")
 
@@ -147,7 +162,9 @@ def main():
         write_comparison_plans(model, args.comparison_inputs, args.run_dir, args.device, args.bfcl_rates,
                                args.resident_decode_headroom, args.qwen3_fused_qk_rope, args.exact_prefix_cache,
                                args.comparison_programs, args.comparison_seed, args.graph_context,
-                               args.completion_only, args.comparison_batch_size, args.fcfs_control)
+                               args.completion_only, args.comparison_batch_size, args.fcfs_control,
+                               repeats=args.comparison_repeats, quantum_scale=args.comparison_quantum_scale,
+                               beta=args.comparison_beta)
         return
 
     from transformers import AutoTokenizer

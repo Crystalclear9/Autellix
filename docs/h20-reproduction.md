@@ -125,6 +125,9 @@ ShareGPT 的 24 程序复测使用 `--comparison-programs 24 --comparison-seed 2
 `--fcfs-control` 在同一 Autellix 执行路径上增加 FCFS 对照，前缀缓存、候补和窗口设置与
 PLAS 相同。BFCL 的独立 12 程序组使用 `--comparison-programs 12 --comparison-seed 2089
 --comparison-batch-size 4 --bfcl-rates .48 --resident-decode-headroom --fcfs-control`。
+`--comparison-repeats` 让两个后端使用相同的连续种子，并轮换每次的组内执行顺序。
+在独立运行目录使用 `--comparison-quantum-scale` 或 `--comparison-beta` 做单因素对照，分别改变
+PLAS 时间片长度和等待时间与服务时间的提级比例，保持原生组与 GPU 预算相同。
 
 同一张卡依次运行匹配 Triton 配置的 SGLang、Autellix PLAS 或 ATLAS，以及采用上游默认优化的
 SGLang。功能验收使用 `check_prefill_priority_gpu.py --modern --mem-fraction-static .88`，
