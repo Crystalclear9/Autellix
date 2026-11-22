@@ -264,6 +264,7 @@ def main(argv=None):
                 if args.backend != "vllm":
                     raise ValueError("native vLLM baselines require --backend vllm")
                 engine_args["autellix_mode"] = policy
+                engine_args.setdefault("observe_native", engine_args.get("measure_timing", False))
             groups = args.device_groups.split(";") if args.device_groups else args.devices.split(",")
             replicas = [ReplicaConfig(args.backend, args.model, d.strip(), engine_args)
                         for d in groups if d.strip()]

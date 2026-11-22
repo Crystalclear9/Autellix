@@ -22,6 +22,7 @@ def trial(model, device, engine_args, trace, arm, reserve=0, interval=8, quantum
         options["autellix_native_baseline"] = native
     elif native:
         options["autellix_mode"] = arm
+        options.setdefault("observe_native", options.get("measure_timing", False))
     defaults = PolicyConfig()
     boundary_scale = quantum_scale if boundary_scale is None else boundary_scale
     policy = PolicyConfig(policy="fcfs" if native else arm,
@@ -53,7 +54,7 @@ def trial(model, device, engine_args, trace, arm, reserve=0, interval=8, quantum
         result["arm"] = arm
         result["state_dir"] = str(engine.state_dir)
         result["effective_engine_args"] = options
-        result["hooks_installed"] = not native
+        result["hooks_installed"] = not native or (backend == "vllm" and bool(options["observe_native"]))
         result["overprovision"] = policy.overprovision
         result["schedule_interval"] = policy.schedule_interval
         result["quantum_scale"] = quantum_scale
