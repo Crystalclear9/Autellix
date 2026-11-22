@@ -17,6 +17,13 @@ RATES = {
     "lats": (.004, .01, .02, .03, .05),
     "mixed": (.01, .025, .05, .075, .12),
 }
+# Cover both the low-load H20 points and the upper rates in Figure 12's 8B column.
+END_TO_END_RATES = {
+    "sharegpt": (*RATES["sharegpt"], .96, 1.92, 4.),
+    "bfcl": RATES["bfcl"],
+    "lats": (*RATES["lats"], .1, .2, .3),
+    "mixed": (*RATES["mixed"], .24, .48, .8),
+}
 
 
 def write_json(path, value):
@@ -93,8 +100,9 @@ def build_plans(args):
         if figures:
             for family in args.workloads:
                 name = f"fig12-13-{family}-{backend}"
+                count = args.online_programs or WORKLOADS[family][1]
                 yield plan(backend, family, name, figures, cases_for(backend, family),
-                           args.rates or RATES[family], WORKLOADS[family][1])
+                           args.rates or END_TO_END_RATES[family], count)
         if 16 in selected:
             for count in args.offline_sizes:
                 for case in cases_for(backend, "sharegpt"):
@@ -204,6 +212,7 @@ def main():
     parser.add_argument("--backends", nargs="+", choices=("vllm", "sglang"), default=("vllm", "sglang"))
     parser.add_argument("--cases", nargs="+", help="select named inference cases from the figure plans")
     parser.add_argument("--offline-sizes", nargs="+", type=int, default=(1000, 2000, 3000, 4000))
+    parser.add_argument("--online-programs", type=int, help="programs per arrival trace for Figures 12 and 13")
     parser.add_argument("--rates", nargs="+", type=float)
     parser.add_argument("--repeats", type=int, default=2)
     parser.add_argument("--seed", type=int, default=2026)
@@ -221,6 +230,8 @@ def main():
         parser.error("use a physical GPU index and a KV capacity divisible by 16 of at least 32768 tokens")
     if min(args.offline_sizes) < 1 or max(args.offline_sizes) > 4000:
         parser.error("offline sizes must be between 1 and 4000")
+    if args.online_programs is not None and args.online_programs < 1:
+        parser.error("online programs must be positive")
 
     out = args.run_dir.resolve()
     out.mkdir(parents=True, exist_ok=True)
