@@ -179,6 +179,10 @@ SHA-256 已核对，记录位于 `data/autellix/import/migration-verification.js
 makespan、程序完成率、归一化程序延迟，以及对应的引擎参数。跨目录的已完成试验可用
 `summarize_paper_suite.py --matrix-only` 汇总。
 
+图 16 的 vLLM Autellix 可用 `--recompute-on-swap-full` 补跑主机 KV 空间耗尽的配置。
+主机块充足时沿用换出，空间耗尽时释放被抢占请求的 GPU KV，并在再次调度时按已有 token 重建。
+补跑沿用原轨迹、GPU KV 容量和批次上限，使用独立输出目录保留原始失败记录。
+
 ShareGPT 的 4,000 条回放含 23,575 次调用，平均输出 279 token、带完整历史的平均输入
 2,962 token。BFCL 轨迹保留每次输入的工具定义和上下文。现有 LATS 轨迹来自六个
 HotpotQA 程序，平均 320 次调用，论文报告 159.7 次。输入长度与程序调用数采用图 11

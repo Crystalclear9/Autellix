@@ -109,6 +109,8 @@ def build_plans(args):
                 for case in cases_for(backend, "sharegpt"):
                     if case["name"] == "vllm-opt-multistep":
                         continue
+                    if args.recompute_on_swap_full and backend == "vllm" and case["name"] == "autellix":
+                        case = dict(case, engine_args=dict(case["engine_args"], recompute_on_swap_full=True))
                     name = f"fig16-{count}-{backend}-{case['name']}"
                     yield plan(backend, "sharegpt", name, (16,), [case], (None,), count, offline=True)
         if backend == "vllm" and 17 in selected:
@@ -217,6 +219,8 @@ def main():
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--kv-tokens", type=int, default=262144)
     parser.add_argument("--swap-gib", type=float, default=128)
+    parser.add_argument("--recompute-on-swap-full", action="store_true",
+                        help="let Figure 16 vLLM Autellix rebuild evicted KV when host swap fills")
     parser.add_argument("--eager", action="store_true")
     parser.add_argument("--request-timeout", type=float, default=79200)
     parser.add_argument("--diagnostic-seconds", type=float, default=3600, help="nominal arrival window for Figure 4")

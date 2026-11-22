@@ -93,10 +93,13 @@ class RealInferenceTests(unittest.TestCase):
             self.assertEqual(engine.table.describe(), {})
 
     def test_real_generation_preemption_and_session_inheritance(self):
+        recompute = BACKEND == "vllm" and os.environ.get("AUTELLIX_TEST_RECOMPUTE") == "1"
         if BACKEND == "vllm":
             args = dict(max_model_len=512, max_num_seqs=1, gpu_memory_utilization=.35,
                         swap_space=.25, dtype="half", enforce_eager=True,
                         fused_swap=os.environ.get("AUTELLIX_TEST_FUSED_SWAP") == "1")
+            if recompute:
+                args.update(swap_space=0, recompute_on_swap_full=True)
         else:
             args = dict(context_length=512, max_running_requests=1, mem_fraction_static=.35,
                         dtype="float16", random_seed=0)
@@ -131,7 +134,10 @@ class RealInferenceTests(unittest.TestCase):
                 if policy.implementation == "paper" and policy.schedule_interval > 1:
                     self.assertGreater(counts["continue_plan"], 0)
                     self.assertLess(counts["schedule_window"], counts["execute"])
-                if policy.overprovision and BACKEND == "vllm":
+                if recompute:
+                    self.assertGreater(counts["recompute_retract"], 0)
+                    self.assertFalse(counts["swap_out"])
+                elif policy.overprovision and BACKEND == "vllm":
                     self.assertGreater(counts["reserve"], 0)
                     if policy.schedule_interval > 1:
                         self.assertGreater(counts["refill"], 0)

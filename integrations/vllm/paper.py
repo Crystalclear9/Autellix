@@ -9,12 +9,13 @@ from autellix.runtime.window import SchedulingWindow
 
 class PaperPlan:
     def __init__(self, scheduler, controller, capacity, keep_resident_kv=False, refill_idle_slots=False,
-                 chunked_prefill=False, resident_reserve_only=False):
+                 chunked_prefill=False, resident_reserve_only=False, recompute_on_swap_full=False):
         self.scheduler, self.controller = scheduler, controller
         self.window = SchedulingWindow(controller, capacity, refill_idle_slots=refill_idle_slots,
                                        resident_reserve_only=resident_reserve_only)
         self.keep_resident_kv = keep_resident_kv
         self.chunked_prefill = chunked_prefill
+        self.recompute_on_swap_full = recompute_on_swap_full
         self.prepared = set()
         self.reserved_slots = set()
 
@@ -76,12 +77,17 @@ class PaperPlan:
         self.prepared.intersection_update(by_id)
 
         def evict(group):
-            s._preempt_by_swap(group, outgoing)
+            if self.recompute_on_swap_full and not s.block_manager.can_swap_out(group):
+                s._preempt_by_recompute(group)
+                s.waiting.appendleft(group)
+                ctl.emit("recompute_retract", rid=group.request_id, reason="host_kv_full")
+            else:
+                s._preempt_by_swap(group, outgoing)
+                s.swapped.append(group)
+                ctl.emit("swap_out", rid=group.request_id)
             s.running.remove(group)
-            s.swapped.append(group)
             self.prepared.discard(group.request_id)
             self.reserved_slots.discard(group.request_id)
-            ctl.emit("swap_out", rid=group.request_id)
 
         def evict_for(index, fits):
             if incoming:

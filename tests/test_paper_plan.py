@@ -118,6 +118,27 @@ class PaperPlanTests(unittest.TestCase):
         out = plan.next_step()
         self.assertEqual([g.seq_group.request_id for g in out.scheduled_seq_groups], ["high"])
 
+    def test_host_swap_pressure_requeues_the_victim_for_recompute(self):
+        self.ctl.config = PolicyConfig(overprovision=0)
+        self.priority.update(high=0, low=1)
+        high, low = Group("high", True), Group("low")
+        self.s.running.append(low)
+        self.s.waiting.append(high)
+        self.s.block_manager.can_allocate = lambda _: self.status.LATER if low in self.s.running else self.status.OK
+        self.s.block_manager.can_swap_out = lambda _: False
+        self.s._preempt_by_recompute = lambda group: setattr(group, "prefill", True)
+        plan = PaperPlan(self.s, self.ctl, 1, keep_resident_kv=True, recompute_on_swap_full=True)
+        plan.prepared.add("low")
+        self.assertFalse(plan.next_step().blocks_to_swap_out)
+        self.assertNotIn(low, self.s.running)
+        self.assertFalse(self.s.swapped)
+        self.assertNotIn("low", plan.prepared)
+        self.assertTrue(low.is_prefill())
+        self.assertIn(("recompute_retract", {"rid": "low", "reason": "host_kv_full"}), self.events)
+        self.assertEqual([g.seq_group for g in plan.next_step().scheduled_seq_groups], [high])
+        self.s.running.remove(high)
+        self.assertEqual([g.seq_group for g in plan.next_step().scheduled_seq_groups], [low])
+
     def test_window_refills_without_readmitting_new_arrival(self):
         self.priority.update(a=0, b=1, urgent=-1)
         a, b = Group("a", True), Group("b", True)
