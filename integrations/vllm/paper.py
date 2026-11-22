@@ -9,13 +9,15 @@ from autellix.runtime.window import SchedulingWindow
 
 class PaperPlan:
     def __init__(self, scheduler, controller, capacity, keep_resident_kv=False, refill_idle_slots=False,
-                 chunked_prefill=False, resident_reserve_only=False, recompute_on_swap_full=False):
+                 chunked_prefill=False, resident_reserve_only=False, recompute_on_swap_full=False,
+                 resident_decode_headroom=False):
         self.scheduler, self.controller = scheduler, controller
         self.window = SchedulingWindow(controller, capacity, refill_idle_slots=refill_idle_slots,
                                        resident_reserve_only=resident_reserve_only)
         self.keep_resident_kv = keep_resident_kv
         self.chunked_prefill = chunked_prefill
         self.recompute_on_swap_full = recompute_on_swap_full
+        self.resident_decode_headroom = resident_decode_headroom
         self.prepared = set()
         self.reserved_slots = set()
 
@@ -127,12 +129,24 @@ class PaperPlan:
             self.prepared.update(prepared)
             return output(groups)
 
+        resident_decodes = set()
+        defer_unreserved = False
         if self.chunked_prefill:
             from vllm.core.scheduler import SchedulingBudget
             budget = SchedulingBudget(s.scheduler_config.max_num_batched_tokens,
                                       s.scheduler_config.max_num_seqs)
+            if self.resident_decode_headroom:
+                resident_decodes = {rid for rid in window.active & running.keys()
+                                    if not running[rid].is_prefill()}
+                min_prefill = s.cache_config.block_size if s.cache_config.enable_prefix_caching else 1
+                if budget.remaining_token_budget() < min_prefill + len(resident_decodes):
+                    resident_decodes.clear()
+                for rid in resident_decodes:
+                    budget.add_num_batched_tokens(rid, 1)
         for index, rid in enumerate(window.cohort):
             group = by_id[rid]
+            if defer_unreserved and rid not in resident_decodes:
+                continue
             if rid not in chosen and rid in self.reserved_slots:
                 continue
             prefill = group.is_prefill()
@@ -146,9 +160,16 @@ class PaperPlan:
                         raise RuntimeError("token budget must allow one prefix-cache block")
                     # This forward consumed the chunk budget. The remaining
                     # cohort can still fit in a later forward of this window.
+                    if resident_decodes:
+                        defer_unreserved = True
+                        continue
                     break
                 partial = chunk < count
                 count = chunk
+            if (resident_decodes and rid not in resident_decodes
+                    and count > budget.remaining_token_budget()):
+                defer_unreserved = True
+                continue
             if tokens + count > s.scheduler_config.max_num_batched_tokens:
                 if groups and not self.chunked_prefill:
                     window.retain_prefix(index)
@@ -203,7 +224,7 @@ class PaperPlan:
             if not partial:
                 prepared.append(rid)
             tokens += count
-            if self.chunked_prefill:
+            if self.chunked_prefill and rid not in resident_decodes:
                 budget.add_num_batched_tokens(rid, count)
             if rid in window.reserve:
                 ctl.emit("reserve", rid=rid)

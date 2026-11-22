@@ -21,6 +21,8 @@
 
 分块 prefill 耗尽当步 token 预算时，待接纳请求和已入选的 decode 留在窗口内。实际 KV 空间不足时，调度窗口按优先级收缩。
 
+分块 prefill 可用 `resident_decode_headroom=true`，给当前窗口中已驻留的活动 decode 各留一个单步 token。这只改变窗口内的混合批次构造，程序优先级和 KV 容量检查保持一致。
+
 抢占沿用原生 block 所有权转换。换出和换入分开处理，各自可与已接纳请求的模型执行放在同一步。等待下一次传输的请求保留在窗口中，传输后继续检查其接纳条件。实际批量传输由 `autellix/runtime/swap.py` 完成。
 
 ## 配置

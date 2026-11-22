@@ -18,7 +18,8 @@ class VLLMBackend:
                  keep_resident_kv: bool = False, publish_activity_at_window: bool = False,
                  refill_idle_slots: bool = False, paper_chunked_prefill: bool = False,
                  resident_reserve_only: bool = False, fused_swap: bool = False,
-                 publish_activity: bool = True, recompute_on_swap_full: bool = False, **engine_args):
+                 publish_activity: bool = True, recompute_on_swap_full: bool = False,
+                 resident_decode_headroom: bool = False, **engine_args):
         if version("vllm") != "0.6.1":
             raise RuntimeError("this backend requires vllm==0.6.1")
         config = config or PolicyConfig()
@@ -83,7 +84,8 @@ class VLLMBackend:
                                                       refill_idle_slots=refill_idle_slots,
                                                       chunked_prefill=paper_chunked_prefill,
                                                       resident_reserve_only=resident_reserve_only,
-                                                      recompute_on_swap_full=recompute_on_swap_full)
+                                                      recompute_on_swap_full=recompute_on_swap_full,
+                                                      resident_decode_headroom=resident_decode_headroom)
             self.scheduler._autellix_window = self.scheduler._autellix_paper.window
         worker = self.engine.model_executor.driver_worker
         if tp == 1 and batched_swap and not native:

@@ -30,6 +30,9 @@ class Budget:
     def add_num_batched_tokens(self, rid, count):
         self.remaining -= count
 
+    def remaining_token_budget(self):
+        return self.remaining
+
 
 class PaperPlanTests(unittest.TestCase):
     def setUp(self):
@@ -337,6 +340,26 @@ class PaperPlanTests(unittest.TestCase):
         out = plan.next_step()
         self.assertFalse(out.blocks_to_swap_out)
         self.assertEqual([g.seq_group for g in out.scheduled_seq_groups], [first, running])
+
+    def test_resident_decode_headroom_keeps_mixed_batches_within_token_budget(self):
+        self.ctl.config = PolicyConfig(overprovision=0)
+        self.priority.update(first=0, pending=1, running=2)
+        first, pending, running = Group("first", True), Group("pending", True), Group("running")
+        first.seq.status = pending.seq.status = "waiting"
+        self.s.waiting.extend([first, pending])
+        self.s.running.append(running)
+        self.s.scheduler_config = NS(max_num_batched_tokens=4, max_num_seqs=3)
+        self.s.cache_config = NS(enable_prefix_caching=False)
+        self.s._get_num_new_tokens = lambda group, status, chunk, budget: min(
+            group.seq.data.get_num_uncomputed_tokens(), budget.remaining)
+        plan = PaperPlan(self.s, self.ctl, 3, chunked_prefill=True, resident_decode_headroom=True)
+
+        out = plan.next_step()
+        self.assertEqual([(g.seq_group, g.token_chunk_size) for g in out.scheduled_seq_groups],
+                         [(first, 3), (running, 1)])
+        self.assertEqual(out.num_batched_tokens, 4)
+        self.assertEqual(plan.window.cohort, ["first", "pending", "running"])
+        self.assertEqual(list(self.s.waiting), [pending])
 
     def test_chunked_plan_still_shrinks_at_true_kv_pressure(self):
         self.ctl.config = PolicyConfig(schedule_interval=3, overprovision=0)
