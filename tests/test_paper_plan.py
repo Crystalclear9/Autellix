@@ -125,6 +125,42 @@ class PaperPlanTests(unittest.TestCase):
         out = plan.next_step()
         self.assertEqual([g.seq_group.request_id for g in out.scheduled_seq_groups], ["high"])
 
+    def test_swap_out_keeps_the_already_admitted_decode(self):
+        self.ctl.config = PolicyConfig(overprovision=0)
+        self.priority.update(decoding=0, pending=1, victim=2)
+        decoding, pending, victim = Group("decoding"), Group("pending", True), Group("victim")
+        self.s.running.extend([decoding, victim])
+        self.s.waiting.append(pending)
+        self.s.block_manager.can_allocate = lambda _: self.status.LATER if victim in self.s.running else self.status.OK
+        plan = PaperPlan(self.s, self.ctl, 2, keep_resident_kv=True)
+
+        out = plan.next_step()
+        self.assertEqual(out.blocks_to_swap_out, [(3, 4)])
+        self.assertEqual([g.seq_group for g in out.scheduled_seq_groups], [decoding])
+        self.assertIn("decoding", plan.prepared)
+        self.assertEqual([g.seq_group for g in plan.next_step().scheduled_seq_groups], [pending, decoding])
+
+    def test_swap_in_defers_the_opposite_transfer_without_shrinking_the_window(self):
+        self.ctl.config = PolicyConfig(overprovision=0)
+        self.priority.update(restored=0, pending=1, victim=2)
+        restored, pending, victim = Group("restored"), Group("pending", True), Group("victim")
+        self.s.swapped.append(restored)
+        self.s.waiting.append(pending)
+        self.s.running.append(victim)
+        self.s.block_manager.can_allocate = lambda _: self.status.LATER if victim in self.s.running else self.status.OK
+        plan = PaperPlan(self.s, self.ctl, 2, keep_resident_kv=True)
+
+        out = plan.next_step()
+        self.assertEqual(out.blocks_to_swap_in, [(1, 2)])
+        self.assertFalse(out.blocks_to_swap_out)
+        self.assertEqual(plan.window.cohort, ["restored", "pending"])
+        plan.window.executed()
+        out = plan.next_step()
+        self.assertEqual(out.blocks_to_swap_out, [(3, 4)])
+        self.assertFalse(out.blocks_to_swap_in)
+        self.assertEqual([g.seq_group for g in out.scheduled_seq_groups], [restored])
+        self.assertEqual(len(self.refreshes), 1)
+
     def test_host_swap_pressure_requeues_the_victim_for_recompute(self):
         self.ctl.config = PolicyConfig(overprovision=0)
         self.priority.update(high=0, low=1)

@@ -90,8 +90,6 @@ class PaperPlan:
             self.reserved_slots.discard(group.request_id)
 
         def evict_for(index, fits):
-            if incoming:
-                return False
             cohort = set(window.cohort)
             inactive = sorted((g for g in s.running if g.request_id not in cohort),
                               key=lambda g: ctl.key(g.request_id), reverse=True)
@@ -124,6 +122,11 @@ class PaperPlan:
             return continue_decode(running)
 
         groups, prepared, tokens = [], [], 0
+
+        def run_admitted():
+            self.prepared.update(prepared)
+            return output(groups)
+
         if self.chunked_prefill:
             from vllm.core.scheduler import SchedulingBudget
             budget = SchedulingBudget(s.scheduler_config.max_num_batched_tokens,
@@ -153,11 +156,11 @@ class PaperPlan:
             lookahead = window.remaining if rid not in self.reserved_slots and not partial else 0
             status = allocation_status(group, lookahead)
             if status != AllocStatus.OK:
-                # A lower-priority resident must never block a higher-priority
-                # arrival or swapped request. Retry after the transfer barrier.
-                if status == AllocStatus.LATER and evict_for(
-                        index, lambda: allocation_status(group, lookahead) == AllocStatus.OK):
-                    return output()
+                # Send the current transfer with the admitted prefix and
+                # retry this request once the worker has completed it.
+                if status == AllocStatus.LATER and (incoming or evict_for(
+                        index, lambda: allocation_status(group, lookahead) == AllocStatus.OK)):
+                    return run_admitted()
                 if status == AllocStatus.NEVER:
                     for seq in group.get_seqs():
                         seq.status = SequenceStatus.FINISHED_IGNORED
@@ -183,10 +186,8 @@ class PaperPlan:
             # Reserve future KV capacity once per window. Subsequent append
             # calls commit actual token IDs / prefix-cache bookkeeping only.
             if not s.block_manager.can_append_slots(group, lookahead):
-                if evict_for(index, lambda: s.block_manager.can_append_slots(group, lookahead)):
-                    return output()
-                if incoming:
-                    return output()  # retry capacity after the incoming barrier
+                if incoming or evict_for(index, lambda: s.block_manager.can_append_slots(group, lookahead)):
+                    return run_admitted()
                 if not groups:
                     raise RuntimeError("insufficient KV capacity for one scheduling window; reduce schedule_interval")
                 window.retain_prefix(index)
@@ -208,5 +209,4 @@ class PaperPlan:
                 ctl.emit("reserve", rid=rid)
         if not groups and not incoming and not ignored and by_id:
             raise RuntimeError("highest-priority request cannot fit the configured token/KV budget")
-        self.prepared.update(prepared)
-        return output(groups)
+        return run_admitted()
