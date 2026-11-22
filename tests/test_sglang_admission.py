@@ -12,6 +12,7 @@ class KeepRunningTests(unittest.TestCase):
                                                 last_node=None)
         running, pending = req(50, 10, 100), req(80, 20, 100)
         scheduler = NS(running_batch=NS(reqs=[running]), server_args=NS(max_running_requests=2),
+                       pp_size=1, is_mixed_chunk=True,
                        max_prefill_tokens=1024, token_to_kv_pool_allocator=NS(available_size=lambda: 100),
                        tree_cache=NS(evictable_size=lambda: 20, inc_lock_ref=lambda _: None, dec_lock_ref=lambda _: None),
                        autellix=NS(config=NS(implementation="paper", schedule_interval=8)))
@@ -21,7 +22,11 @@ class KeepRunningTests(unittest.TestCase):
         self.assertFalse(can_keep_running(scheduler, [pending], {"running"}))
         scheduler.tree_cache.evictable_size = lambda: 20
         scheduler.max_prefill_tokens = 101
+        self.assertTrue(can_keep_running(scheduler, [pending], {"running"}))
+        scheduler.chunked_prefill_size = 1
         self.assertFalse(can_keep_running(scheduler, [pending], {"running"}))
+        scheduler.chunked_prefill_size = 2
+        self.assertTrue(can_keep_running(scheduler, [pending], {"running"}))
         scheduler.max_prefill_tokens = 1024
         scheduler.server_args.max_running_requests = 1
         self.assertFalse(can_keep_running(scheduler, [pending], {"running"}))
@@ -37,6 +42,7 @@ class KeepRunningTests(unittest.TestCase):
                        extend_input_len=12, sampling_params=NS(max_new_tokens=50),
                        init_next_round_input=lambda _: None) for i in range(2)]
         scheduler = NS(running_batch=NS(reqs=[]), server_args=NS(max_running_requests=2),
+                       pp_size=1, is_mixed_chunk=True,
                        max_prefill_tokens=128, token_to_kv_pool_allocator=NS(available_size=lambda: 50),
                        tree_cache=tree, autellix=NS(config=NS(implementation="paper", schedule_interval=8)))
         self.assertTrue(can_keep_running(scheduler, requests, {r.rid for r in requests}))

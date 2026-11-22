@@ -10,9 +10,11 @@ def can_keep_running(scheduler, pending, selected):
         request.init_next_round_input(cache)
     prefill_tokens = sum(request.extend_input_len for request in pending)
     chunk_budget = getattr(scheduler, "chunked_prefill_size", None)
-    iteration_tokens = (min(prefill_tokens, chunk_budget - len(running))
-                        if chunk_budget and chunk_budget > 0 else prefill_tokens)
-    if iteration_tokens + len(running) >= scheduler.max_prefill_tokens:
+    mixed_decode = len(running) if scheduler.is_mixed_chunk else 0
+    # A forward can defer some prefills while keeping the selected KV on GPU.
+    if chunk_budget is not None and 0 < chunk_budget <= mixed_decode:
+        return False
+    if scheduler.pp_size > 1 and prefill_tokens + len(running) >= scheduler.max_prefill_tokens:
         return False
     config = scheduler.autellix.config
     horizon = config.schedule_interval if config.implementation == "paper" else float("inf")
