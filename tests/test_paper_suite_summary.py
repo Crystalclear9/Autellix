@@ -94,7 +94,8 @@ class PaperSuiteSummary(unittest.TestCase):
         for row in (native, candidate):
             row.update(versions={"vllm": "0.6.1"}, effective_engine_args={"max_num_batched_tokens": 2048})
         native["effective_engine_args"].update(autellix_mode="vllm-opt", observe_native=False)
-        candidate["effective_engine_args"].update(resident_decode_headroom=True, recompute_on_swap_full=True)
+        candidate["effective_engine_args"].update(resident_decode_headroom=True, recompute_on_swap_full=True,
+                                                   min_decode_steps=8)
         result = summary.summarize([native, candidate])
         self.assertTrue(result["comparisons"][0]["pairing"]["same_options"])
 
