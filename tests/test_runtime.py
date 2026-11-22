@@ -55,6 +55,14 @@ class RuntimePolicyTests(unittest.TestCase):
         self.ctl.finish("b")
         self.assertEqual(self.table.snapshot()["p"][0], 2)
 
+    def test_priority_snapshot_omits_only_zero_history(self):
+        self.table.open("new")
+        self.ctl.admit("queued", "p")
+        self.clock.now = 3.
+        self.ctl.finish("queued", "cancelled")
+        self.assertEqual(self.table.snapshot(), {"new": (0., 0.), "p": (0., 3.)})
+        self.assertEqual(self.table.snapshot(include_zero=False), {"p": (0., 3.)})
+
     def test_cross_connection_program_statistics_and_close(self):
         peer = ProgramTable(self.table.path)
         try:

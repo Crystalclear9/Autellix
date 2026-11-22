@@ -171,9 +171,11 @@ class ProgramTable:
             raise
 
     @serialized
-    def snapshot(self) -> dict[str, tuple[float, float]]:
-        return {pid: (service, wait) for pid, service, wait in
-                self.db.execute("SELECT pid,service,wait FROM programs")}
+    def snapshot(self, *, include_zero=True) -> dict[str, tuple[float, float]]:
+        query = "SELECT pid,service,wait FROM programs"
+        if not include_zero:
+            query += " WHERE service != 0 OR wait != 0"
+        return {pid: (service, wait) for pid, service, wait in self.db.execute(query)}
 
     @serialized
     def finish(self, pid: str, rid: str, inherited: float, executed: float,
@@ -303,7 +305,8 @@ class RuntimeScheduler:
 
     def refresh(self):
         now = self.clock()
-        totals = self.table.snapshot() if self.config.policy in {"plas", "atlas"} else {}
+        # Programs without completed service or wait already use the zero default.
+        totals = self.table.snapshot(include_zero=False) if self.config.policy in {"plas", "atlas"} else {}
         changes = []
         for call in self.calls.values():
             self._wait_until(call, now)

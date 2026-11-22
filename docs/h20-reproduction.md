@@ -171,6 +171,7 @@ SHA-256 已核对，记录位于 `data/autellix/import/migration-verification.js
 | 图 19，KV 交换 | 跨层 fused 打包与解包，测原生 vLLM 搬运、PyTorch 聚合和 fused 路径。推理消融同时记录逻辑换出、主机与设备之间的 KV 载荷传输次数及耗时，并比较 N=1 窗口 |
 
 SGLang 单步预填充预算耗尽后保留已选请求与 decode，GPU KV 或请求槽位耗尽时按优先级收缩窗口。
+PLAS 与 ATLAS 在窗口边界只读取已累计服务或等待时间的程序，其余程序使用零历史。
 
 图 12、13 保留 H20 的低负载测点，并扫描论文 8B 图中的高到达率区间。ShareGPT、LATS 和
 Mixed 的默认上限分别为 4、0.30 和 0.80 程序/秒。可用 `--rates` 指定测点，用
