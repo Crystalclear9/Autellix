@@ -338,7 +338,9 @@ def install(cls, options):
                 result = original_prefill(self)
         finally:
             self.waiting_queue.extend(held)
-        if self._autellix_paper and self._autellix_window is not None:
+        # A partial prefill consumed this step's chunk budget. Retry the
+        # remaining cohort after it completes without retracting its decodes.
+        if self._autellix_paper and self._autellix_window is not None and getattr(self, "chunked_req", None) is None:
             admitted = {r.rid for r in self.running_batch.reqs}
             if result is not None:
                 admitted.update(r.rid for r in result.reqs)

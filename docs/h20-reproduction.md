@@ -170,6 +170,9 @@ SHA-256 已核对，记录位于 `data/autellix/import/migration-verification.js
 | 图 18，最优调度对照 | ShareGPT 与 LATS 的等步长模拟，含可提前获知剩余服务量的 SRPT |
 | 图 19，KV 交换 | 跨层 fused 打包与解包，测原生 vLLM 搬运、PyTorch 聚合和 fused 路径。推理消融同时记录逻辑换出、主机与设备之间的 KV 载荷传输次数及耗时，并比较 N=1 窗口 |
 
+SGLang 的分块预填充尚在进行时保留已选请求窗口。分块完成后继续接纳该窗口中的请求，
+完整接纳阶段的容量检查继续按优先级收缩窗口。
+
 图 12 的 Llama-3.1-70B 和 Falcon-180B 原配置分别使用 4 张和 8 张 A100。图 14 的副本组数
 分别为 4 和 2，图 15 比较独立引擎扩容。上述 GPU 结果与单卡 8B、CPU 模拟分别汇总。
 [Autellix 论文，第 6 节](https://arxiv.org/html/2502.13965v1#S6)

@@ -1,4 +1,5 @@
 """Native scheduler lifecycle regressions; GPU generation is tested separately."""
+from contextlib import closing
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,6 +10,55 @@ from integrations.sglang.scheduler import encode_request, install
 
 
 class CompletedDecodeTests(unittest.TestCase):
+    def test_partial_prefill_preserves_the_decode_cohort(self):
+        with tempfile.TemporaryDirectory() as directory:
+            class Native:
+                def __init__(self):
+                    self.policy = SimpleNamespace()
+                    self.server_args = SimpleNamespace(max_running_requests=3)
+                    self.max_prefill_tokens, self.chunked_prefill_size = 16, 4
+                    self.token_to_kv_pool_allocator = SimpleNamespace(available_size=lambda: 2048)
+                    self.tree_cache = SimpleNamespace(evictable_size=lambda: 0, inc_lock_ref=Mock(), dec_lock_ref=Mock())
+                    self.waiting_queue = []
+                    self.chunked_req = None
+                _add_request_to_queue = Mock()
+                _extend_requests_to_queue = Mock()
+                run_batch = Mock()
+                process_batch_result = Mock()
+                abort_request = Mock()
+                check_memory = Mock()
+
+                def get_new_batch_prefill(self):
+                    if self.chunked_req is not None:
+                        request, self.chunked_req = self.chunked_req, None
+                    else:
+                        request = self.waiting_queue.pop(0)
+                        if request.rid == "first":
+                            self.chunked_req = request
+                    return SimpleNamespace(reqs=[request, *self.running_batch.reqs])
+
+            with patch.dict("sys.modules", {"torch": Mock()}):
+                install(Native, {"table_path": str(Path(directory, "state.sqlite")),
+                                 "config": {"overprovision": 0}, "capacity": 3})
+            scheduler = Native()
+            with closing(scheduler.autellix.table) as table:
+                table.open("p")
+                first, second, running = (SimpleNamespace(
+                    rid=rid, output_ids=[], sampling_params=SimpleNamespace(max_new_tokens=8),
+                    extend_input_len=4, init_next_round_input=lambda _: None, last_node=None)
+                    for rid in ("first", "second", "running"))
+                for request in (first, second, running):
+                    scheduler.autellix.admit(request.rid, "p")
+                scheduler.waiting_queue = [first, second]
+                scheduler.running_batch = SimpleNamespace(reqs=[running], filter_batch=lambda: None)
+                self.assertEqual(scheduler.get_new_batch_prefill().reqs, [first, running])
+                window = scheduler._autellix_window
+                self.assertEqual(window.cohort, ["first", "second", "running"])
+                self.assertFalse(window.capacity_limited)
+                self.assertEqual(scheduler.get_new_batch_prefill().reqs, [first, running])
+                scheduler.running_batch.reqs = [first, running]
+                self.assertEqual(scheduler.get_new_batch_prefill().reqs, [second, first, running])
+
     def test_promoted_lower_reserve_yields_to_highest_restore(self):
         with tempfile.TemporaryDirectory() as directory:
             locks = {"lower"}
