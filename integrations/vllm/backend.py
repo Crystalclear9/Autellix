@@ -19,7 +19,8 @@ class VLLMBackend:
                  refill_idle_slots: bool = False, paper_chunked_prefill: bool = False,
                  resident_reserve_only: bool = False, fused_swap: bool = False,
                  publish_activity: bool = True, recompute_on_swap_full: bool = False,
-                 resident_decode_headroom: bool = False, **engine_args):
+                 resident_decode_headroom: bool = False, qwen3_fused_qk_rope: bool = False,
+                 exact_prefix_cache: bool | None = None, **engine_args):
         if version("vllm") != "0.6.1":
             raise RuntimeError("this backend requires vllm==0.6.1")
         config = config or PolicyConfig()
@@ -40,7 +41,7 @@ class VLLMBackend:
         import torch
 
         from .qwen3_config import register_local_qwen3
-        register_local_qwen3(model, tp)
+        register_local_qwen3(model, tp, qwen3_fused_qk_rope)
 
         args = dict(enable_prefix_caching=True, enforce_eager=True,
                     disable_async_output_proc=True, use_v2_block_manager=True,
@@ -75,6 +76,16 @@ class VLLMBackend:
                                                publish_activity=publish_activity)
         self.engine = LLMEngine.from_engine_args(EngineArgs(model=model, **args))
         self.scheduler = self.engine.scheduler[0]
+        prefix_cache = None
+        supports_exact_prefix = (args["enable_prefix_caching"] and
+                                 self.engine.model_config.get_sliding_window() is None)
+        if exact_prefix_cache is None:
+            exact_prefix_cache = paper and paper_chunked_prefill and supports_exact_prefix
+        if exact_prefix_cache:
+            if not supports_exact_prefix:
+                raise ValueError("exact_prefix_cache requires full-context prefix caching")
+            from .prefix import ChunkedPrefixCache
+            prefix_cache = ChunkedPrefixCache(self.scheduler.block_manager)
         if self.controller is None:
             return
         attach_scheduler(self.scheduler, self.controller, observe_only=native)
@@ -88,7 +99,8 @@ class VLLMBackend:
                                                       chunked_prefill=paper_chunked_prefill,
                                                       resident_reserve_only=resident_reserve_only,
                                                       recompute_on_swap_full=recompute_on_swap_full,
-                                                      resident_decode_headroom=resident_decode_headroom)
+                                                      resident_decode_headroom=resident_decode_headroom,
+                                                      prefix_cache=prefix_cache)
             self.scheduler._autellix_window = self.scheduler._autellix_paper.window
         worker = self.engine.model_executor.driver_worker
         if tp == 1 and batched_swap and not native:

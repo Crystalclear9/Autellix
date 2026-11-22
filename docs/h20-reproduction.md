@@ -112,6 +112,13 @@ t=0 提交，比较整批耗时和尾延迟。对照使用同一个随机种子�
 需要测 BFCL 积压时，可在新目录生成 `--bfcl-rates .24 .60 --resident-decode-headroom`
 计划。该选项给已选中且驻留的 decode 留出一步 token，长提示仍可分块进入同一次前向。
 
+在新目录生成带 `--exact-prefix-cache --qwen3-fused-qk-rope` 的计划，可以让两个 vLLM
+对照共用精确的前缀 KV 状态和 Qwen3 融合算子。全上下文的 PLAS 分块 prefill 默认使用
+精确 KV 状态。原生 vLLM-opt 的上游配置用无上述两项参数的计划执行，原生 SGLang
+沿用同一程序集合和批次预算。
+ShareGPT 的 24 程序复测使用 `--comparison-programs 24 --comparison-seed 2029`；
+从已有的 128 程序轨迹取样，与默认种子下的 16 个程序互不重叠。
+
 同一张卡依次运行匹配 Triton 配置的 SGLang、Autellix PLAS 或 ATLAS，以及采用上游默认优化的
 SGLang。功能验收使用 `check_prefill_priority_gpu.py --modern --mem-fraction-static .88`，
 分别验证 KV 换入换出与 `--host-kv-recompute`，检查恢复生成和连续生成的输出是否一致。

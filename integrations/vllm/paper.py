@@ -10,7 +10,7 @@ from autellix.runtime.window import SchedulingWindow
 class PaperPlan:
     def __init__(self, scheduler, controller, capacity, keep_resident_kv=False, refill_idle_slots=False,
                  chunked_prefill=False, resident_reserve_only=False, recompute_on_swap_full=False,
-                 resident_decode_headroom=False):
+                 resident_decode_headroom=False, prefix_cache=None):
         self.scheduler, self.controller = scheduler, controller
         self.window = SchedulingWindow(controller, capacity, refill_idle_slots=refill_idle_slots,
                                        resident_reserve_only=resident_reserve_only)
@@ -18,6 +18,7 @@ class PaperPlan:
         self.chunked_prefill = chunked_prefill
         self.recompute_on_swap_full = recompute_on_swap_full
         self.resident_decode_headroom = resident_decode_headroom
+        self.prefix_cache = prefix_cache
         self.prepared = set()
         self.reserved_slots = set()
 
@@ -27,6 +28,7 @@ class PaperPlan:
         from vllm.sequence import SequenceStatus
         s, ctl, window = self.scheduler, self.controller, self.window
         incoming, outgoing, copies, ignored = [], [], [], []
+        uncached_counts = {}
 
         def output(groups=()):
             groups = list(groups)
@@ -36,8 +38,10 @@ class PaperPlan:
             s._autellix_execution = [g.seq_group.request_id for g in groups]
             s._autellix_is_prefill = not any(not g.seq_group.is_prefill() for g in groups)
             num_tokens = sum(g.token_chunk_size for g in groups)
+            uncached_tokens = sum(uncached_counts.get(g.seq_group.request_id, g.token_chunk_size)
+                                  for g in groups) if uncached_counts else num_tokens
             ctl.emit("plan_step", requests=s._autellix_execution,
-                     decode=not s._autellix_is_prefill, remaining=window.remaining, tokens=num_tokens)
+                     decode=not s._autellix_is_prefill, remaining=window.remaining, tokens=uncached_tokens)
             ctl.begin(s._autellix_execution)
             return SchedulerOutputs(
                 scheduled_seq_groups=groups,
@@ -153,8 +157,17 @@ class PaperPlan:
             executes = rid not in resident and not (rid in window.reserve and not prefill)
             count = (group.get_seqs()[0].data.get_num_uncomputed_tokens() if prefill else 1) if executes else 0
             partial = False
+            cached = 0
             if self.chunked_prefill and prefill and count:
-                chunk = s._get_num_new_tokens(group, group.get_seqs()[0].status, True, budget)
+                seq = group.get_seqs()[0]
+                if self.prefix_cache is None:
+                    chunk = s._get_num_new_tokens(group, seq.status, True, budget)
+                else:
+                    cached = self.prefix_cache.reusable_tokens(seq)
+                    available = budget.remaining_token_budget()
+                    size = self.prefix_cache.block_size
+                    aligned = (available // size) * size
+                    chunk = count if count - cached <= available else (cached + aligned if aligned else 0)
                 if chunk == 0:
                     if not groups:
                         raise RuntimeError("token budget must allow one prefix-cache block")
@@ -166,11 +179,12 @@ class PaperPlan:
                     break
                 partial = chunk < count
                 count = chunk
+            uncached = count - cached
             if (resident_decodes and rid not in resident_decodes
-                    and count > budget.remaining_token_budget()):
+                    and uncached > budget.remaining_token_budget()):
                 defer_unreserved = True
                 continue
-            if tokens + count > s.scheduler_config.max_num_batched_tokens:
+            if tokens + uncached > s.scheduler_config.max_num_batched_tokens:
                 if groups and not self.chunked_prefill:
                     window.retain_prefix(index)
                 break
@@ -221,11 +235,13 @@ class PaperPlan:
             if rid in resident or (rid in window.reserve and not prefill):
                 continue
             groups.append(ScheduledSequenceGroup(seq_group=group, token_chunk_size=count))
+            if cached:
+                uncached_counts[rid] = uncached
             if not partial:
                 prepared.append(rid)
-            tokens += count
+            tokens += uncached
             if self.chunked_prefill and rid not in resident_decodes:
-                budget.add_num_batched_tokens(rid, count)
+                budget.add_num_batched_tokens(rid, uncached)
             if rid in window.reserve:
                 ctl.emit("reserve", rid=rid)
         if not groups and not incoming and not ignored and by_id:

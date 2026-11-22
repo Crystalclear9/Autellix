@@ -14,6 +14,8 @@
 单卡可直接读取本地 Qwen3-32B BF16 检查点。Qwen3 模型沿用 0.6.1 的 Qwen2 权重加载和
 执行接口，使用 Qwen3 的独立 head dimension 及 RoPE 前的 Q/K RMSNorm。原生 vLLM
 和 Autellix 共用这份适配。回放入口见 [H20 单卡 Qwen3-32B](../../docs/h20-reproduction.md#单卡-qwen3-32b)。
+`qwen3_fused_qk_rope=true` 在单个 Triton kernel 内完成 Q/K 的 RMSNorm 与 RoPE，保留
+原算子的中间舍入，并原样保留 V。该参数可同时应用于原生调度和 PLAS 对照。
 
 ## 调度与显存
 
@@ -24,6 +26,11 @@
 混合 prefill/decode 执行按程序优先级选批。`paper_chunked_prefill=true` 复用 vLLM 的 token 预算与前缀缓存块对齐规则，把长输入分到多个迭代。最后一段完成后才预留后续 decode 的 KV 槽位。默认整段 prefill，`max_num_batched_tokens` 需覆盖单条输入。预备请求占用 KV 显存，成为活动请求后参与 decode。
 
 分块 prefill 耗尽当步 token 预算时，待接纳请求和已入选的 decode 留在窗口内。实际 KV 空间不足时，调度窗口按优先级收缩。
+
+`exact_prefix_cache=true` 按实际算完的完整 KV 块发布可复用前缀。启用前缀缓存的全上下文
+PLAS 分块 prefill 默认使用这一路径。未完成的 KV 块释放时直接
+归还分配器，换入时按已计算长度恢复前缀状态。开启该选项后，PLAS 分块 prefill 用实际需要
+执行的 token 计入单步预算，并把逻辑进度连同已缓存的 token 一起交给 vLLM worker。
 
 分块 prefill 可用 `resident_decode_headroom=true`，给当前窗口中已驻留的活动 decode 各留一个单步 token。这只改变窗口内的混合批次构造，程序优先级和 KV 容量检查保持一致。
 

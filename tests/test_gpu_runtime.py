@@ -24,6 +24,73 @@ VLLM_DTYPE = os.environ.get("AUTELLIX_TEST_VLLM_DTYPE", "half")
 
 @unittest.skipUnless(BACKEND and MODEL, "requires AUTELLIX_GPU_BACKEND and AUTELLIX_TEST_MODEL")
 class RealInferenceTests(unittest.TestCase):
+    @unittest.skipUnless(BACKEND == "vllm" and os.environ.get("AUTELLIX_TEST_QWEN3_KERNEL"),
+                         "requires AUTELLIX_TEST_QWEN3_KERNEL=1 in the vLLM CUDA environment")
+    def test_qwen3_fused_qk_rope_matches_native(self):
+        import torch
+        from vllm.model_executor.layers.layernorm import RMSNorm
+        from vllm.model_executor.layers.rotary_embedding import get_rope
+        from integrations.vllm.qwen3_kernels import qk_rms_rope
+
+        torch.manual_seed(9)
+        dim, query_heads, kv_heads = 128, 64, 8
+        sizes = (query_heads * dim, kv_heads * dim, kv_heads * dim)
+        for dtype in (torch.bfloat16, torch.float16):
+            q_norm, k_norm = (RMSNorm(dim, eps=1e-6).to(device="cuda", dtype=dtype) for _ in range(2))
+            rope = get_rope(dim, dim, 2048, 1_000_000, dtype=dtype).to("cuda")
+            with torch.no_grad():
+                q_norm.weight.uniform_(.25, 1.5)
+                k_norm.weight.uniform_(.25, 1.5)
+                for tokens in (1, 8, 64, 2048):
+                    qkv = torch.randn(tokens, sum(sizes), device="cuda", dtype=dtype)
+                    positions = torch.randperm(2048, device="cuda")[:tokens]
+                    q, k, v = qkv.split(sizes, dim=-1)
+                    reference_q, reference_k = rope(
+                        positions, q_norm(q.reshape(-1, dim).contiguous()).view_as(q),
+                        k_norm(k.reshape(-1, dim).contiguous()).view_as(k))
+                    packed = qkv.clone()
+                    qk_rms_rope(packed, positions, rope.cos_sin_cache, q_norm.weight, k_norm.weight,
+                                query_heads, kv_heads, 1e-6)
+                    fused_q, fused_k, fused_v = packed.split(sizes, dim=-1)
+                    torch.testing.assert_close(fused_q, reference_q, rtol=.008, atol=.008)
+                    torch.testing.assert_close(fused_k, reference_k, rtol=.008, atol=.008)
+                    self.assertTrue(torch.equal(fused_v, v))
+
+    @unittest.skipUnless(BACKEND == "vllm" and os.environ.get("AUTELLIX_TEST_QWEN3_KERNEL"),
+                         "requires the local CUDA Qwen3 model")
+    def test_qwen3_reuses_only_executed_prefix_during_concurrent_prefill(self):
+        from integrations.vllm.backend import VLLMBackend
+
+        config = PolicyConfig(policy="fcfs", schedule_interval=1, overprovision=0)
+        sampling = dict(temperature=0, max_tokens=4, ignore_eos=True)
+        with tempfile.TemporaryDirectory(prefix="autellix-prefix-") as directory:
+            backend = VLLMBackend(MODEL, str(Path(directory, "state.sqlite")), config,
+                                  dtype=VLLM_DTYPE, gpu_memory_utilization=VLLM_MEMORY,
+                                  max_num_seqs=2, max_model_len=512, max_num_batched_tokens=32,
+                                  num_gpu_blocks_override=64, swap_space=.25, enforce_eager=False,
+                                  paper_chunked_prefill=True, exact_prefix_cache=True, qwen3_fused_qk_rope=True)
+            try:
+                prompt = backend.tokenize("Remember: the answer is Paris.\n" * 10 + "The capital of France is")
+                self.assertGreater(len(prompt), 64)
+                for pid in ("first", "second", "serial"):
+                    backend.table.open(pid)
+                backend.add("a", "first", prompt, sampling)
+                backend.step()
+                backend.add("b", "second", prompt, sampling)
+                next_seq = backend.scheduler.waiting[0].get_seqs()[0]
+                self.assertEqual(backend.scheduler._autellix_paper.prefix_cache.reusable_tokens(next_seq), 32)
+                outputs = {}
+                while backend.has_work():
+                    outputs.update((row["request_id"], row["token_ids"]) for row in backend.step() if row["finished"])
+                backend.add("c", "serial", prompt, sampling)
+                while backend.has_work():
+                    outputs.update((row["request_id"], row["token_ids"]) for row in backend.step() if row["finished"])
+                self.assertEqual(len(outputs["c"]), 4)
+                self.assertEqual(outputs["a"], outputs["c"])
+                self.assertEqual(outputs["b"], outputs["c"])
+            finally:
+                backend.close()
+
     @unittest.skipUnless(BACKEND == "vllm", "requires vllm")
     def test_chunked_prefill_matches_whole_prefill_with_graph_decode(self):
         tokens = [1 + i % 11 for i in range(84)]

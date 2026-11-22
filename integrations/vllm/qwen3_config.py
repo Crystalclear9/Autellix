@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 
 
-def register_local_qwen3(model, tensor_parallel_size):
+def register_local_qwen3(model, tensor_parallel_size, fused_qk_rope=False):
     config_path = Path(model) / "config.json"
     if not config_path.is_file():
         return
@@ -16,11 +16,11 @@ def register_local_qwen3(model, tensor_parallel_size):
     from transformers import AutoConfig, Qwen2Config
     from transformers.models.auto.configuration_auto import CONFIG_MAPPING
     from vllm.model_executor.models import ModelRegistry
-    from .qwen3 import Qwen3ForCausalLM
+    from .qwen3 import Qwen3ForCausalLM, Qwen3WithFusedQKRoPE
 
     if "qwen3" not in CONFIG_MAPPING:
         class Qwen3Config(Qwen2Config):
             model_type = "qwen3"
 
         AutoConfig.register("qwen3", Qwen3Config)
-    ModelRegistry.register_model("Qwen3ForCausalLM", Qwen3ForCausalLM)
+    ModelRegistry.register_model("Qwen3ForCausalLM", Qwen3WithFusedQKRoPE if fused_qk_rope else Qwen3ForCausalLM)

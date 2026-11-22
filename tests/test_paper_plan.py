@@ -66,6 +66,22 @@ class PaperPlanTests(unittest.TestCase):
         self.assertEqual([g.seq_group.request_id for g in out.scheduled_seq_groups], ["high"])
         self.assertEqual(len(self.s.waiting), 1)
 
+    def test_completed_prefix_only_consumes_uncached_forward_budget(self):
+        self.ctl.config = PolicyConfig(overprovision=0)
+        fresh, decode = Group("fresh", True), Group("decode")
+        fresh.seq.data.get_num_uncomputed_tokens = lambda: 68
+        self.s.waiting.append(fresh)
+        self.s.running.append(decode)
+        self.priority.update(fresh=0, decode=1)
+        self.s.scheduler_config.max_num_seqs = 2
+        prefix = NS(block_size=16, reusable_tokens=lambda _: 48)
+        plan = PaperPlan(self.s, self.ctl, 2, chunked_prefill=True, prefix_cache=prefix)
+        step = plan.next_step()
+        self.assertEqual([(g.seq_group.request_id, g.token_chunk_size) for g in step.scheduled_seq_groups],
+                         [("fresh", 68), ("decode", 1)])
+        self.assertEqual(step.num_batched_tokens, 69)
+        self.assertEqual(next(fields["tokens"] for event, fields in self.events if event == "plan_step"), 21)
+
     def test_mixed_batch_keeps_both_admitted_phases(self):
         self.ctl.config = PolicyConfig(overprovision=0)
         self.priority.update(high=0, low=1)

@@ -57,7 +57,9 @@ def write_json(path, value):
             staged.unlink(missing_ok=True)
 
 
-def write_comparison_plans(model, inputs, destination, device, bfcl_rates, resident_decode_headroom):
+def write_comparison_plans(model, inputs, destination, device, bfcl_rates,
+                           resident_decode_headroom, qwen3_fused_qk_rope, exact_prefix_cache,
+                           programs, seed):
     destination.mkdir(parents=True, exist_ok=True)
     context, capacity, batch, kv_tokens, block = 32768, 8, 2048, 65536, 16
     vllm = dict(dtype="bfloat16", max_model_len=context, max_num_seqs=capacity,
@@ -65,6 +67,10 @@ def write_comparison_plans(model, inputs, destination, device, bfcl_rates, resid
                 num_gpu_blocks_override=kv_tokens // block, gpu_memory_utilization=.93,
                 swap_space=16, enforce_eager=False, max_seq_len_to_capture=context,
                 seed=0, publish_activity=False)
+    if qwen3_fused_qk_rope:
+        vllm["qwen3_fused_qk_rope"] = True
+    if exact_prefix_cache:
+        vllm["exact_prefix_cache"] = True
     sglang = dict(dtype="bfloat16", context_length=context, max_running_requests=capacity,
                   max_total_tokens=kv_tokens, chunked_prefill_size=batch, max_prefill_tokens=batch,
                   tp_size=1, pp_size=1, dp_size=1, mem_fraction_static=.93, random_seed=0,
@@ -82,7 +88,7 @@ def write_comparison_plans(model, inputs, destination, device, bfcl_rates, resid
         label = f"qwen32-{family}"
         common = dict(model=str(model), device=str(device), workload=str(trace), workload_family=family,
                       workload_kind=label, experiment="offline" if rates == [None] else "online",
-                      programs=16, unique_programs=True, rates=rates, seed=2026, repeats=1,
+                      programs=programs, unique_programs=True, rates=rates, seed=seed, repeats=1,
                       paper_figures=figures,
                       compact_calls=True, request_timeout=3600, scheduler_trace=False)
         write_json(destination / f"{label}-vllm-plan.json",
@@ -104,16 +110,26 @@ def main():
                         help="BFCL offered loads in programs/s for comparison plans")
     parser.add_argument("--resident-decode-headroom", action="store_true",
                         help="let selected resident decodes share a forward with a long prefill")
+    parser.add_argument("--qwen3-fused-qk-rope", action="store_true",
+                        help="use fused Qwen3 Q/K normalization and RoPE in both vLLM cases")
+    parser.add_argument("--exact-prefix-cache", action="store_true",
+                        help="publish completed KV blocks and charge uncached prefill tokens")
+    parser.add_argument("--comparison-programs", type=int, default=16,
+                        help="distinct programs sampled from each comparison trace")
+    parser.add_argument("--comparison-seed", type=int, default=2026)
     args = parser.parse_args()
     if args.device < 0:
         parser.error("device must be a nonnegative GPU index")
     if any(not math.isfinite(rate) or rate <= 0 for rate in args.bfcl_rates):
         parser.error("BFCL rates must be finite and positive")
+    if args.comparison_programs < 1:
+        parser.error("--comparison-programs must be positive")
 
     model = args.model.resolve(strict=True)
     if args.comparison_inputs:
         write_comparison_plans(model, args.comparison_inputs, args.run_dir, args.device, args.bfcl_rates,
-                               args.resident_decode_headroom)
+                               args.resident_decode_headroom, args.qwen3_fused_qk_rope, args.exact_prefix_cache,
+                               args.comparison_programs, args.comparison_seed)
         return
 
     from transformers import AutoTokenizer
