@@ -166,9 +166,11 @@ def install(cls, options):
             old_remaining = window.remaining
             selected, _ = window.select(running.union(r.rid for r in self.waiting_queue),
                                         running.union(self._autellix_reserve))
-            for rid in list(self._autellix_reserve):
-                if rid not in window.cohort:
-                    release_reserves(self, [rid])
+            departing = [rid for rid in self._autellix_reserve if rid not in window.cohort]
+            if departing:
+                # A rotation leaves the prefix resident and evictable in radix.
+                # Use the same residency policy as other paused requests.
+                release_reserves(self, departing, preserve=not options.get("cache_paused_kv"))
             if self._autellix_paper and old_remaining > 0 and selected == running:
                 ctl.emit("continue_plan", requests=[r.rid for r in batch.reqs])
                 return None

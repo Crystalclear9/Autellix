@@ -72,6 +72,50 @@ class CompletedDecodeTests(unittest.TestCase):
                 scheduler.running_batch.reqs = [first, running]
                 self.assertEqual(scheduler.get_new_batch_prefill().reqs, [second, first, running])
 
+    def test_rotating_reserve_uses_the_configured_paused_kv_policy(self):
+        for cache_paused in (True, False):
+            with self.subTest(cache_paused=cache_paused), tempfile.TemporaryDirectory() as directory:
+                class Native:
+                    def __init__(self):
+                        self.policy = SimpleNamespace()
+                        self.server_args = SimpleNamespace(max_running_requests=2)
+                        self.running_batch = SimpleNamespace(reqs=[], filter_batch=lambda: None)
+                    _add_request_to_queue = Mock()
+                    _extend_requests_to_queue = Mock()
+                    run_batch = Mock()
+                    process_batch_result = Mock()
+                    abort_request = Mock()
+                    check_memory = Mock()
+
+                    def get_new_batch_prefill(self):
+                        result = SimpleNamespace(reqs=list(self.waiting_queue))
+                        self.waiting_queue = []
+                        return result
+
+                with patch.dict("sys.modules", {"torch": Mock()}):
+                    install(Native, {"table_path": str(Path(directory, "state.sqlite")),
+                                     "config": {"overprovision": 1}, "capacity": 1,
+                                     "cache_paused_kv": cache_paused})
+                scheduler = Native()
+                with closing(scheduler.autellix.table) as table:
+                    table.open("p")
+                    scheduler.waiting_queue = [SimpleNamespace(rid=rid, last_node=rid, _autellix_reserved_tokens=[7],
+                                                               init_next_round_input=lambda _: None)
+                                               for rid in ("first", "next", "old-reserve")]
+                    for req in scheduler.waiting_queue:
+                        scheduler.autellix.admit(req.rid, "p")
+                    scheduler._autellix_reserve["old-reserve"] = "old-reserve"
+                    scheduler._autellix_host = SimpleNamespace(saved={}, save=Mock(return_value=True), discard=Mock())
+                    scheduler.tree_cache = SimpleNamespace(inc_lock_ref=Mock(), dec_lock_ref=Mock(),
+                        match_prefix=lambda _: SimpleNamespace(device_indices=[8]))
+
+                    result = scheduler.get_new_batch_prefill()
+                    self.assertEqual([req.rid for req in result.reqs], ["first", "next"])
+                    self.assertEqual([req.rid for req in scheduler.waiting_queue], ["old-reserve"])
+                    self.assertEqual(scheduler._autellix_reserve, {})
+                    self.assertEqual(scheduler.tree_cache.dec_lock_ref.call_args_list.count((("old-reserve",), {})), 1)
+                    self.assertEqual(scheduler._autellix_host.save.call_count, 0 if cache_paused else 1)
+
     def test_promoted_lower_reserve_yields_to_highest_restore(self):
         with tempfile.TemporaryDirectory() as directory:
             locks = {"lower"}

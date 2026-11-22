@@ -53,7 +53,7 @@ P40 路径同时修复了固定版本 Llama 模型在 PP 下的 tied embedding �
 新 prefill 的空间，按队列后缀释放临时锁并重试接纳；已晋升的低优先级预备项同样
 可以换出。`scripts/check_prefill_priority_gpu.py` 在实际 GPU 上验证此路径与生成一致性。
 
-预备请求离开窗口或因显存压力被释放时，先保存 CPU 副本再解锁。备份失败保留原有 GPU 锁；替换主机备份失败也保留旧副本。成功接纳或取消后回收主机副本。
+启用 `autellix_cache_paused_kv` 时，轮换出窗口的预备请求解锁后继续留在 radix 缓存，跟随普通暂停请求的回收规则。因显存压力释放预备请求时先保存 CPU 副本再解锁。关闭 radix 暂停缓存时，普通轮换也保存 CPU 副本。备份失败保留原有 GPU 锁；成功接纳或取消后回收主机副本。
 
 单卡可用 `autellix_host_kv_recompute=true` 处理主机 KV 预算耗尽。达到预算时暂缓保存
 这次换出，保留请求和已生成 token，重新接纳时使用 radix 前缀并补算缺失 KV。
