@@ -75,6 +75,17 @@ class PaperSuiteSummary(unittest.TestCase):
         with self.assertRaises(ValueError):
             summary.summarize(rows)
 
+    def test_vllm_schedule_options_keep_matching_model_budgets_paired(self):
+        native, candidate = self.records()
+        native.update(condition="vllm-opt", arm="vllm-opt")
+        candidate.update(condition="autellix", arm="plas")
+        for row in (native, candidate):
+            row.update(versions={"vllm": "0.6.1"}, effective_engine_args={"max_num_batched_tokens": 2048})
+        native["effective_engine_args"].update(autellix_mode="vllm-opt", observe_native=False)
+        candidate["effective_engine_args"].update(resident_decode_headroom=True, recompute_on_swap_full=True)
+        result = summary.summarize([native, candidate])
+        self.assertTrue(result["comparisons"][0]["pairing"]["same_options"])
+
     def test_labeled_dag_replay_uses_critical_path_and_records_backend_cache_count(self):
         rows = self.records()
         for row in rows:
