@@ -96,8 +96,10 @@ GPU 回归使用 `AUTELLIX_TEST_LEGACY_GPU=1`；仍需设置后端和模型环�
 要求 `PolicyConfig.overprovision=0`；返回 metrics 中的 `native_sglang=true`
 用于标记这条路径，不包含 Autellix 的执行/继承统计。外层 IPC 与会话封装仍在。
 若同时启用 `autellix_legacy_gpu`，只安装相同的硬件兼容算子，不安装调度钩子。
-双方使用相同的 overlap/chunked prefill 设置。`policy=fcfs` 是 Autellix 内部策略；
-原生调度对照使用 `autellix_native_baseline=true`。
+单独开启 `autellix_native_baseline` 时沿用适配器的同步调度及分块设置。
+再开启 `autellix_native_defaults=true` 时使用上游默认值，可单独设置
+`disable_overlap_schedule=true` 测量原生 overlap 的影响。
+`policy=fcfs` 走 Autellix 的调度窗口和 KV 管理，可与同配置的 PLAS/ATLAS 配对。
 
 配对实验、输入构造限制和结论见 [论文对照审计](../../docs/autellix-paper-audit.md)。
 
