@@ -86,6 +86,32 @@ for family in sharegpt bfcl sharegpt-offline128 lats mixed; do
 done
 ```
 
+同一份 Qwen 轨迹也可以直接生成 vLLM 与原生 SGLang 的对照计划。先在
+`autellix-vllm061` 环境测原生 vLLM-opt 和 PLAS，再切到 `autellix-sglang` 环境测原生
+SGLang。两个环境都读取共享目录中的相同权重。每组只用一张卡，保留 BF16、
+32,768-token 上下文、8 个活动请求、2,048-token prefill 分块和 65,536-token KV 容量。
+
+```bash
+comparison="$data/runs/qwen32-comparison"
+python scripts/prepare_h20_qwen32.py --model "$model" --comparison-inputs "$out" \
+  --run-dir "$comparison" --device "$gpu"
+for family in bfcl sharegpt; do
+  python scripts/run_sglang_matrix.py --plan "$comparison/qwen32-$family-vllm-plan.json" \
+    --output "$comparison/qwen32-$family-vllm.json" --resume
+done
+# 切换至 autellix-sglang 环境并清除 vLLM 专用的 LD_PRELOAD 后运行。
+for family in bfcl sharegpt; do
+  python scripts/run_sglang_matrix.py --plan "$comparison/qwen32-$family-sglang-plan.json" \
+    --output "$comparison/qwen32-$family-sglang.json" --resume
+done
+```
+
+BFCL 按泊松到达回放，比较程序级毫秒/token、完成率和排空时间。ShareGPT 所有程序在
+t=0 提交，比较整批耗时和尾延迟。对照使用同一个随机种子和请求顺序，按 trace 哈希与
+逐调用 token 数核对工作量。关闭调度轨迹的测量会在引擎退出时清理临时 SQLite 状态。
+需要测 BFCL 积压时，可在新目录生成 `--bfcl-rates .24 .60 --resident-decode-headroom`
+计划。该选项给已选中且驻留的 decode 留出一步 token，长提示仍可分块进入同一次前向。
+
 同一张卡依次运行匹配 Triton 配置的 SGLang、Autellix PLAS 或 ATLAS，以及采用上游默认优化的
 SGLang。功能验收使用 `check_prefill_priority_gpu.py --modern --mem-fraction-static .88`，
 分别验证 KV 换入换出与 `--host-kv-recompute`，检查恢复生成和连续生成的输出是否一致。

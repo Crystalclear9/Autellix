@@ -255,6 +255,23 @@ class PaperPlanTests(unittest.TestCase):
         self.assertEqual([g.seq_group.request_id for g in out.scheduled_seq_groups], ["a"])
         self.assertEqual(len(self.refreshes), 1)
 
+    def test_completion_reopens_a_capacity_limited_window(self):
+        self.ctl.config = PolicyConfig(schedule_interval=3, overprovision=0)
+        self.priority.update(a=0, b=1, blocked=2, later=3)
+        self.s.running.extend([Group("a"), Group("b")])
+        self.s.waiting.extend([Group("blocked", True), Group("later", True)])
+        self.s.block_manager.can_allocate = lambda _: self.status.LATER
+        plan = PaperPlan(self.s, self.ctl, 3, keep_resident_kv=True, refill_idle_slots=True)
+        plan.next_step()
+        self.assertEqual(plan.window.cohort, ["a", "b"])
+        plan.window.executed()
+        self.s.running.popleft()
+        self.s.block_manager.can_allocate = lambda _: self.status.OK
+        refill = plan.next_step()
+        self.assertEqual([g.seq_group.request_id for g in refill.scheduled_seq_groups],
+                         ["blocked", "later", "b"])
+        self.assertEqual(len(self.refreshes), 1)
+
     def test_resident_reserve_does_not_consume_decode_token_budget(self):
         self.priority.update(a=0, reserve=1)
         self.s.scheduler_config.max_num_batched_tokens = 1

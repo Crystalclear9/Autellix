@@ -1,6 +1,7 @@
 """Prepare single-H20 Qwen3-32B replay plans using the existing ShareGPT and agent traces."""
 import argparse
 import json
+import math
 from pathlib import Path
 import random
 import re
@@ -56,18 +57,66 @@ def write_json(path, value):
             staged.unlink(missing_ok=True)
 
 
+def write_comparison_plans(model, inputs, destination, device, bfcl_rates, resident_decode_headroom):
+    destination.mkdir(parents=True, exist_ok=True)
+    context, capacity, batch, kv_tokens, block = 32768, 8, 2048, 65536, 16
+    vllm = dict(dtype="bfloat16", max_model_len=context, max_num_seqs=capacity,
+                max_num_batched_tokens=batch, block_size=block, tensor_parallel_size=1,
+                num_gpu_blocks_override=kv_tokens // block, gpu_memory_utilization=.93,
+                swap_space=16, enforce_eager=False, max_seq_len_to_capture=context,
+                seed=0, publish_activity=False)
+    sglang = dict(dtype="bfloat16", context_length=context, max_running_requests=capacity,
+                  max_total_tokens=kv_tokens, chunked_prefill_size=batch, max_prefill_tokens=batch,
+                  tp_size=1, pp_size=1, dp_size=1, mem_fraction_static=.93, random_seed=0,
+                  autellix_native_defaults=True)
+    paper = dict(paper_chunked_prefill=True, keep_resident_kv=True, refill_idle_slots=True,
+                 resident_reserve_only=True, recompute_on_swap_full=True, fused_swap=True)
+    if resident_decode_headroom:
+        paper["resident_decode_headroom"] = True
+    native = dict(name="vllm-opt", policy="vllm-opt", interval=1,
+                  engine_args=dict(preemption_mode=None))
+    plas = dict(name="autellix", policy="plas", reserve=1, interval=8, quantum_scale=16,
+                boundary_scale=128, engine_args=paper)
+    for family, rates, figures in (("bfcl", bfcl_rates, [12, 13]), ("sharegpt", [None], [16])):
+        trace = (inputs / f"qwen32-{family}-trace.json").resolve(strict=True)
+        label = f"qwen32-{family}"
+        common = dict(model=str(model), device=str(device), workload=str(trace), workload_family=family,
+                      workload_kind=label, experiment="offline" if rates == [None] else "online",
+                      programs=16, unique_programs=True, rates=rates, seed=2026, repeats=1,
+                      paper_figures=figures,
+                      compact_calls=True, request_timeout=3600, scheduler_trace=False)
+        write_json(destination / f"{label}-vllm-plan.json",
+                   dict(common, backend="vllm", engine_args=vllm, cases=[native, plas]))
+        write_json(destination / f"{label}-sglang-plan.json", dict(
+            common, backend="sglang", engine_args=sglang,
+            cases=[dict(name="sglang-native", policy="sglang-native")]))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", type=Path, required=True)
-    parser.add_argument("--datasets", type=Path, required=True)
+    sources = parser.add_mutually_exclusive_group(required=True)
+    sources.add_argument("--datasets", type=Path)
+    sources.add_argument("--comparison-inputs", type=Path, help="reuse previously prepared Qwen3 traces")
     parser.add_argument("--run-dir", type=Path, required=True)
     parser.add_argument("--device", required=True, type=int, help="one physical H20 GPU index")
+    parser.add_argument("--bfcl-rates", nargs="+", type=float, default=[.24],
+                        help="BFCL offered loads in programs/s for comparison plans")
+    parser.add_argument("--resident-decode-headroom", action="store_true",
+                        help="let selected resident decodes share a forward with a long prefill")
     args = parser.parse_args()
     if args.device < 0:
         parser.error("device must be a nonnegative GPU index")
+    if any(not math.isfinite(rate) or rate <= 0 for rate in args.bfcl_rates):
+        parser.error("BFCL rates must be finite and positive")
+
+    model = args.model.resolve(strict=True)
+    if args.comparison_inputs:
+        write_comparison_plans(model, args.comparison_inputs, args.run_dir, args.device, args.bfcl_rates,
+                               args.resident_decode_headroom)
+        return
 
     from transformers import AutoTokenizer
-    model = args.model.resolve(strict=True)
     tokenizer = AutoTokenizer.from_pretrained(model, local_files_only=True)
     original_template = tokenizer.chat_template
     tokenizer.chat_template = "{% set enable_thinking = false %}" + original_template

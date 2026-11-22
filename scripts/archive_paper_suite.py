@@ -68,7 +68,7 @@ def main():
                 shutil.copy2(search_log, inputs / search_log.name)
         traces = root / "traces"
         traces.mkdir()
-        state_dirs = {row["state_dir"] for row in rows}
+        state_dirs = {row["state_dir"] for row in rows if row["plan"].get("scheduler_trace", True)}
         for name in ["prefill-priority-gpu-check.json", "host-kv-overflow-gpu.json"]:
             check = run / name
             if check.exists():

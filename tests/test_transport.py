@@ -48,6 +48,12 @@ class IPCTransportTests(unittest.TestCase):
         self.engine.end_session(pid)
         self.assertEqual(self.engine.table.snapshot(), {})
 
+    def test_untraced_engine_removes_its_temporary_state(self):
+        with InferenceEngine([ReplicaConfig("vllm", "fake")], scheduler_trace=False) as engine:
+            state = engine.state_dir
+            self.assertTrue((state / "programs.sqlite").is_file())
+        self.assertFalse(state.exists())
+
     def test_short_balances_long_pins_and_cancel_releases_load(self):
         pid = self.engine.start_session()
         first = self.engine.submit(pid, input_ids=[1], sampling={"hold": True})

@@ -11,6 +11,10 @@
 
 后端检查版本，并在自己的进程内安装钩子，不修改已安装的 vLLM 文件。
 
+单卡可直接读取本地 Qwen3-32B BF16 检查点。Qwen3 模型沿用 0.6.1 的 Qwen2 权重加载和
+执行接口，使用 Qwen3 的独立 head dimension 及 RoPE 前的 Q/K RMSNorm。原生 vLLM
+和 Autellix 共用这份适配。回放入口见 [H20 单卡 Qwen3-32B](../../docs/h20-reproduction.md#单卡-qwen3-32b)。
+
 ## 调度与显存
 
 默认 `paper` 模式由 `paper.py` 按全局优先级接纳请求，不使用原生 `_schedule()` 决定批次。窗口开始时预留后续 KV 槽位；窗口内更新 token 和 block 元数据，预备请求可在活动请求结束后补位。

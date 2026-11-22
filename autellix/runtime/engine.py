@@ -129,7 +129,10 @@ class InferenceEngine:
         self.replicas = replicas
         self.model = replicas[0].model
         self.policy = policy or PolicyConfig()
-        self.state_dir = Path(state_dir or tempfile.mkdtemp(prefix="autellix-"))
+        self._temporary_state = (tempfile.TemporaryDirectory(prefix="autellix-")
+                                 if state_dir is None and not scheduler_trace else None)
+        default_state_dir = self._temporary_state.name if self._temporary_state else None
+        self.state_dir = Path(state_dir or default_state_dir or tempfile.mkdtemp(prefix="autellix-"))
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self.table = ProgramTable(str(self.state_dir / "programs.sqlite"))
         self.threshold = locality_threshold
@@ -367,6 +370,8 @@ class InferenceEngine:
         for channel in self.commands + [self.events]:
             channel.close()
             channel.cancel_join_thread()
+        if self._temporary_state is not None:
+            self._temporary_state.cleanup()
 
     def __enter__(self):
         try:

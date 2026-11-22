@@ -39,6 +39,9 @@ class VLLMBackend:
         from vllm.engine.llm_engine import LLMEngine
         import torch
 
+        from .qwen3_config import register_local_qwen3
+        register_local_qwen3(model, tp)
+
         args = dict(enable_prefix_caching=True, enforce_eager=True,
                     disable_async_output_proc=True, use_v2_block_manager=True,
                     preemption_mode="swap", swap_space=1, max_num_seqs=8)

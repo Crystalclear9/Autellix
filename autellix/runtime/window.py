@@ -33,12 +33,13 @@ class SchedulingWindow:
             self.remaining = ctl.config.schedule_interval
             self.capacity_limited = False
             ctl.emit("schedule_window", requests=cohort, decode_steps=self.remaining)
-        elif self.refill_idle_slots and not self.capacity_limited and len(cohort) < self.capacity:
+        elif (self.refill_idle_slots and len(cohort) < self.capacity
+              and (not self.capacity_limited or len(cohort) < len(self.cohort))):
             spare = self.capacity - len(cohort)
             refill = nsmallest(spare, available.difference(cohort), key=ctl.key)
             if refill:
-                # Use vacancies only. The admitted cohort keeps its order and
-                # the next priority refresh remains on its original boundary.
+                # A completion can free KV after a failed admission. Retry
+                # only after that change and preserve the surviving order.
                 cohort.extend(refill)
                 ctl.emit("refill_idle", requests=refill, remaining_steps=self.remaining)
         active = set(cohort[:self.capacity])

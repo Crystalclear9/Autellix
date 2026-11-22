@@ -58,7 +58,7 @@ def main():
             workloads[name] = str(target.relative_to(root))
         traces = root / "traces"
         traces.mkdir()
-        for name in sorted({row["state_dir"] for row in rows}):
+        for name in sorted({row["state_dir"] for row in rows if row["plan"].get("scheduler_trace", True)}):
             source = relocated(name, layout)
             shutil.copytree(source, traces / source.name)
         manifest = dict(workloads=workloads, files={})
