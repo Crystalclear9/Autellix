@@ -11,6 +11,9 @@ def test_call_concurrency_samples_outstanding_calls():
     calls = [dict(submitted_seconds=0, completed_seconds=5),
              dict(submitted_seconds=4, completed_seconds=11)]
     assert [p["active_calls"] for p in motivation.call_concurrency(calls, 12, interval=2)] == [1, 1, 2, 1, 1, 1, 0]
+    assert motivation.call_concurrency(calls, 12, interval=2, start=4) == [
+        dict(seconds=4, active_calls=2), dict(seconds=6, active_calls=1),
+        dict(seconds=8, active_calls=1), dict(seconds=10, active_calls=1), dict(seconds=12, active_calls=0)]
 
 
 def test_prefix_counts_distinguish_same_program_and_prior_programs():

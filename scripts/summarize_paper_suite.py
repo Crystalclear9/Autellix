@@ -80,7 +80,9 @@ def metrics(row):
     if prompt_tokens and all(c is not None for c in cached):
         cache["sglang_cached_tokens"] = sum(cached)
         cache["sglang_cached_tokens_per_prompt_token"] = sum(cached) / prompt_tokens
-    return dict(workload=kind, condition=row["condition"], rate=row["rate"], seed=row["seed"],
+    return dict(workload=kind, workload_family=row["plan"].get("workload_family", kind),
+                paper_figures=row["plan"].get("paper_figures", []),
+                condition=row["condition"], rate=row["rate"], seed=row["seed"],
                 model=row["model"], versions=row["versions"], engine_args=row["effective_engine_args"],
                 devices=row["device_groups"], trace_sha256=row["trace_sha256"],
                 programs=len(arrivals), calls=len(row["calls"]), output_tokens=row["completion_tokens"],

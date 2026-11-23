@@ -1,7 +1,9 @@
 """Plot measured paper-workload latency curves and paired changes."""
 import argparse
+from collections import defaultdict
 import json
 from pathlib import Path
+from statistics import mean
 
 
 def main():
@@ -25,28 +27,44 @@ def main():
                 path.write_text("\n".join(line.rstrip() for line in path.read_text(encoding="utf-8").splitlines()) + "\n", encoding="utf-8")
         plt.close(fig)
 
-    fig, axes = plt.subplots(2, 2, figsize=(10, 8), layout="constrained")
-    for ax, workload in zip(axes.flat, ("sharegpt", "bfcl", "lats", "mixed")):
-        selected = [t for t in result["trials"] if t["workload"] == workload]
-        if not selected:
-            ax.set(title=workload.upper())
-            ax.text(.5, .5, "Pending completed pairs", ha="center", va="center", transform=ax.transAxes)
-            ax.set_axis_off()
-            continue
-        for index, condition in enumerate(dict.fromkeys(t["condition"] for t in selected)):
-            rows = sorted((t for t in selected if t["condition"] == condition), key=lambda t: t["rate"])
-            x = [t["rate"] for t in rows]
-            color = colors.get(condition, f"C{index}")
-            ax.plot(x, [t["paper_token_latency"]["mean"] for t in rows], "o-", color=color, label=condition + " mean")
-            ax.plot(x, [t["paper_token_latency"]["p95"] for t in rows], "x--", color=color, alpha=.65, label=condition + " P95")
-        ax.set(title=workload.upper(), xlabel="Offered programs / second", ylabel="Program token latency (s/token)")
+    trials = [t for t in result["trials"] if t["rate"] is not None
+              and (not t.get("paper_figures") or set(t["paper_figures"]) & {12, 13})]
+    workloads = ("sharegpt", "bfcl", "lats", "mixed")
+    models = sorted({Path(t["model"]).name for t in trials})
+    conditions = list(dict.fromkeys(t["condition"] for t in trials))
+
+    def curve(ax, workload, metric):
+        rows = [t for t in trials if t.get("workload_family", t["workload"]) == workload]
+        for index, condition in enumerate(conditions):
+            results = defaultdict(list)
+            for trial in rows:
+                value = trial["paper_token_latency"][metric]
+                if trial["condition"] == condition and value is not None:
+                    results[trial["rate"]].append(value)
+            if results:
+                rates = sorted(results)
+                ax.plot(rates, [mean(results[rate]) for rate in rates], "o-",
+                        color=colors.get(condition, f"C{index}"), label=condition)
+        ax.set(title=f"{workload.upper()} · {metric.upper()}", xlabel="Offered programs / second",
+               ylabel="Program token latency (s/token)")
         ax.grid(alpha=.18)
-        ax.legend(frameon=False, fontsize=8)
-    models = sorted({Path(t["model"]).name for t in result["trials"]})
+        if ax.lines:
+            ax.legend(frameon=False, fontsize=8)
+
+    fig, axes = plt.subplots(2, 2, figsize=(10, 8), layout="constrained")
+    for ax, workload in zip(axes.flat, workloads):
+        curve(ax, workload, "mean")
     fig.suptitle(args.title or " / ".join(models), fontsize=13)
     save(fig, "paper-workload-curves")
 
-    rows = result["comparisons"]
+    fig, axes = plt.subplots(4, 2, figsize=(11, 13), layout="constrained")
+    for (p95, p99), workload in zip(axes, workloads):
+        curve(p95, workload, "p95")
+        curve(p99, workload, "p99")
+    fig.suptitle(args.title or " / ".join(models), fontsize=13)
+    save(fig, "paper-workload-tail-curves")
+
+    rows = [row for row in result["comparisons"] if row["rate"] is not None]
     fig, axes = plt.subplots(1, 3, figsize=(14, max(5, len(rows)*.45)), layout="constrained", sharey=True)
     labels = [f"{r['workload']} {r['rate']:g} / {r['condition']}" for r in rows]
     for ax, field, title in zip(axes,
