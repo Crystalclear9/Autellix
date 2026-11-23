@@ -59,6 +59,7 @@ def workload_path(args, family):
 def build_plans(args):
     selected = set(args.figures)
     figures = tuple(sorted(selected & {12, 13}))
+    profiled_workloads = tuple(family for family in ("sharegpt", "lats") if family in args.workloads)
     device = str(args.gpu)
     engine_args = {
         "vllm": dict(dtype="bfloat16", max_model_len=32768, tensor_parallel_size=1,
@@ -107,7 +108,7 @@ def build_plans(args):
                     compact_calls=True, engine_args=args_for_engine, cases=cases)
 
     for backend in args.backends:
-        if backend == "vllm" and 4 in selected:
+        if backend == "vllm" and 4 in selected and "sharegpt" in args.workloads:
             family, rate = "sharegpt", args.rates[0] if args.rates else .20
             cases = [case for case in cases_for(backend, family) if case["name"] in {"vllm", "autellix"}]
             figure = plan(backend, family, "fig4-concurrency-vllm", (4,), cases, (rate,), None)
@@ -115,6 +116,8 @@ def build_plans(args):
                        steady_state_start_seconds=args.diagnostic_warmup)
         if backend == "vllm" and selected & {5, 6}:
             for family in ("sharegpt", "bfcl", "lats"):
+                if family not in args.workloads:
+                    continue
                 cases = [case for case in cases_for(backend, family) if case["name"] in {"vllm", "mlfq", "autellix"}]
                 yield plan(backend, family, f"fig5-6-{family}-vllm", sorted(selected & {5, 6}), cases,
                            args.rates or (RATES[family][1], RATES[family][3]),
@@ -138,7 +141,7 @@ def build_plans(args):
                     name = f"fig16-{count}-{backend}-{case['name']}"
                     yield plan(backend, "sharegpt", name, (16,), [case], (None,), count, offline=True)
         if backend == "vllm" and 17 in selected:
-            for family in ("sharegpt", "lats"):
+            for family in profiled_workloads:
                 cases = [case for case in cases_for(backend, family)
                          if case["name"] in {"vllm-opt", "mlfq", "autellix"}]
                 name = f"fig17-{family}-{backend}"
@@ -146,7 +149,7 @@ def build_plans(args):
                 yield plan(backend, family, name, (17,), cases, args.rates or (pressure_rate,),
                            program_count(family, args.profile_programs), timing=True)
         if 19 in selected:
-            for family in ("sharegpt", "lats"):
+            for family in profiled_workloads:
                 candidate = cases_for(backend, family)[-1]
                 mode = dict(candidate["engine_args"])
                 if backend == "vllm":

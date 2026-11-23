@@ -255,6 +255,9 @@ SHA-256 已核对，记录位于 `data/autellix/import/migration-verification.js
 | 图 18，最优调度对照 | ShareGPT 与 LATS 各抽取 64 个程序，扫描至积压区间的等步长模拟，含可提前获知剩余服务量的 SRPT |
 | 图 19，KV 交换 | 跨层 fused 打包与解包，测原生 vLLM 搬运、PyTorch 聚合和 fused 路径。推理消融同时记录逻辑换出、主机与设备之间的 KV 载荷传输次数及耗时，并比较 N=1 窗口 |
 
+ShareGPT 的单程序同时只有一个调用。测图 17 和图 19 的抢占压力时可指定
+`--workloads sharegpt --profile-programs 64`，让同时提交的程序数超过 GPU 的活动槽数。
+
 SGLang 单步预填充预算耗尽后保留已选请求与 decode，GPU KV 或请求槽位耗尽时按优先级收缩窗口。
 PLAS 与 ATLAS 在窗口边界只读取已累计服务或等待时间的程序，其余程序使用零历史。
 
