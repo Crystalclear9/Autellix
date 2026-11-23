@@ -119,11 +119,21 @@ class VLLMBackend:
             def timed_schedule(*args, **kwargs):
                 started = perf_counter()
                 result = schedule(*args, **kwargs)
-                outputs = result[1]
+                seconds = perf_counter() - started
+                metadata, outputs, _ = result
                 groups = len(outputs.scheduled_seq_groups)
                 prefill = outputs.num_prefill_groups
                 self.scheduler._autellix_timed_phase = ("prefill" if groups == prefill else "mixed") if prefill else "decode"
-                controller.emit("schedule_time", seconds=perf_counter() - started,
+                logical = cached = 0
+                for group in metadata[:prefill]:
+                    chunk = group.token_chunk_size
+                    context = next(iter(group.seq_data.values())).get_num_computed_tokens()
+                    prefix = len(group.computed_block_nums or ()) * self.scheduler.cache_config.block_size
+                    logical += chunk
+                    # The native input builder evaluates one token even on a full hit.
+                    cached += min(chunk - 1, max(0, prefix - context))
+                controller.emit("schedule_time", seconds=seconds, logical_prefill_tokens=logical,
+                                cached_prefill_tokens=cached,
                                 requests=[g.seq_group.request_id for g in outputs.scheduled_seq_groups])
                 return result
 

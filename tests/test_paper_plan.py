@@ -255,9 +255,16 @@ class PaperPlanTests(unittest.TestCase):
         self.assertEqual([g.seq_group.request_id for g in first.scheduled_seq_groups], ["active"])
         plan.window.executed()
         self.s.running.popleft()
+
+        class UnreadableQueue(deque):
+            def __iter__(self):
+                raise AssertionError("resident refill scanned the waiting queue")
+
+        self.s.waiting = UnreadableQueue(self.s.waiting)
         refill = plan.next_step()
         self.assertEqual([g.seq_group.request_id for g in refill.scheduled_seq_groups], ["resident"])
-        self.assertEqual([g.request_id for g in self.s.waiting], ["waiting"])
+        self.assertEqual(self.s.waiting[0].request_id, "waiting")
+        self.assertEqual(len(self.refreshes), 1)
 
     def test_idle_refill_does_not_bypass_capacity_limited_prefix(self):
         self.ctl.config = PolicyConfig(schedule_interval=3, overprovision=0)

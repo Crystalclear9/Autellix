@@ -1,7 +1,6 @@
 """Run the paper evaluation in one physical-GPU queue, with per-case checkpoints."""
 import argparse
 import json
-import math
 import os
 from pathlib import Path
 import subprocess
@@ -17,12 +16,12 @@ RATES = {
     "lats": (.004, .01, .02, .03, .05),
     "mixed": (.01, .025, .05, .075, .12),
 }
-# Cover both the low-load H20 points and the upper rates in Figure 12's 8B column.
+# Measured points in the Llama-3.1-8B column of Figures 12 and 13.
 END_TO_END_RATES = {
-    "sharegpt": (*RATES["sharegpt"], .96, 1.92, 4.),
-    "bfcl": RATES["bfcl"],
-    "lats": (*RATES["lats"], .1, .2, .3),
-    "mixed": (*RATES["mixed"], .24, .48, .8),
+    "sharegpt": (.10, .25, .50, .75, .80, .90, 1., 1.10, 1.25, 1.50, 1.75, 2., 2.50, 3., 4.),
+    "bfcl": (.05, .10, .25, .38, .40, .50, .75),
+    "lats": (.01, .025, .05, .075, .10, .15, .20, .30, .35),
+    "mixed": (.01, .05, .10, .15, .20, .25, .35, .50, .75, .85),
 }
 
 
@@ -38,7 +37,7 @@ def cases_for(backend, family):
         native = [dict(name=name, policy=name, interval=steps, engine_args={"preemption_mode": None})
                   for name, steps in (("vllm", 1), ("vllm-opt", 1), ("vllm-opt-multistep", 8))]
         options = dict(keep_resident_kv=True, publish_activity_at_window=True, paper_chunked_prefill=True,
-                       refill_idle_slots=True, resident_reserve_only=True, fused_swap=True)
+                       resident_reserve_only=True, fused_swap=True)
     else:
         native = [dict(name="sglang-native", policy="sglang-native", interval=1,
                        engine_args={"autellix_native_defaults": True})]
@@ -51,15 +50,21 @@ def cases_for(backend, family):
             dict(common, name="mlfq", policy="mlfq"), dict(common, name="autellix", policy=policy)]
 
 
+def workload_path(args, family):
+    filenames = {"sharegpt": "sharegpt-whole4000.json", **args.workload_files}
+    return (args.datasets / filenames.get(family, WORKLOADS[family][0])).resolve()
+
+
 def build_plans(args):
     selected = set(args.figures)
     figures = tuple(sorted(selected & {12, 13}))
     device = str(args.gpu)
     engine_args = {
         "vllm": dict(dtype="bfloat16", max_model_len=32768, tensor_parallel_size=1,
-                     max_num_seqs=args.batch_size, max_num_batched_tokens=32768,
+                     max_num_seqs=args.batch_size, max_num_batched_tokens=args.batch_tokens,
                      block_size=16, num_gpu_blocks_override=args.kv_tokens // 16,
                      gpu_memory_utilization=.88, swap_space=args.swap_gib, enforce_eager=args.eager,
+                     max_seq_len_to_capture=8192, completion_only=True, publish_activity=False,
                      observe_native=False, seed=0),
         "sglang": dict(dtype="bfloat16", context_length=32768, pp_size=1,
                        max_running_requests=args.batch_size, max_total_tokens=args.kv_tokens,
@@ -68,39 +73,55 @@ def build_plans(args):
                        autellix_swap_space=args.swap_gib),
     }
 
+    def program_count(family, option):
+        return option or (64 if family == "sharegpt" else WORKLOADS[family][1])
+
     def plan(backend, family, name, selected_figures, cases, rates, count, *, offline=False, timing=False):
         args_for_engine = dict(engine_args[backend])
-        if timing and backend == "vllm":
-            args_for_engine.update(observe_native=True, measure_timing=True)
+        if backend == "vllm":
+            paired_cases = []
+            for case in cases:
+                options = dict(case["engine_args"])
+                if case["policy"] in {"vllm", "vllm-opt-multistep"}:
+                    options["max_num_batched_tokens"] = max(32768, args.batch_tokens)
+                else:
+                    options["exact_prefix_cache"] = True
+                    if case["policy"] != "vllm-opt":
+                        options["resident_decode_headroom"] = True
+                paired_cases.append(dict(case, engine_args=options))
+            cases = paired_cases
+            if timing:
+                args_for_engine.update(observe_native=True, measure_timing=True)
         elif timing:
             args_for_engine["autellix_measure_timing"] = True
         if offline or timing:
             args_for_engine["publish_activity" if backend == "vllm" else "autellix_publish_activity"] = False
-        filename = "sharegpt-whole4000.json" if offline or 4 in selected_figures else WORKLOADS[family][0]
         return dict(backend=backend, model=str(args.model.resolve()), device=device,
                     experiment="offline" if offline else "online", paper_figures=list(selected_figures),
-                    workload=str((args.datasets / filename).resolve()), workload_family=family,
+                    workload=str(workload_path(args, family)), workload_family=family,
                     workload_kind=name, programs=count, rates=list(rates), seed=args.seed,
-                    repeats=1 if offline or timing else args.repeats, unique_programs=offline,
+                    repeats=1 if offline or timing else args.repeats, unique_programs=True,
                     request_timeout=args.request_timeout, progress_interval=60,
                     equal_dataset_counts=family == "mixed", scheduler_trace=timing,
                     compact_calls=True, engine_args=args_for_engine, cases=cases)
 
     for backend in args.backends:
         if backend == "vllm" and 4 in selected:
-            family, rate = "sharegpt", .20
+            family, rate = "sharegpt", args.rates[0] if args.rates else .20
             cases = [case for case in cases_for(backend, family) if case["name"] in {"vllm", "autellix"}]
-            yield plan(backend, family, "fig4-concurrency-vllm", (4,), cases, (rate,),
-                       math.ceil(rate * args.diagnostic_seconds), timing=True)
+            figure = plan(backend, family, "fig4-concurrency-vllm", (4,), cases, (rate,), None)
+            yield dict(figure, repeats=1, arrival_seconds=args.diagnostic_seconds + args.diagnostic_warmup,
+                       steady_state_start_seconds=args.diagnostic_warmup)
         if backend == "vllm" and selected & {5, 6}:
             for family in ("sharegpt", "bfcl", "lats"):
                 cases = [case for case in cases_for(backend, family) if case["name"] in {"vllm", "mlfq", "autellix"}]
                 yield plan(backend, family, f"fig5-6-{family}-vllm", sorted(selected & {5, 6}), cases,
-                           args.rates or (RATES[family][1], RATES[family][3]), WORKLOADS[family][1], timing=True)
+                           args.rates or (RATES[family][1], RATES[family][3]),
+                           program_count(family, args.profile_programs), timing=True)
         if figures:
             for family in args.workloads:
                 name = f"fig12-13-{family}-{backend}"
-                count = args.online_programs or WORKLOADS[family][1]
+                count = program_count(family, args.online_programs)
                 yield plan(backend, family, name, figures, cases_for(backend, family),
                            args.rates or END_TO_END_RATES[family], count)
         if 16 in selected:
@@ -117,8 +138,9 @@ def build_plans(args):
                 cases = [case for case in cases_for(backend, family)
                          if case["name"] in {"vllm-opt", "mlfq", "autellix"}]
                 name = f"fig17-{family}-{backend}"
-                yield plan(backend, family, name, (17,), cases, (RATES[family][-1],),
-                           WORKLOADS[family][1], timing=True)
+                pressure_rate = 1.92 if family == "sharegpt" else .28
+                yield plan(backend, family, name, (17,), cases, args.rates or (pressure_rate,),
+                           program_count(family, args.profile_programs), timing=True)
         if 19 in selected:
             for family in ("sharegpt", "lats"):
                 candidate = cases_for(backend, family)[-1]
@@ -136,8 +158,8 @@ def build_plans(args):
                               dict(candidate, name="fused-swap-N1", interval=1, engine_args=mode)))
                 name = f"fig19-{family}-{backend}"
                 pressure_rate = 1.92 if family == "sharegpt" else .28
-                yield plan(backend, family, name, (19,), cases, (pressure_rate,),
-                           WORKLOADS[family][1], timing=True)
+                yield plan(backend, family, name, (19,), cases, args.rates or (pressure_rate,),
+                           program_count(family, args.profile_programs), timing=True)
 
 
 def simulate(args):
@@ -149,15 +171,14 @@ def simulate(args):
         from analyze_paper_motivation import prefix_opportunities
         from autellix.runtime.benchmark import load_workloads
 
-        rows = {family: prefix_opportunities(load_workloads([args.datasets / WORKLOADS[family][0]]))
+        rows = {family: prefix_opportunities(load_workloads([workload_path(args, family)]))
                 for family in ("sharegpt", "lats")}
         write_json(args.run_dir / "fig7-prefix-opportunities.json", rows)
     for figure in sorted(set(args.figures) & {11, 14, 15, 18}):
         families = tuple(WORKLOADS) if figure == 11 else ("sharegpt", "lats") if figure in {14, 18} else ("sharegpt",)
         rows = []
         for family in families:
-            data = str(args.datasets / ("sharegpt-whole4000.json" if figure == 11 and family == "sharegpt"
-                                        else WORKLOADS[family][0]))
+            data = str(workload_path(args, family))
             count = 4000 if figure == 11 else WORKLOADS[family][1]
             if figure == 11:
                 from analyze_paper_motivation import workload_histograms
@@ -209,29 +230,41 @@ def main():
     parser.add_argument("--vllm-preload", help="LD_PRELOAD for the pinned vLLM environment")
     parser.add_argument("--figures", nargs="+", type=int, choices=FIGURES, default=FIGURES)
     parser.add_argument("--workloads", nargs="+", choices=WORKLOADS, default=tuple(WORKLOADS))
+    parser.add_argument("--bfcl-trace", type=Path, help="replay file with captured BFCL tool calls")
+    parser.add_argument("--lats-trace", type=Path, help="replay file with captured HotpotQA programs")
+    parser.add_argument("--mixed-trace", type=Path, help="replay file containing balanced-source programs")
     parser.add_argument("--backends", nargs="+", choices=("vllm", "sglang"), default=("vllm", "sglang"))
     parser.add_argument("--cases", nargs="+", help="select named inference cases from the figure plans")
     parser.add_argument("--offline-sizes", nargs="+", type=int, default=(1000, 2000, 3000, 4000))
     parser.add_argument("--online-programs", type=int, help="programs per arrival trace for Figures 12 and 13")
+    parser.add_argument("--profile-programs", type=int, help="programs per timing trace for Figures 5, 6, 17, and 19")
     parser.add_argument("--rates", nargs="+", type=float)
     parser.add_argument("--repeats", type=int, default=2)
     parser.add_argument("--seed", type=int, default=2026)
     parser.add_argument("--batch-size", type=int, default=16)
+    parser.add_argument("--batch-tokens", type=int, default=2048, help="chunked-prefill budget for matched vLLM arms")
     parser.add_argument("--kv-tokens", type=int, default=262144)
     parser.add_argument("--swap-gib", type=float, default=128)
     parser.add_argument("--recompute-on-swap-full", action="store_true",
                         help="let Figure 16 vLLM Autellix rebuild evicted KV when host swap fills")
     parser.add_argument("--eager", action="store_true")
     parser.add_argument("--request-timeout", type=float, default=79200)
-    parser.add_argument("--diagnostic-seconds", type=float, default=3600, help="nominal arrival window for Figure 4")
+    parser.add_argument("--diagnostic-seconds", type=int, default=3600, help="steady-state measurement window for Figure 4")
+    parser.add_argument("--diagnostic-warmup", type=int, default=300, help="Figure 4 arrivals before measuring")
     parser.add_argument("--plan-only", action="store_true")
     args = parser.parse_args()
+    args.workload_files = {name: path.resolve() for name, path in (
+        ("bfcl", args.bfcl_trace), ("lats", args.lats_trace), ("mixed", args.mixed_trace)) if path is not None}
     if args.gpu < 0 or args.kv_tokens < 32768 or args.kv_tokens % 16:
         parser.error("use a physical GPU index and a KV capacity divisible by 16 of at least 32768 tokens")
     if min(args.offline_sizes) < 1 or max(args.offline_sizes) > 4000:
         parser.error("offline sizes must be between 1 and 4000")
-    if args.online_programs is not None and args.online_programs < 1:
-        parser.error("online programs must be positive")
+    if any(count is not None and count < 1 for count in (args.online_programs, args.profile_programs)):
+        parser.error("online and timing trace counts must be positive")
+    if args.diagnostic_seconds < 1 or args.diagnostic_warmup < 0:
+        parser.error("Figure 4 duration must be positive and warmup cannot be negative")
+    if args.batch_tokens < args.batch_size + 16:
+        parser.error("vLLM chunk budget must hold one KV block and one token per active sequence")
 
     out = args.run_dir.resolve()
     out.mkdir(parents=True, exist_ok=True)
@@ -281,8 +314,8 @@ def main():
         for blocks in (8, 32, 128, 512):
             name = f"fig19-kernel-{blocks}"
             gpu_run(name, [exe, str(root / "cuda/batched_swap_benchmark.py"), "--blocks", str(blocks),
-                           "--layers", "32", "--block-bytes", "32768", "--fused", "--output",
-                           str(out / (name + ".json"))], run_env)
+                           "--layers", "32", "--block-bytes", "32768", "--dtype", "bfloat16", "--baseline", "vllm",
+                           "--fused", "--output", str(out / (name + ".json"))], run_env)
     for plan in plans:
         name, backend = plan["workload_kind"], plan["backend"]
         exe, run_env = interpreters[backend]

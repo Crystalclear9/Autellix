@@ -100,6 +100,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", required=True)
     parser.add_argument("--model", required=True)
+    parser.add_argument("--backend", choices=("sglang", "vllm"), default="sglang")
     parser.add_argument("--output", required=True)
     parser.add_argument("--device", default="2")
     parser.add_argument("--programs", type=int, default=16)
@@ -121,19 +122,32 @@ def main():
             for name, module in CLASS_FILE_PATH_MAPPING.items()}
     tokenizer = AutoTokenizer.from_pretrained(args.model, local_files_only=True)
     format_prompt, preprocess_functions = official_formatter(source)
-    options = dict(autellix_legacy_gpu=True, autellix_native_baseline=True, dtype="float16",
-                   context_length=32768, max_running_requests=4, max_total_tokens=32768,
-                   max_prefill_tokens=32768, mem_fraction_static=.9, random_seed=args.seed)
+    if args.backend == "vllm":
+        options = dict(autellix_mode="vllm-opt", observe_native=False, dtype="bfloat16",
+                       max_model_len=32768, max_num_seqs=4, max_num_batched_tokens=2048,
+                       num_gpu_blocks_override=4096, enforce_eager=False, seed=args.seed,
+                       completion_only=True, preemption_mode=None, exact_prefix_cache=True)
+    else:
+        options = dict(autellix_legacy_gpu=True, autellix_native_baseline=True, dtype="float16",
+                       context_length=32768, max_running_requests=4, max_total_tokens=32768,
+                       max_prefill_tokens=32768, mem_fraction_static=.9, random_seed=args.seed)
     programs, outcomes = [], []
     out.parent.mkdir(parents=True, exist_ok=True)
     if args.resume and out.exists():
         programs = json.loads(out.read_text())
-        outcomes = json.loads(out.with_suffix(".manifest.json").read_text())["outcomes"]
+        saved = json.loads(out.with_suffix(".manifest.json").read_text())
+        if (saved["model"] != args.model or saved.get("backend", "sglang") != args.backend
+                or saved["seed"] != args.seed or saved["steps_per_turn"] != args.steps_per_turn
+                or (set(p["program_id"] for p in programs) - {task["id"] for task in tasks})):
+            parser.error("resume requires the same model, backend, seed, step budget and task sample")
+        outcomes = saved["outcomes"]
     completed = {p["program_id"] for p in programs}
     if completed:
         print(f"RESUME programs={len(completed)}", flush=True)
-    with InferenceEngine([ReplicaConfig("sglang", args.model, args.device, options)],
-                         policy=PolicyConfig(policy="fcfs", overprovision=0)) as engine:
+    with InferenceEngine([ReplicaConfig(args.backend, args.model, args.device, options)],
+                         policy=PolicyConfig(policy="fcfs", overprovision=0,
+                                             schedule_interval=1 if args.backend == "vllm" else 8),
+                         scheduler_trace=args.backend == "sglang") as engine:
         for task in tasks:
             if task["id"] in completed:
                 continue
@@ -188,7 +202,8 @@ def main():
                                  output_tokens=sum(c["max_tokens"] for c in calls)))
             out.write_text(json.dumps(programs, ensure_ascii=False, indent=2))
             manifest = dict(source="https://github.com/ShishirPatil/gorilla", revision=REVISION,
-                            model=args.model, seed=args.seed, category="multi_turn_base", outcomes=outcomes,
+                            model=args.model, backend=args.backend, seed=args.seed,
+                            category="multi_turn_base", outcomes=outcomes,
                             steps_per_turn=args.steps_per_turn, max_output_tokens=4096, temperature=.001,
                             prompt_format="Pinned LlamaFCHandler._format_prompt and language-specific function preprocessing",
                             protocol="Actual Llama multi-turn/tool loop with official FC prompt and simulated tools; fixed captured inputs, lengths and tool delays in replay.",

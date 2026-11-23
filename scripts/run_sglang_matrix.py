@@ -3,6 +3,7 @@ import argparse
 import copy
 import hashlib
 import json
+import math
 import os
 import random
 import subprocess
@@ -51,6 +52,25 @@ def unique_trace(programs, count, rate, seed, *, equal_dataset_counts=False):
         if i and rate is not None:
             arrival += rng.expovariate(rate)
         program["arrival_time"] = arrival
+    return trace
+
+
+def timed_trace(programs, rate, seed, seconds):
+    """Sample distinct programs for a fixed-duration Poisson arrival window."""
+    if rate is None or not math.isfinite(rate) or rate <= 0 or not math.isfinite(seconds) or seconds <= 0:
+        raise ValueError("Poisson arrival rate and duration must be finite and positive")
+    # The arrival process is independent of program selection.
+    rng = random.Random(seed)
+    arrivals = []
+    arrival = rng.expovariate(rate)
+    while arrival < seconds:
+        arrivals.append(arrival)
+        arrival += rng.expovariate(rate)
+    if not arrivals:
+        raise ValueError("the arrival window contains no programs")
+    trace = unique_trace(programs, len(arrivals), None, f"{seed}:programs")
+    for program, at in zip(trace, arrivals):
+        program["arrival_time"] = at
     return trace
 
 
@@ -110,7 +130,10 @@ def main(argv=None):
     for rate in plan["rates"]:
         for repeat in range(plan.get("repeats", 1)):
             seed = plan.get("seed", 100) + repeat
-            if plan.get("programs") and not plan.get("unique_programs"):
+            arrival_seconds = plan.get("arrival_seconds")
+            if arrival_seconds is not None:
+                trace = timed_trace(programs, rate, seed, arrival_seconds)
+            elif plan.get("programs") and not plan.get("unique_programs"):
                 trace = sample_trace(programs, plan["programs"], rate, seed,
                                       equal_dataset_counts=plan.get("equal_dataset_counts", False))
             else:
@@ -158,6 +181,11 @@ def main(argv=None):
                 row.update(condition=case["name"], rate=rate, repeat=repeat, seed=seed,
                            wall_start=started, plan=plan,
                            trace_sha256=trace_hash, versions=versions)
+                if arrival_seconds is not None:
+                    row.update(arrival_horizon_seconds=arrival_seconds,
+                               drain_seconds=max(0., row["elapsed_seconds"] - arrival_seconds),
+                               completions_during_arrivals=sum(at <= arrival_seconds for at in
+                                                               row["program_completion_times"].values()))
                 if plan.get("compact_calls"):
                     for call in row["calls"]:
                         call.pop("text", None)

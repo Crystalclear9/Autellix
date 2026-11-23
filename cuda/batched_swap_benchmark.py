@@ -11,6 +11,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--blocks", type=int, default=128)
     parser.add_argument("--block-bytes", type=int, default=16 * 1024)
     parser.add_argument("--layers", type=int, default=4)
+    parser.add_argument("--dtype", choices=("float16", "bfloat16"), default="float16")
     parser.add_argument("--iterations", type=int, default=10)
     parser.add_argument("--output")
     parser.add_argument("--baseline", choices=("vllm", "python"), default="vllm")
@@ -23,8 +24,9 @@ def main(argv: list[str] | None = None) -> int:
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA GPU required; no simulated fallback")
     shape = (2, args.blocks, args.block_bytes // 2)
-    gpu = [torch.randn(shape, device="cuda", dtype=torch.float16) for _ in range(args.layers)]
-    cpu = [torch.empty(shape, dtype=torch.float16, pin_memory=True) for _ in gpu]
+    dtype = getattr(torch, args.dtype)
+    gpu = [torch.randn(shape, device="cuda", dtype=dtype) for _ in range(args.layers)]
+    cpu = [torch.empty(shape, dtype=dtype, pin_memory=True) for _ in gpu]
     restored = [torch.empty_like(layer) for layer in gpu]
     mapping = [(i, args.blocks - i - 1) for i in range(args.blocks)]
     native_mapping = torch.tensor(mapping, dtype=torch.int64)

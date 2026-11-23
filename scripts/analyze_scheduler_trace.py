@@ -14,6 +14,7 @@ def _summarize_events(stream, request_ids, workload_window):
     counts, queues, admissions, batch_sizes = Counter(), Counter(), Counter(), Counter()
     timing, transfer_blocks, transfer_copies = Counter(), Counter(), Counter()
     model_seconds, occupied_seconds, swapped_tokens = 0., 0., 0
+    logical_prefill_tokens = cached_prefill_tokens = 0
     for line in stream:
         event = json.loads(line)
         if workload_window is not None and not workload_window[0] <= event["time"] <= workload_window[1]:
@@ -39,6 +40,8 @@ def _summarize_events(stream, request_ids, workload_window):
             admissions[event["queue"]] += 1
         elif event["event"] == "schedule_time":
             timing["schedule"] += event["seconds"]
+            logical_prefill_tokens += event.get("logical_prefill_tokens", 0)
+            cached_prefill_tokens += event.get("cached_prefill_tokens", 0)
         elif event["event"] == "model_phase_time":
             timing[event["phase"]] += event["seconds"]
         elif event["event"] == "kv_transfer":
@@ -46,10 +49,13 @@ def _summarize_events(stream, request_ids, workload_window):
             transfer_blocks[event["direction"]] += event["blocks"]
             if "copies" in event:
                 transfer_copies[event["direction"]] += event["copies"]
+    prefill = (dict(logical=logical_prefill_tokens, reused=cached_prefill_tokens,
+                    computed=logical_prefill_tokens - cached_prefill_tokens) if logical_prefill_tokens else {})
     return dict(events=dict(counts), admissions_by_queue=dict(admissions), demotions_by_queue=dict(queues),
                 batches_by_size=dict(batch_sizes), model_seconds=model_seconds,
                 service_weighted_batch_size=occupied_seconds/model_seconds if model_seconds else None,
                 swapped_out_tokens=swapped_tokens, timing_seconds=dict(timing),
+                prefill_tokens=prefill,
                 kv_transfer_blocks=dict(transfer_blocks), kv_transfer_copies=dict(transfer_copies))
 
 

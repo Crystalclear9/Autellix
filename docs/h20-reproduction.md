@@ -245,22 +245,29 @@ SHA-256 已核对，记录位于 `data/autellix/import/migration-verification.js
 
 | 原论文 | 单卡工作流 |
 | --- | --- |
-| 图 4–6，负载动机 | 一小时 ShareGPT 到达记录、活动调用数、不同负载的排队占比，并按调用输出 token 数和每程序调用数统计阻塞 |
+| 图 4–6，负载动机 | ShareGPT 先到达 5 分钟，再采样 1 小时的活动调用数。排队实验按调用输出 token 数和每程序调用数统计阻塞 |
 | 图 7，前缀局部性 | 从 ShareGPT 和 LATS 的实际输入 token 逐块计算同程序及跨程序前缀复用机会 |
 | 图 11，工作负载分布 | 从 ShareGPT、BFCL、LATS 与 Mixed 回放提取程序长度与调用统计 |
 | 图 12、13，在线均值与尾延迟 | 四类负载的泊松到达率扫描，包含原生 vLLM、两种 vLLM-opt、同路径 FCFS、MLFQ、Autellix，以及原生 SGLang 和它的接入版。汇总同时记录到达窗口完成率和固定延迟目标内完成率 |
 | 图 14、15，多副本路由与扩展 | 原数据的多副本模拟。论文的多物理 GPU 性能依赖各副本拥有独立计算资源 |
 | 图 16，离线 makespan | 从同一 4,000 程序池抽取 1,000、2,000、3,000 和 4,000 个不同程序，每组同时提交，记录整批完成时间。对照包含三项组合优化的 FCFS、原生 vLLM、原生 SGLang、MLFQ 和两种 Autellix 接入。关闭 SQLite 的瞬时活动发布，调度和完成统计继续更新 |
-| 图 17，开销拆分 | vLLM-opt、MLFQ 和 Autellix 分别测量 ShareGPT、LATS 的模型、调度、KV 搬运和请求累计排队时间，按实际处理窗口排除预热 |
+| 图 17，开销拆分 | vLLM-opt、MLFQ 和 Autellix 分别测量 ShareGPT、LATS 的模型、调度、KV 搬运和请求累计排队时间，并分开统计逻辑输入、命中前缀和模型实际计算的 prefill token |
 | 图 18，最优调度对照 | ShareGPT 与 LATS 的等步长模拟，含可提前获知剩余服务量的 SRPT |
 | 图 19，KV 交换 | 跨层 fused 打包与解包，测原生 vLLM 搬运、PyTorch 聚合和 fused 路径。推理消融同时记录逻辑换出、主机与设备之间的 KV 载荷传输次数及耗时，并比较 N=1 窗口 |
 
 SGLang 单步预填充预算耗尽后保留已选请求与 decode，GPU KV 或请求槽位耗尽时按优先级收缩窗口。
 PLAS 与 ATLAS 在窗口边界只读取已累计服务或等待时间的程序，其余程序使用零历史。
 
-图 12、13 保留 H20 的低负载测点，并扫描论文 8B 图中的高到达率区间。ShareGPT、LATS 和
-Mixed 的默认上限分别为 4、0.30 和 0.80 程序/秒。可用 `--rates` 指定测点，用
-`--online-programs` 增加每条到达轨迹的程序数。配对各组使用同一轨迹和随机种子。
+图 12、13 以论文 8B 图的测点为默认扫描范围。ShareGPT、BFCL、LATS 和 Mixed 的上限分别为
+4、0.75、0.35 和 0.85 程序/秒。每条轨迹从源数据抽取不同的完整程序，Mixed 对各来源等量抽样。
+配对各组使用同一轨迹和随机种子。`--rates` 和 `--online-programs` 可调整到达率和样本数。
+`--bfcl-trace`、`--lats-trace` 和 `--mixed-trace` 用于指定新采集的数据文件。
+`collect_bfcl.py --backend vllm` 可用同一基础模型执行 BFCL v3 的工具循环，记录实际调用长度和工具耗时。
+
+vLLM 复现分支使用 BF16、16 个活动槽、262,144 个 GPU KV token 和 2,048 token 的
+chunked-prefill 预算。Autellix 在 8 步窗口内使用已经在 GPU 上预备好的请求补位。原生
+vLLM 与原生多步对照的完整 prefill 预算是 32,768 token，chunked-prefill 原生对照和同路径
+FCFS 用于区分执行优化与程序优先级带来的收益。
 
 图 12 的 Llama-3.1-70B 和 Falcon-180B 原配置分别使用 4 张和 8 张 A100。图 14 的副本组数
 分别为 4 和 2，图 15 比较独立引擎扩容。上述 GPU 结果与单卡 8B、CPU 模拟分别汇总。
@@ -284,7 +291,7 @@ HotpotQA 程序，平均 320 次调用，论文报告 159.7 次。输入长度�
 
 ```bash
 python scripts/run_h20_paper_suite.py --model "$model" --datasets "$data/datasets" --gpu "$gpu" \
-  --run-dir "$data/runs/paper-replay" --vllm-python "$vp" --sglang-python "$sp" \
+  --run-dir "$data/runs/fjr-llama8b-paper-replay" --backends vllm --vllm-python "$vp" \
   --vllm-preload "$lib/libcublas.so.12:$lib/libcublasLt.so.12"
 ```
 

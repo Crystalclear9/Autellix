@@ -10,11 +10,11 @@ def workload_histograms(programs):
                 calls_per_program=dict(sorted(Counter(len(p.calls) for p in programs).items())))
 
 
-def call_concurrency(calls, horizon, interval=5):
+def call_concurrency(calls, horizon, interval=5, start=0):
     events = sorted((mark, delta) for call in calls for mark, delta in (
         (call["submitted_seconds"], 1), (call["completed_seconds"], -1)))
     samples, active, cursor = [], 0, 0
-    for at in range(0, int(horizon) + 1, interval):
+    for at in range(int(start), int(horizon) + 1, interval):
         while cursor < len(events) and events[cursor][0] <= at:
             active += events[cursor][1]
             cursor += 1
@@ -82,5 +82,6 @@ def prefix_opportunities(programs, block_size=16):
 
 def motivation(rows):
     return [dict(condition=row["condition"], rate=row["rate"], seed=row["seed"],
-                 concurrency=call_concurrency(row["calls"], row["arrival_horizon_seconds"]),
+                 concurrency=call_concurrency(row["calls"], row["arrival_horizon_seconds"],
+                                              start=row["plan"].get("steady_state_start_seconds", 0)),
                  blocking=blocking(row)) for row in rows]

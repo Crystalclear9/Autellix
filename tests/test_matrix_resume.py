@@ -1,6 +1,7 @@
 import importlib.util
 import copy
 import json
+import random
 import sys
 from tempfile import TemporaryDirectory
 from pathlib import Path
@@ -18,6 +19,19 @@ finally:
 
 
 class MatrixResumeTests(unittest.TestCase):
+    def test_timed_trace_uses_every_arrival_in_fixed_window(self):
+        pool = [{"program_id": str(index)} for index in range(40)]
+        trace = matrix.timed_trace(pool, 1.5, 27, 10)
+        rng = random.Random(27)
+        arrivals = []
+        at = rng.expovariate(1.5)
+        while at < 10:
+            arrivals.append(at)
+            at += rng.expovariate(1.5)
+        self.assertEqual([row["arrival_time"] for row in trace], arrivals)
+        self.assertEqual(len({row["program_id"] for row in trace}), len(arrivals))
+        self.assertEqual(trace, matrix.timed_trace(pool, 1.5, 27, 10))
+
     def test_distinct_mixed_trace_balances_datasets_at_every_rate(self):
         pool = [dict(program_id=f"{dataset}-{i}", dataset=dataset)
                 for dataset, size in (("sharegpt", 9), ("bfcl", 7), ("lats", 3)) for i in range(size)]

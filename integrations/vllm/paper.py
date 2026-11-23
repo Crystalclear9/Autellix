@@ -67,16 +67,24 @@ class PaperPlan:
 
         running = {g.request_id: g for g in s.running}
 
-        def prepared_decode():
-            return bool(window.cohort) and all(
+        def prepared_decode(cohort):
+            return bool(cohort) and all(
                 rid in self.reserved_slots and rid in self.prepared and rid in running
-                and not running[rid].is_prefill() for rid in window.cohort)
+                and not running[rid].is_prefill() for rid in cohort)
 
         # A full prepared window can continue without scanning waiting and
         # swapped queues, whose size is independent of the active GPU batch.
         if (window.remaining and (not window.refill_idle_slots or len(window.active) == window.capacity)
-                and prepared_decode()):
+                and prepared_decode(window.cohort)):
             return continue_decode(running)
+        if window.remaining and not window.refill_idle_slots:
+            # Eviction removes the ready and reserved flags. A missing request
+            # that still has both flags finished and can leave its slot now.
+            live = [rid for rid in window.cohort if rid in running]
+            if (prepared_decode(live)
+                    and all(rid in self.reserved_slots and rid in self.prepared for rid in window.cohort)):
+                window.select(live, live)
+                return continue_decode(running)
 
         by_id = {**running, **{g.request_id: g for g in s.waiting}, **{g.request_id: g for g in s.swapped}}
         boundary = window.remaining == 0 or not any(r in by_id for r in window.cohort)
@@ -127,7 +135,7 @@ class PaperPlan:
             if outgoing:
                 return output()
 
-        if not boundary and prepared_decode():
+        if not boundary and prepared_decode(window.cohort):
             return continue_decode(running)
 
         groups, prepared, tokens = [], [], 0
