@@ -274,13 +274,17 @@ class RealInferenceTests(unittest.TestCase):
     @unittest.skipUnless(os.environ.get("AUTELLIX_TEST_REPLICAS"), "requires AUTELLIX_TEST_REPLICAS=1")
     def test_two_real_replicas_cancel_and_cleanup(self):
         args = (dict(max_model_len=512, max_num_seqs=1, gpu_memory_utilization=.2,
-                     swap_space=.1, dtype="half", enforce_eager=True) if BACKEND == "vllm" else
+                     swap_space=.1, dtype=VLLM_DTYPE, enforce_eager=True) if BACKEND == "vllm" else
                 dict(context_length=512, max_running_requests=1, mem_fraction_static=.2,
                      dtype="float16", random_seed=0))
         if BACKEND == "sglang" and os.environ.get("AUTELLIX_TEST_LEGACY_GPU") == "1":
             args.update(autellix_legacy_gpu=True, max_total_tokens=2048, dtype="float32")
         with tempfile.TemporaryDirectory(prefix="autellix-replicas-") as directory:
             devices = os.environ.get("AUTELLIX_TEST_DEVICES", "0,0").split(",")
+            if BACKEND == "vllm" and len(set(devices)) < len(devices):
+                # Each vLLM worker profiles the same card. Fix its cache size
+                # so peer allocations cannot change its startup result.
+                args["num_gpu_blocks_override"] = 64
             engine = InferenceEngine([ReplicaConfig(BACKEND, MODEL, device=device, engine_args=args) for device in devices],
                                      state_dir=directory, locality_threshold=10)
             try:
@@ -311,6 +315,7 @@ class RealInferenceTests(unittest.TestCase):
 
 @unittest.skipUnless(os.environ.get("AUTELLIX_TEST_CUDA_SWAP"), "requires AUTELLIX_TEST_CUDA_SWAP=1")
 class CUDASwapTests(unittest.TestCase):
+    @unittest.skipIf(BACKEND == "vllm", "SGLang attention check uses the SGLang PyTorch environment")
     def test_tiled_prefix_attention_cuda(self):
         import torch
         from integrations.sglang.attention import prefix_attention
