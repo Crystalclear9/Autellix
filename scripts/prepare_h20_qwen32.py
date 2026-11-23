@@ -60,7 +60,8 @@ def write_json(path, value):
 def write_comparison_plans(model, inputs, destination, device, bfcl_rates,
                            resident_decode_headroom, qwen3_fused_qk_rope, exact_prefix_cache,
                            programs, seed, graph_context, completion_only, capacity, fcfs_control,
-                           *, repeats=1, quantum_scale=16, beta=8.0, min_decode_steps=0):
+                           *, repeats=1, quantum_scale=16, boundary_scale=128, beta=8.0, min_decode_steps=0,
+                           paper_vllm_only=False):
     destination.mkdir(parents=True, exist_ok=True)
     context, batch, kv_tokens, block = 32768, 2048, 65536, 16
     vllm = dict(dtype="bfloat16", max_model_len=context, max_num_seqs=capacity,
@@ -84,10 +85,16 @@ def write_comparison_plans(model, inputs, destination, device, bfcl_rates,
     native = dict(name="vllm-opt", policy="vllm-opt", interval=1,
                   engine_args=dict(preemption_mode=None))
     plas = dict(name="autellix", policy="plas", reserve=1, interval=8, quantum_scale=quantum_scale,
-                boundary_scale=128, engine_args=paper)
+                boundary_scale=boundary_scale, engine_args=paper)
     if beta != 8.0:
         plas["beta"] = beta
     vllm_cases = [native, plas]
+    if paper_vllm_only:
+        whole = dict(preemption_mode=None, max_num_batched_tokens=context)
+        vanilla = dict(native, name="vllm", policy="vllm", engine_args=dict(whole, exact_prefix_cache=False))
+        multistep = dict(native, name="vllm-opt-multistep", policy="vllm-opt-multistep",
+                         interval=plas["interval"], engine_args=whole)
+        vllm_cases = [vanilla, native, multistep, dict(plas, name="mlfq", policy="mlfq"), plas]
     if fcfs_control:
         vllm_cases.append(dict(plas, name="fcfs-control", policy="fcfs"))
     if min_decode_steps:
@@ -104,9 +111,10 @@ def write_comparison_plans(model, inputs, destination, device, bfcl_rates,
         capture = graph_context or (8192 if family == "sharegpt" else context)
         write_json(destination / f"{label}-vllm-plan.json", dict(
             common, backend="vllm", engine_args=dict(vllm, max_seq_len_to_capture=capture), cases=vllm_cases))
-        write_json(destination / f"{label}-sglang-plan.json", dict(
-            common, backend="sglang", engine_args=sglang,
-            cases=[dict(name="sglang-native", policy="sglang-native")]))
+        if not paper_vllm_only:
+            write_json(destination / f"{label}-sglang-plan.json", dict(
+                common, backend="sglang", engine_args=sglang,
+                cases=[dict(name="sglang-native", policy="sglang-native")]))
 
 
 def main():
@@ -140,10 +148,14 @@ def main():
                         help="also run the Autellix execution path with FCFS priorities")
     parser.add_argument("--comparison-quantum-scale", type=float, default=16,
                         help="scale PLAS time slices in vLLM comparison plans")
+    parser.add_argument("--comparison-boundary-scale", type=float, default=128,
+                        help="scale the elapsed-service ranges used to assign queues")
     parser.add_argument("--comparison-beta", type=float, default=8,
                         help="set the PLAS wait-to-service ratio for priority promotion")
     parser.add_argument("--comparison-min-decode-steps", type=int, default=0,
                         help="add a PLAS comparison with this many decode steps required before demotion")
+    parser.add_argument("--paper-vllm-only", action="store_true",
+                        help="prepare vLLM, both vLLM-opt configurations, MLFQ and PLAS")
     args = parser.parse_args()
     if args.device < 0:
         parser.error("device must be a nonnegative GPU index")
@@ -158,6 +170,7 @@ def main():
     if args.comparison_min_decode_steps < 0:
         parser.error("--comparison-min-decode-steps must be nonnegative")
     for option, value in (("--comparison-quantum-scale", args.comparison_quantum_scale),
+                          ("--comparison-boundary-scale", args.comparison_boundary_scale),
                           ("--comparison-beta", args.comparison_beta)):
         if not math.isfinite(value) or value <= 0:
             parser.error(f"{option} must be finite and positive")
@@ -171,7 +184,9 @@ def main():
                                args.comparison_programs, args.comparison_seed, args.graph_context,
                                args.completion_only, args.comparison_batch_size, args.fcfs_control,
                                repeats=args.comparison_repeats, quantum_scale=args.comparison_quantum_scale,
-                               beta=args.comparison_beta, min_decode_steps=args.comparison_min_decode_steps)
+                               boundary_scale=args.comparison_boundary_scale, beta=args.comparison_beta,
+                               min_decode_steps=args.comparison_min_decode_steps,
+                               paper_vllm_only=args.paper_vllm_only)
         return
 
     from transformers import AutoTokenizer

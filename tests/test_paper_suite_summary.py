@@ -162,6 +162,19 @@ class PaperSuiteSummary(unittest.TestCase):
         self.assertFalse(pending["comparisons"])
         self.assertEqual(pending["unmatched"][0]["reason"], "mismatched trace or work")
 
+    def test_paper_slo_distinguishes_input_rate_from_observed_completions(self):
+        native, _ = self.records()
+        native.update(condition="sglang-native", plan=dict(backend="sglang", workload_family="lats",
+                      paper_figures=[12]), effective_engine_args=dict(dtype="bfloat16", context_length=32768,
+                      max_running_requests=4, max_total_tokens=65536))
+        burst = dict(native, rate=.2, completions_during_arrivals=0)
+        mean = next(p for p in summary.paper_matrix([native, burst], slo_targets=(.9,))["slo_points"]
+                    if p["latency_statistic"] == "mean")
+        arm = "sglang/sglang-native"
+        self.assertEqual(mean["maximum_tested_offered_programs_per_second"][arm], .2)
+        self.assertEqual(mean["completed_programs_per_second"][arm], .1)
+        self.assertEqual(mean["arrival_window_completed_programs_per_second"][arm], .1)
+
 
 if __name__ == "__main__":
     unittest.main()

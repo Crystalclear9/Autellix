@@ -186,17 +186,22 @@ def paper_matrix(records, slo_targets=DEFAULT_SLO_TARGETS, *, strict=True):
         figures, workload, programs, model, devices, _ = config
         for target in slo_targets:
             for stat in ("mean", "p95", "p99"):
-                rates = {}
+                offered, completed, in_window = {}, {}, {}
                 for arm, grouped in arms.items():
-                    qualifying = [rows for rows in grouped.values()
+                    qualifying = {rate: rows for rate, rows in grouped.items()
                                   if all(len(rows) == row["planned_repeats"] and row["token_latency"][stat] is not None
-                                         and row["token_latency"][stat] <= target for row in rows)]
-                    rates[arm] = max((statistics.mean(row["arrival_window_completed_programs_per_second"] for row in rows)
-                                      for rows in qualifying if all(row["arrival_window_completed_programs_per_second"]
-                                                                    is not None for row in rows)), default=None)
+                                         and row["token_latency"][stat] <= target for row in rows)}
+                    offered[arm] = max(qualifying, default=None)
+                    completed[arm] = max((statistics.mean(row["completed_programs_per_second"] for row in rows)
+                                          for rows in qualifying.values()), default=None)
+                    in_window[arm] = max((statistics.mean(row["arrival_window_completed_programs_per_second"] for row in rows)
+                                          for rows in qualifying.values() if all(row["arrival_window_completed_programs_per_second"]
+                                                                                 is not None for row in rows)), default=None)
                 slo.append(dict(figures=figures, workload=workload, programs=programs, model=model, devices=devices,
                                 latency_statistic=stat, seconds_per_token_target=target,
-                                arrival_window_completed_programs_per_second=rates))
+                                maximum_tested_offered_programs_per_second=offered,
+                                completed_programs_per_second=completed,
+                                arrival_window_completed_programs_per_second=in_window))
     return dict(trials=trials, comparisons=pairs, unmatched=unmatched, slo_points=slo)
 
 
@@ -242,7 +247,7 @@ def summarize(records, slo_targets=DEFAULT_SLO_TARGETS):
                                      "autellix_mode", "preemption_mode", "observe_native", "batched_swap",
                                      "keep_resident_kv", "recompute_on_swap_full", "paper_chunked_prefill",
                                      "publish_activity_at_window", "refill_idle_slots", "resident_decode_headroom",
-                                     "min_decode_steps"}}
+                                     "min_decode_steps", "mixed_decode_quantum"}}
             native_defaults = row["arm"] == "sglang-native" and row["effective_engine_args"].get("autellix_native_defaults", False)
             baseline_defaults = native["effective_engine_args"].get("autellix_native_defaults", False)
             row_options, baseline_options = options(row), options(native)
