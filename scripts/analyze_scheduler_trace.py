@@ -1,13 +1,22 @@
 """Summarize GPU scheduler events without counting warmup as workload."""
 import argparse
 from collections import Counter
+import gzip
 import json
 from pathlib import Path
 
 
 def analyze(path, request_ids=None, workload_window=None):
-    with Path(path).open(encoding="utf-8") as stream:
+    path = Path(path)
+    opener = gzip.open if path.suffix == ".gz" else open
+    with opener(path, "rt", encoding="utf-8") as stream:
         return _summarize_events(stream, request_ids, workload_window)
+
+
+def replica_traces(state):
+    paths = {p.name.removesuffix(".jsonl.gz"): p for p in state.glob("replica-*.jsonl.gz")}
+    paths.update((p.stem, p) for p in state.glob("replica-*.jsonl"))
+    return sorted(paths.items())
 
 
 def _summarize_events(stream, request_ids, workload_window):
@@ -85,7 +94,7 @@ def main():
             state = args.state_root / state.name
         window = ((row["workload_started_monotonic"], row["workload_finished_monotonic"])
                   if "workload_started_monotonic" in row else None)
-        replicas = {path.stem: analyze(path, ids, window) for path in sorted(state.glob("replica-*.jsonl"))}
+        replicas = {name: analyze(path, ids, window) for name, path in replica_traces(state)}
         summary = dict(replicas.get("replica-0", dict(events={})))
         if len(replicas) > 1:
             summary["replicas"] = replicas

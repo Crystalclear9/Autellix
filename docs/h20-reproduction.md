@@ -287,6 +287,8 @@ makespan、程序完成率和归一化程序延迟。
 
 单卡矩阵的失败尝试保存在 `*-failures.json`。显卡空闲时继续执行其余组，
 下次续跑从尚未产生成功记录的组恢复。计时汇总的退出码单独写入 `exit-codes.json`。
+临时调度状态可放在节点本地 `TMPDIR`。已完成组的 `replica-*.jsonl` 调度轨迹可压缩成
+同名 `.jsonl.gz` 文件，`analyze_scheduler_trace.py` 可直接读取。
 
 图 16 的 vLLM Autellix 可用 `--recompute-on-swap-full` 补跑主机 KV 空间耗尽的配置。
 主机块充足时沿用换出，空间耗尽时释放被抢占请求的 GPU KV，并在再次调度时按已有 token 重建。

@@ -1,14 +1,31 @@
 import copy
+import gzip
 import importlib.util
 from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 
 spec = importlib.util.spec_from_file_location("paper_summary", Path(__file__).parents[1] / "scripts/summarize_paper_suite.py")
 summary = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(summary)
+trace_spec = importlib.util.spec_from_file_location("scheduler_trace", Path(__file__).parents[1] / "scripts/analyze_scheduler_trace.py")
+scheduler_trace = importlib.util.module_from_spec(trace_spec)
+trace_spec.loader.exec_module(scheduler_trace)
 
 
 class PaperSuiteSummary(unittest.TestCase):
+    def test_analyze_compressed_replica_trace(self):
+        with TemporaryDirectory() as directory:
+            state = Path(directory)
+            payload = '{"event": "execute", "time": 1, "requests": ["a"], "seconds": 0.5}\n'
+            plain = state / "replica-0.jsonl"
+            plain.write_text(payload, encoding="utf-8")
+            packed = state / "replica-1.jsonl.gz"
+            with gzip.open(packed, "wt", encoding="utf-8") as stream:
+                stream.write(payload)
+            self.assertEqual(scheduler_trace.replica_traces(state), [("replica-0", plain), ("replica-1", packed)])
+            self.assertEqual(scheduler_trace.analyze(plain), scheduler_trace.analyze(packed))
+
     def records(self):
         ids = [str(i) for i in range(4)]
         native = dict(plan={"workload_kind": "lats"}, condition="native", arm="sglang-native", rate=.1, seed=42,

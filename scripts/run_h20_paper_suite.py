@@ -320,7 +320,7 @@ def main():
         if any(line.strip().isdecimal() for line in pids.splitlines()):
             raise RuntimeError(f"GPU {args.gpu} is occupied before {name}")
         print(f"START {name}", flush=True)
-        with (out / (name + ".log")).open("w", encoding="utf-8") as log:
+        with (out / (name + ".log")).open("a", encoding="utf-8") as log:
             statuses[name] = subprocess.run(cmd, cwd=root, env=run_env, stdout=log, stderr=subprocess.STDOUT).returncode
         write_json(statuses_path, previous_statuses | statuses)
 
