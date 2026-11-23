@@ -62,13 +62,13 @@ python scripts/run_paper_vllm.py online bfcl --model "$model" --datasets "$data/
   --no-scheduler-trace --no-publish-activity
 ```
 
-重新采集 LATS 时使用同一份基础模型和本地对话模板。下面的采集执行 15 轮上限的
-HotpotQA 搜索，保存实际调用、并发依赖和生成长度。
+重新采集 LATS 时使用同一份基础模型和本地对话模板。下面的配置从 HotpotQA 抽取
+12 个问题，每题最多搜索 15 轮、调用模型 240 次，并记录实际调用、并发依赖和生成长度。
 
 ```bash
 python scripts/collect_lats.py --backend vllm --source "$data/datasets/lats-source" \
   --data "$data/datasets/hotpot-train" --model "$model" --device "$gpu" \
-  --chat-template "$data/datasets/llama-31-chat.jinja" --programs 4 --iterations 15 \
+  --chat-template "$data/datasets/llama-31-chat.jinja" --programs 12 --iterations 15 \
   --max-calls 240 --output "$data/runs/fjr-llama8b-lats/lats-15-trace.json" --resume
 ```
 
@@ -293,9 +293,10 @@ makespan、程序完成率和归一化程序延迟。
 补跑沿用原轨迹、GPU KV 容量和批次上限，使用独立输出目录保留原始失败记录。
 
 ShareGPT 的 4,000 条回放含 23,575 次调用，平均输出 279 token、带完整历史的平均输入
-2,962 token。BFCL 轨迹保留每次输入的工具定义和上下文。现有 LATS 轨迹来自六个
-HotpotQA 程序，平均 320 次调用，论文报告 159.7 次。输入长度与程序调用数采用图 11
-的工作负载清单核对，结果保留对应轨迹版本。
+2,962 token。BFCL 回放使用官方 v3 工具循环已采集的输入和输出长度，推理引擎统一使用
+共享的 Llama-3.1-8B 基础权重。用上面的 12 题配置采集 LATS 后，将 `lats-15-trace.json`
+传给 `--lats-trace`，并在准备 Mixed 时复用同一批 LATS 程序。采集清单记录源代码版本、
+模型、搜索参数和调用数，可与论文图 11 的分布核对。
 
 ```bash
 python scripts/run_h20_paper_suite.py --model "$model" --datasets "$data/datasets" --gpu "$gpu" \
