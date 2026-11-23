@@ -252,7 +252,7 @@ SHA-256 已核对，记录位于 `data/autellix/import/migration-verification.js
 | 图 14、15，多副本路由与扩展 | 原数据的多副本模拟。论文的多物理 GPU 性能依赖各副本拥有独立计算资源 |
 | 图 16，离线 makespan | 从同一 4,000 程序池抽取 1,000、2,000、3,000 和 4,000 个不同程序，每组同时提交，记录整批完成时间。对照包含三项组合优化的 FCFS、原生 vLLM、原生 SGLang、MLFQ 和两种 Autellix 接入。关闭 SQLite 的瞬时活动发布，调度和完成统计继续更新 |
 | 图 17，开销拆分 | vLLM-opt、MLFQ 和 Autellix 分别测量 ShareGPT、LATS 的模型、调度、KV 搬运和请求累计排队时间，并分开统计逻辑输入、命中前缀和模型实际计算的 prefill token |
-| 图 18，最优调度对照 | ShareGPT 与 LATS 的等步长模拟，含可提前获知剩余服务量的 SRPT |
+| 图 18，最优调度对照 | ShareGPT 与 LATS 各抽取 64 个程序，扫描至积压区间的等步长模拟，含可提前获知剩余服务量的 SRPT |
 | 图 19，KV 交换 | 跨层 fused 打包与解包，测原生 vLLM 搬运、PyTorch 聚合和 fused 路径。推理消融同时记录逻辑换出、主机与设备之间的 KV 载荷传输次数及耗时，并比较 N=1 窗口 |
 
 SGLang 单步预填充预算耗尽后保留已选请求与 decode，GPU KV 或请求槽位耗尽时按优先级收缩窗口。

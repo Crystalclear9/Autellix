@@ -178,14 +178,16 @@ def make_paper_workload(
     num_programs: int = 24,
     arrival_rate: float = 1.0,
     dataset_path: str | None = None,
+    dataset_programs: list[ProgramSpec] | None = None,
 ) -> list[ProgramSpec]:
-    if dataset_path:
-        source = load_programs_from_file(dataset_path, default_kind=kind)
+    if dataset_programs is None and dataset_path:
+        dataset_programs = load_programs_from_file(dataset_path, default_kind=kind)
+    if dataset_programs is not None:
         rng, now, sampled = random.Random(seed), 0., []
         for index in range(num_programs):
             if index:
                 now += rng.expovariate(arrival_rate)
-            program = rng.choice(source)
+            program = rng.choice(dataset_programs)
             pid, arrival = f"{program.program_id}-{index}", int(now)
             calls = tuple(replace(call, program_id=pid,
                 submit_time=None if call.submit_time is None else

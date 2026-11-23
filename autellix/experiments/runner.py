@@ -10,7 +10,7 @@ from typing import Iterable
 from .baselines import make_baseline
 from .datasets import load_programs_from_file, workload_analysis
 from ..core.execution import make_execution_model
-from ..core.models import SimulationResult
+from ..core.models import ProgramSpec, SimulationResult
 from ..core.simulator import Simulator
 from .workloads import make_paper_workload
 
@@ -90,6 +90,7 @@ class ExperimentRunner:
         arrival_rate: float,
         engines: int,
         dataset_path: str | None = None,
+        dataset_programs: list[ProgramSpec] | None = None,
         fixed_steps: bool = False,
     ) -> tuple[SimulationResult, dict[str, float | int | str]]:
         programs = make_paper_workload(
@@ -98,6 +99,7 @@ class ExperimentRunner:
             num_programs=num_programs,
             arrival_rate=arrival_rate,
             dataset_path=dataset_path,
+            dataset_programs=dataset_programs,
         )
         baseline = make_baseline(
             baseline_name,
@@ -145,6 +147,7 @@ class ExperimentRunner:
                 num_programs=num_programs,
                 dataset_path=dataset_path,
             )
+        source = load_programs_from_file(dataset_path, default_kind=workload) if dataset_path else None
         records: list[dict[str, float | int | str]] = []
         for rate in arrival_rates:
             for baseline_name in baseline_names:
@@ -155,7 +158,7 @@ class ExperimentRunner:
                         num_programs=num_programs,
                         arrival_rate=rate,
                         engines=engines,
-                        dataset_path=dataset_path,
+                        dataset_programs=source,
                         fixed_steps=fixed_steps,
                     )
                     record["status"] = "ok"
@@ -203,6 +206,7 @@ class ExperimentRunner:
         num_programs: int,
         dataset_path: str | None = None,
     ) -> list[dict[str, float | int | str]]:
+        source = load_programs_from_file(dataset_path, default_kind=workload) if dataset_path else None
         records: list[dict[str, float | int | str]] = []
         for rate in arrival_rates:
             programs = make_paper_workload(
@@ -210,7 +214,7 @@ class ExperimentRunner:
                 seed=self.seed,
                 num_programs=num_programs,
                 arrival_rate=rate,
-                dataset_path=dataset_path,
+                dataset_programs=source,
             )
             for load_balancer_name in load_balancers:
                 baseline = make_baseline(

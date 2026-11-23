@@ -199,9 +199,10 @@ def simulate(args):
                                              arrival_rates=(.08, .16, .32, .64, 1., 1.5, 2.5, 4., 6., 10.), engines=engines,
                                              num_programs=512, dataset_path=data))
             else:
-                rates = (.0008, .0016, .0032, .0064) if family == "lats" else (.005, .01, .02, .03, .04)
+                rates = ((.0008, .0016, .0032, .0064, .0096, .0128) if family == "lats"
+                         else (.005, .01, .02, .03, .04, .05, .065))
                 rows.extend(runner.sweep(workload=family, baseline_names=("fcfs", "round-robin", "mlfq", "autellix", "srpt"),
-                                         arrival_rates=rates, engines=1, num_programs=count,
+                                         arrival_rates=rates, engines=1, num_programs=args.simulation_programs,
                                          dataset_path=data, fixed_steps=True))
         measurement = "workload_trace" if figure == 11 else "simulation"
         write_json(args.run_dir / f"fig{figure}-{measurement.replace('_', '-')}.json",
@@ -238,6 +239,7 @@ def main():
     parser.add_argument("--offline-sizes", nargs="+", type=int, default=(1000, 2000, 3000, 4000))
     parser.add_argument("--online-programs", type=int, help="programs per arrival trace for Figures 12 and 13")
     parser.add_argument("--profile-programs", type=int, help="programs per timing trace for Figures 5, 6, 17, and 19")
+    parser.add_argument("--simulation-programs", type=int, default=64, help="programs per Figure 18 simulated trace")
     parser.add_argument("--rates", nargs="+", type=float)
     parser.add_argument("--repeats", type=int, default=2)
     parser.add_argument("--seed", type=int, default=2026)
@@ -259,8 +261,9 @@ def main():
         parser.error("use a physical GPU index and a KV capacity divisible by 16 of at least 32768 tokens")
     if min(args.offline_sizes) < 1 or max(args.offline_sizes) > 4000:
         parser.error("offline sizes must be between 1 and 4000")
-    if any(count is not None and count < 1 for count in (args.online_programs, args.profile_programs)):
-        parser.error("online and timing trace counts must be positive")
+    if any(count is not None and count < 1
+           for count in (args.online_programs, args.profile_programs, args.simulation_programs)):
+        parser.error("program counts must be positive")
     if args.diagnostic_seconds < 1 or args.diagnostic_warmup < 0:
         parser.error("Figure 4 duration must be positive and warmup cannot be negative")
     if args.batch_tokens < args.batch_size + 16:
