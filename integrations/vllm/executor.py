@@ -1,10 +1,45 @@
-"""KV transfer and metadata handling for the pinned tensor-parallel workers."""
+"""KV transfer and metadata handling for the pinned vLLM workers."""
 from vllm.distributed import broadcast_tensor_dict
+from vllm.executor.gpu_executor import GPUExecutor
 from vllm.executor.multiproc_gpu_executor import MultiprocessingGPUExecutor
+from vllm.worker.cache_engine import CacheEngine
 from vllm.worker.worker import Worker
 from vllm.worker.worker_base import WorkerInput, extract_previous_hidden_states
 
-from autellix.runtime.swap import attach_cache_engine
+from autellix.runtime.swap import attach_cache_engine, packed_host_swap
+
+
+class BlockMajorHostCacheEngine(CacheEngine):
+    def _allocate_kv_cache(self, num_blocks, device):
+        if device != "cpu":
+            return super()._allocate_kv_cache(num_blocks, device)
+        import torch
+        from autellix.runtime.packed_kv import PackedKVLayout
+
+        self.packed_gpu = PackedKVLayout(self.gpu_cache, channels=2, token_major=True)
+        self.host_blocks = torch.zeros(self.packed_gpu.shape(num_blocks), dtype=self.dtype,
+                                       device="cpu", pin_memory=True)
+        # The logical layer views share the same block-major host storage.
+        return [self.host_blocks[:, 2*i:2*i+2].transpose(0, 1) for i in range(self.num_attention_layers)]
+
+    def swap_in(self, mapping):
+        return packed_host_swap(self.packed_gpu, self.host_blocks, mapping, to_host=False)
+
+    def swap_out(self, mapping):
+        return packed_host_swap(self.packed_gpu, self.host_blocks, mapping, to_host=True)
+
+
+class AutellixPackedHostWorker(Worker):
+    def _init_cache_engine(self):
+        cache = BlockMajorHostCacheEngine(self.cache_config, self.model_config,
+                                         self.parallel_config, self.device_config)
+        self.cache_engine = [cache]
+        self.gpu_cache = [cache.gpu_cache]
+
+
+class AutellixPackedHostGPUExecutor(GPUExecutor):
+    def _get_worker_module_and_class(self):
+        return __name__, AutellixPackedHostWorker.__name__, None
 
 
 class AutellixWorker(Worker):

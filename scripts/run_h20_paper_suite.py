@@ -163,6 +163,8 @@ def build_plans(args):
                 cases.extend((dict(candidate, name="torch-swap", engine_args=torch_swap),
                               dict(candidate, name="fused-swap", engine_args=mode),
                               dict(candidate, name="fused-swap-N1", interval=1, engine_args=mode)))
+                if backend == "vllm":
+                    cases.append(dict(candidate, name="fused-swap-packed-host", engine_args=dict(mode, packed_host_kv=True)))
                 name = f"fig19-{family}-{backend}"
                 pressure_rate = 1.92 if family == "sharegpt" else .28
                 yield plan(backend, family, name, (19,), cases, args.rates or (pressure_rate,),

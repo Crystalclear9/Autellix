@@ -16,6 +16,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output")
     parser.add_argument("--baseline", choices=("vllm", "python"), default="vllm")
     parser.add_argument("--fused", action="store_true", help="also measure fused cross-layer CUDA packing")
+    parser.add_argument("--packed-host", action="store_true", help="also measure block-major host KV")
     args = parser.parse_args(argv)
     if min(args.blocks, args.block_bytes, args.layers, args.iterations) <= 0 or args.block_bytes % 2:
         parser.error("counts must be positive; block-bytes must be divisible by 2")
@@ -45,6 +46,8 @@ def main(argv: list[str] | None = None) -> int:
         torch.cuda.synchronize()
 
     def measure(operation):
+        for layer in restored:
+            layer.zero_()
         times = []
         for i in range(args.iterations + 2):
             torch.cuda.synchronize()
@@ -84,6 +87,21 @@ def main(argv: list[str] | None = None) -> int:
         result.update(fused_roundtrip_seconds=fused_seconds, fused_GBps=size / fused_seconds / 1e9,
                       fused_speedup_vs_native=small_seconds / fused_seconds,
                       fused_speedup_vs_torch=batched_seconds / fused_seconds)
+    if args.packed_host:
+        from autellix.runtime.packed_kv import PackedKVLayout
+        from autellix.runtime.swap import packed_host_swap
+
+        packer = PackedKVLayout(gpu, channels=2, token_major=True)
+        unpacker = PackedKVLayout(restored, channels=2, token_major=True)
+        block_major = torch.empty(packer.shape(args.blocks), dtype=dtype, device="cpu", pin_memory=True)
+
+        def packed_transfer(source, destination):
+            to_host = source is gpu
+            packed_host_swap(packer if to_host else unpacker, block_major, native_mapping, to_host=to_host)
+
+        packed_seconds = measure(packed_transfer)
+        result.update(packed_host_roundtrip_seconds=packed_seconds, packed_host_GBps=size / packed_seconds / 1e9,
+                      packed_host_speedup_vs_native=small_seconds / packed_seconds)
     print(json.dumps(result, indent=2))
     if args.output:
         from pathlib import Path

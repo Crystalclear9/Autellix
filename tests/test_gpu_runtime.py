@@ -338,21 +338,39 @@ class CUDASwapTests(unittest.TestCase):
     def test_real_kv_roundtrip_nontrivial_mapping(self):
         import torch
         from unittest.mock import patch
-        from autellix.runtime.swap import batched_swap
+        from autellix.runtime.packed_kv import PackedKVLayout
+        from autellix.runtime.swap import batched_swap, packed_host_swap
         self.assertTrue(torch.cuda.is_available())
         source = [torch.randn(2, 9, 4, 2, 8, dtype=torch.float16, device="cuda") for _ in range(3)]
         host = [torch.full((2, 11, 4, 2, 8), -10., dtype=torch.float16) for _ in source]
         target = [torch.zeros_like(layer) for layer in source]
         block_bytes = len(source) * source[0][:, 0].numel() * source[0].element_size()
+        swap_out = [(0, 2), (7, 2), (0, 9), (4, 5), (4, 5)]
+        swap_in = [(9, 7), (2, 7), (9, 0), (5, 4)]
         with patch("autellix.runtime.swap.MAX_TRANSFER_BYTES", block_bytes):
-            batched_swap(source, host, [(0, 2), (7, 2), (0, 9), (4, 5), (4, 5)])
-            batched_swap(host, target, [(9, 7), (2, 7), (9, 0), (5, 4)])
+            batched_swap(source, host, swap_out)
+            batched_swap(host, target, swap_in)
         for src, dst, cpu in zip(source, target, host):
             self.assertTrue(torch.equal(src[:, [7, 0, 4]], dst[:, [7, 0, 4]]))
             self.assertTrue(torch.equal(dst[:, 1], torch.zeros_like(dst[:, 1])))
             self.assertTrue(torch.all(cpu[:, 0] == -10).item())
         with self.assertRaises(IndexError):
             batched_swap(source, host, [(10, 0), (7, 0)])
+
+        packer = PackedKVLayout(source, channels=2, token_major=True)
+        unpacker = PackedKVLayout(target, channels=2, token_major=True)
+        blocks = torch.empty(packer.shape(11), dtype=packer.dtype, pin_memory=True).fill_(-10)
+        for layer in target:
+            layer.zero_()
+        with patch("autellix.runtime.swap.MAX_TRANSFER_BYTES", block_bytes):
+            self.assertEqual(packed_host_swap(packer, blocks, swap_out, to_host=True), 3)
+            self.assertEqual(packed_host_swap(unpacker, blocks, swap_in, to_host=False), 3)
+        for src, dst in zip(source, target):
+            self.assertTrue(torch.equal(src[:, [7, 0, 4]], dst[:, [7, 0, 4]]))
+            self.assertEqual(dst[:, 1].count_nonzero().item(), 0)
+        self.assertTrue(torch.all(blocks[0] == -10).item())
+        with self.assertRaises(IndexError):
+            packed_host_swap(packer, blocks, [(10, 0), (7, 0)], to_host=True)
 
     def test_fused_kv_matches_selected_blocks_for_both_layouts(self):
         import torch

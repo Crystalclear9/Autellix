@@ -53,6 +53,7 @@ def main():
     parser.add_argument("--completion-only", action="store_true", help="return only final outputs for all cases")
     parser.add_argument("--no-publish-activity", action="store_true", help="skip intermediate activity writes for performance replay")
     parser.add_argument("--fused-swap", action="store_true", help="pack and unpack all CUDA KV layers with the fused kernel")
+    parser.add_argument("--packed-host-kv", action="store_true", help="store host KV in contiguous whole blocks on one GPU")
     parser.add_argument("--no-scheduler-trace", action="store_true", help="measure without per-step scheduler JSONL events")
     parser.add_argument("--cases", nargs="+", help="run only the listed cases")
     parser.add_argument("--label")
@@ -80,7 +81,7 @@ def main():
     options = {name: True for name in ("keep_resident_kv", "publish_activity_at_window", "refill_idle_slots",
                                        "paper_chunked_prefill", "resident_reserve_only", "fused_swap",
                                        "resident_decode_headroom", "exact_prefix_cache", "recompute_on_swap_full",
-                                       "deduplicate_prefill")
+                                       "deduplicate_prefill", "packed_host_kv")
                if getattr(args, name)}
     if options:
         candidate["engine_args"] = options

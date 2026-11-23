@@ -10,6 +10,17 @@ from __future__ import annotations
 MAX_TRANSFER_BYTES = 1 << 30
 
 
+def _last_writes(source, destination):
+    # Prefix-sharing mappings can repeat. Apply the last write for each block,
+    # matching vLLM's same-stream order.
+    import torch
+    last_copy = {block: i for i, block in enumerate(destination.tolist())}
+    if len(last_copy) == len(destination):
+        return source, destination
+    keep = torch.tensor(list(last_copy.values()), dtype=torch.long, device="cpu")
+    return source[keep], destination[keep]
+
+
 def batched_swap(source, destination, mapping, *, packed=None):
     import torch
 
@@ -34,11 +45,7 @@ def batched_swap(source, destination, mapping, *, packed=None):
             raise ValueError("unsupported KV cache shape, dtype, device, or stride")
         if src_min < 0 or src_max >= src.shape[1] or dst_min < 0 or dst_max >= dst.shape[1]:
             raise IndexError("KV block mapping out of bounds")
-    # Shared prefix blocks can repeat. Match vLLM's same-stream copy order.
-    last_copy = {block: i for i, block in enumerate(dst_idx.tolist())}
-    if len(last_copy) != len(dst_idx):
-        keep = torch.tensor(list(last_copy.values()), dtype=torch.long, device="cpu")
-        src_idx, dst_idx = src_idx[keep], dst_idx[keep]
+    src_idx, dst_idx = _last_writes(src_idx, dst_idx)
     gpu = first_src.device if first_src.is_cuda else first_dst.device
     bytes_per_block = len(source) * first_src[:, 0].numel() * first_src.element_size()
     blocks_per_transfer = max(1, MAX_TRANSFER_BYTES // bytes_per_block)
@@ -46,6 +53,40 @@ def batched_swap(source, destination, mapping, *, packed=None):
         for src_blocks, dst_blocks in zip(src_idx.split(blocks_per_transfer), dst_idx.split(blocks_per_transfer)):
             _transfer(source, destination, src_blocks, dst_blocks, gpu, packed)
     return (len(src_idx) + blocks_per_transfer - 1) // blocks_per_transfer
+
+
+def packed_host_swap(packed, host_cache, mapping, *, to_host):
+    """Transfer whole blocks between layered GPU KV and block-major host KV."""
+    import torch
+    pairs = torch.as_tensor(mapping, dtype=torch.long, device="cpu").reshape(-1, 2)
+    if not len(pairs):
+        return 0
+    host_column = 1 if to_host else 0
+    for indices, capacity in ((pairs[:, host_column], host_cache.shape[0]),
+                              (pairs[:, 1 - host_column], packed.capacity)):
+        first, last = torch.aminmax(indices)
+        if first < 0 or last >= capacity:
+            raise IndexError("KV block mapping out of bounds")
+    source, destination = _last_writes(pairs[:, 0].contiguous(), pairs[:, 1].contiguous())
+    host_indices, gpu_indices = (destination, source) if to_host else (source, destination)
+    gpu = packed.device
+    blocks_per_transfer = max(1, MAX_TRANSFER_BYTES // packed.bytes_per_block)
+    with torch.cuda.device(gpu):
+        stream = torch.cuda.current_stream(gpu)
+        for cpu_index, gpu_index in zip(host_indices.split(blocks_per_transfer), gpu_indices.split(blocks_per_transfer)):
+            shape = packed.shape(len(cpu_index))
+            staging = torch.empty(shape, dtype=packed.dtype, device="cpu", pin_memory=True)
+            if to_host:
+                payload = torch.empty(shape, dtype=packed.dtype, device=gpu)
+                packed.move(gpu_index, payload, pack=True)
+                staging.copy_(payload, non_blocking=True)
+                stream.synchronize()
+                host_cache.index_copy_(0, cpu_index, staging)
+            else:
+                torch.index_select(host_cache, 0, cpu_index, out=staging)
+                packed.move(gpu_index, staging.to(gpu, non_blocking=True), pack=False)
+                stream.synchronize()
+    return (len(host_indices) + blocks_per_transfer - 1) // blocks_per_transfer
 
 
 def _transfer(source, destination, src_idx, dst_idx, gpu, packed):

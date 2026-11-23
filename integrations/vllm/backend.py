@@ -21,7 +21,8 @@ class VLLMBackend:
                  publish_activity: bool = True, recompute_on_swap_full: bool = False,
                  resident_decode_headroom: bool = False, qwen3_fused_qk_rope: bool = False,
                  exact_prefix_cache: bool | None = None, completion_only: bool = False,
-                 min_decode_steps: int = 0, deduplicate_prefill: bool = False, **engine_args):
+                 min_decode_steps: int = 0, deduplicate_prefill: bool = False,
+                 packed_host_kv: bool = False, **engine_args):
         if version("vllm") != "0.6.1":
             raise RuntimeError("this backend requires vllm==0.6.1")
         config = config or PolicyConfig()
@@ -35,6 +36,8 @@ class VLLMBackend:
         if engine_args.get("pipeline_parallel_size", 1) != 1:
             raise ValueError("pipeline parallelism is not supported; use tensor parallelism")
         tp = engine_args.get("tensor_parallel_size", 1)
+        if packed_host_kv and (not paper or tp != 1 or not batched_swap):
+            raise ValueError("packed host KV requires single-GPU paper mode with batched swap")
         if "num_scheduler_steps" in engine_args and engine_args["num_scheduler_steps"] != config.schedule_interval:
             raise ValueError("num_scheduler_steps must match PolicyConfig.schedule_interval")
         if engine_args.get("enable_chunked_prefill", False) and not native and not paper:
@@ -66,7 +69,10 @@ class VLLMBackend:
             # by PaperPlan. An explicit chunk budget can be below max_model_len.
             args["enable_chunked_prefill"] = True
             args.setdefault("max_num_batched_tokens", max(args.get("max_model_len", 2048), capacity + config.overprovision))
-        if tp > 1 and not native:
+        if packed_host_kv:
+            from .executor import AutellixPackedHostGPUExecutor
+            args["distributed_executor_backend"] = AutellixPackedHostGPUExecutor
+        elif tp > 1 and not native:
             from .executor import AutellixFusedSwapMPExecutor, AutellixMPExecutor, AutellixNativeSwapMPExecutor
             executor = AutellixFusedSwapMPExecutor if fused_swap else AutellixMPExecutor
             args["distributed_executor_backend"] = executor if batched_swap else AutellixNativeSwapMPExecutor
@@ -110,7 +116,7 @@ class VLLMBackend:
                                                       deduplicate_prefill=deduplicate_prefill)
             self.scheduler._autellix_window = self.scheduler._autellix_paper.window
         worker = self.engine.model_executor.driver_worker
-        if tp == 1 and batched_swap and not native:
+        if tp == 1 and batched_swap and not native and not packed_host_kv:
             for cache in worker.cache_engine:
                 attach_cache_engine(cache, fused=fused_swap)
         if measure_timing:
