@@ -141,33 +141,57 @@ def main():
     p.add_argument("--source", required=True)
     p.add_argument("--data", required=True)
     p.add_argument("--model", required=True)
+    p.add_argument("--backend", choices=("sglang", "vllm"), default="sglang")
+    p.add_argument("--chat-template", type=Path, help="local Jinja template for base-model tokenizers")
     p.add_argument("--device", default="2")
     p.add_argument("--output", required=True)
     p.add_argument("--programs", type=int, default=6)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--max-calls", type=int, default=400)
+    p.add_argument("--iterations", type=int, default=30)
     p.add_argument("--resume", action="store_true")
     args = p.parse_args()
+    if args.iterations < 1:
+        p.error("--iterations must be positive")
     import pyarrow.parquet as pq
     from transformers import AutoTokenizer
     from autellix.runtime import InferenceEngine, ReplicaConfig, PolicyConfig
     rows = pq.read_table(args.data).to_pylist()
     indices = random.Random(args.seed).sample(range(len(rows)), args.programs)
     tokenizer = AutoTokenizer.from_pretrained(args.model, local_files_only=True)
+    template_sha256 = None
+    if args.chat_template:
+        template = args.chat_template.read_bytes()
+        tokenizer.chat_template = template.decode("utf-8")
+        template_sha256 = hashlib.sha256(template).hexdigest()
     source, out = Path(args.source).resolve(), Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
     programs, outcomes = [], []
     if args.resume and out.exists():
         programs = json.loads(out.read_text())
-        outcomes = json.loads(out.with_suffix(".manifest.json").read_text())["outcomes"]
+        saved = json.loads(out.with_suffix(".manifest.json").read_text())
+        if (saved.get("backend", "sglang") != args.backend or saved["search"]["iterations"] != args.iterations
+                or saved["search"]["max_calls"] != args.max_calls or saved["seed"] != args.seed
+                or saved.get("chat_template_sha256") != template_sha256 or saved["model"] != args.model
+                or saved["indices"] != indices):
+            p.error("resume requires the same model, backend, template, search iterations, and question sample")
+        outcomes = saved["outcomes"]
     completed = {p["program_id"] for p in programs}
     if completed:
         print(f"RESUME programs={len(completed)}", flush=True)
-    options = dict(autellix_legacy_gpu=True, autellix_native_baseline=True, dtype="float16",
-                   context_length=32768, max_running_requests=4, max_total_tokens=32768,
-                   max_prefill_tokens=32768, mem_fraction_static=.9, random_seed=args.seed)
-    with InferenceEngine([ReplicaConfig("sglang", args.model, args.device, options)],
-                         policy=PolicyConfig(policy="fcfs", overprovision=0)) as engine:
+    if args.backend == "vllm":
+        options = dict(autellix_mode="vllm-opt", observe_native=False, dtype="bfloat16",
+                       max_model_len=32768, max_num_seqs=8, max_num_batched_tokens=2048,
+                       num_gpu_blocks_override=4096, enforce_eager=False, seed=args.seed,
+                       completion_only=True, preemption_mode=None)
+    else:
+        options = dict(autellix_legacy_gpu=True, autellix_native_baseline=True, dtype="float16",
+                       context_length=32768, max_running_requests=4, max_total_tokens=32768,
+                       max_prefill_tokens=32768, mem_fraction_static=.9, random_seed=args.seed)
+    with InferenceEngine([ReplicaConfig(args.backend, args.model, args.device, options)],
+                         policy=PolicyConfig(policy="fcfs", overprovision=0,
+                                             schedule_interval=1 if args.backend == "vllm" else 8),
+                         scheduler_trace=args.backend == "sglang") as engine:
         recorder = Recorder(engine, tokenizer, args.max_calls)
         lats, task_class = load_official(source, recorder, DocumentEnv(rows), tokenizer)
         search_log = engine.state_dir / "lats-search.log"
@@ -185,7 +209,7 @@ def main():
             lats.gpt = recorder.gpt
             status, reward = "completed", None
             try:
-                result = lats.lats_search(config, task_class(), index, iterations=30, to_print=False)
+                result = lats.lats_search(config, task_class(), index, iterations=args.iterations, to_print=False)
                 reward = result[3]
             except SearchBudget:
                 status = f"{args.max_calls}-call search budget"
@@ -203,8 +227,9 @@ def main():
             shutil.copy2(search_log, out.with_suffix(".search.log"))
             print(json.dumps(outcomes[-1]), flush=True)
             manifest = dict(source="https://github.com/andyz245/LanguageAgentTreeSearch", revision=REVISION,
-                            model=args.model, seed=args.seed, indices=indices, outcomes=outcomes,
-                            search=dict(iterations=30, expansion_width=5, evaluation_samples=1,
+                            model=args.model, backend=args.backend, chat_template_sha256=template_sha256,
+                            seed=args.seed, indices=indices, outcomes=outcomes,
+                            search=dict(iterations=args.iterations, expansion_width=5, evaluation_samples=1,
                                         temperature=1., max_output_tokens=100, max_calls=args.max_calls),
                             environment="HotpotQA supplied distractor documents; local Search/Lookup/Finish",
                             adaptations=["local Llama replaces hosted GPT",

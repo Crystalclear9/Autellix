@@ -22,6 +22,7 @@ def main():
     selection = parser.add_mutually_exclusive_group()
     selection.add_argument("--programs", type=int)
     selection.add_argument("--all-programs", action="store_true", help="replay each offline program once")
+    parser.add_argument("--unique-programs", action="store_true", help="sample each source program at most once per trace")
     parser.add_argument("--rates", type=float, nargs="+")
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--batch-tokens", type=int, default=32768)
@@ -42,7 +43,13 @@ def main():
     parser.add_argument("--refill-idle-slots", action="store_true", help="fill vacant batch slots after the prepared reserve is exhausted")
     parser.add_argument("--resident-reserve-only", action="store_true", help="choose reserve requests from KV already on GPU")
     parser.add_argument("--cuda-graphs", action="store_true", help="enable the native decode CUDA graphs for all cases")
+    parser.add_argument("--graph-context", type=int, help="maximum context length for CUDA graph decode")
     parser.add_argument("--paper-chunked-prefill", action="store_true", help="use budgeted prefill along with Autellix windows")
+    parser.add_argument("--resident-decode-headroom", action="store_true", help="budget one token per selected resident decode")
+    parser.add_argument("--exact-prefix-cache", action="store_true", help="match computed prefix accounting in the chunked vLLM controls")
+    parser.add_argument("--recompute-on-swap-full", action="store_true", help="recompute paused KV when the host cache fills")
+    parser.add_argument("--completion-only", action="store_true", help="return only final outputs for all cases")
+    parser.add_argument("--no-publish-activity", action="store_true", help="skip intermediate activity writes for performance replay")
     parser.add_argument("--fused-swap", action="store_true", help="pack and unpack all CUDA KV layers with the fused kernel")
     parser.add_argument("--no-scheduler-trace", action="store_true", help="measure without per-step scheduler JSONL events")
     parser.add_argument("--cases", nargs="+", help="run only the listed cases")
@@ -69,12 +76,19 @@ def main():
     candidate = dict(name="autellix", policy=policy, interval=args.interval, reserve=1,
                      quantum_scale=args.quantum_scale, boundary_scale=args.boundary_scale)
     options = {name: True for name in ("keep_resident_kv", "publish_activity_at_window", "refill_idle_slots",
-                                       "paper_chunked_prefill", "resident_reserve_only", "fused_swap")
+                                       "paper_chunked_prefill", "resident_reserve_only", "fused_swap",
+                                       "resident_decode_headroom", "exact_prefix_cache", "recompute_on_swap_full")
                if getattr(args, name)}
     if options:
         candidate["engine_args"] = options
     baselines = [dict(name=name, policy=name, interval=steps, engine_args={"preemption_mode": None}) for name, steps in (
         ("vllm", 1), ("vllm-opt", 1), ("vllm-opt-multistep", args.interval))]
+    for case in baselines:
+        if case["policy"] == "vllm-opt":
+            if args.exact_prefix_cache:
+                case["engine_args"]["exact_prefix_cache"] = True
+        elif args.batch_tokens < 32768:
+            case["engine_args"]["max_num_batched_tokens"] = 32768
     mlfq = dict(candidate, name="mlfq", policy="mlfq")
     cases = [*baselines, mlfq, candidate]
     if args.experiment == "routing":
@@ -108,6 +122,14 @@ def main():
                                  enforce_eager=not args.cuda_graphs,
                                  observe_native=args.experiment == "timing", measure_timing=args.experiment == "timing"),
                 cases=cases)
+    if args.unique_programs:
+        plan["unique_programs"] = True
+    if args.completion_only:
+        plan["engine_args"]["completion_only"] = True
+    if args.graph_context is not None:
+        plan["engine_args"]["max_seq_len_to_capture"] = args.graph_context
+    if args.no_publish_activity:
+        plan["engine_args"]["publish_activity"] = False
     if args.window_activity:
         plan["engine_args"]["publish_waiting_each_step"] = False
     if args.kv_blocks is not None:

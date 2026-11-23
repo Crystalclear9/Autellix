@@ -27,6 +27,33 @@ def hash_trace(trace):
     return digest.hexdigest()
 
 
+def unique_trace(programs, count, rate, seed, *, equal_dataset_counts=False):
+    rng = random.Random(seed)
+    ordered = list(programs)
+    rng.shuffle(ordered)
+    if count:
+        if count > len(ordered):
+            raise ValueError(f"requested {count} distinct programs from {len(ordered)}")
+        if equal_dataset_counts:
+            pools = {}
+            for program in ordered:
+                pools.setdefault(program.get("dataset", "default"), []).append(program)
+            per_dataset, remainder = divmod(count, len(pools))
+            if remainder or any(len(pool) < per_dataset for pool in pools.values()):
+                raise ValueError("equal sampling requires enough distinct programs in every dataset")
+            selected = {p["program_id"] for pool in pools.values() for p in pool[:per_dataset]}
+            ordered = [program for program in ordered if program["program_id"] in selected]
+        else:
+            ordered = ordered[:count]
+    trace = copy.deepcopy(ordered)
+    arrival = 0.
+    for i, program in enumerate(trace):
+        if i and rate is not None:
+            arrival += rng.expovariate(rate)
+        program["arrival_time"] = arrival
+    return trace
+
+
 def completed_trials(records, plan, versions):
     completed = {}
     for row in records:
@@ -87,19 +114,8 @@ def main(argv=None):
                 trace = sample_trace(programs, plan["programs"], rate, seed,
                                       equal_dataset_counts=plan.get("equal_dataset_counts", False))
             else:
-                trace = copy.deepcopy(programs)
-                rng = random.Random(seed)
-                rng.shuffle(trace)
-                if plan.get("programs"):
-                    count = plan["programs"]
-                    if count > len(trace):
-                        raise ValueError(f"requested {count} distinct programs from {len(trace)}")
-                    trace = trace[:count]
-                arrival = 0.
-                for i, program in enumerate(trace):
-                    if i and rate is not None:
-                        arrival += rng.expovariate(rate)
-                    program["arrival_time"] = arrival
+                trace = unique_trace(programs, plan.get("programs"), rate, seed,
+                                     equal_dataset_counts=plan.get("equal_dataset_counts", False))
             cases = plan["cases"]
             trace_hash = hash_trace(trace)
             offset = repeat % len(cases)

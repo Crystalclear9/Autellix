@@ -45,6 +45,33 @@ H20，70B 在 SGLang 使用流水线并行，在 vLLM 使用四卡张量并行�
 0.6.1、启用分块 prefill 和前缀缓存的 vLLM-opt，以及 MLFQ。
 [Autellix 论文，第 6 节](https://arxiv.org/html/2502.13965v1#S6)
 
+## 单卡 Llama‑3.1‑8B 论文对照
+
+在 `autellix-vllm061` 环境中使用共享的 `Meta-Llama-3.1-8B` BF16 权重。ShareGPT 从
+完整会话取样，BFCL v3 沿用官方工具模拟器采集的输入与生成长度。`--unique-programs`
+使同一条轨迹里的程序各出现一次。Mixed 按 ShareGPT、BFCL、LATS 等量取样；LATS 和
+Mixed 按调用依赖计算关键路径。BFCL 可用下列配置复跑 24 个程序的负载对照。
+
+```bash
+python scripts/run_paper_vllm.py online bfcl --model "$model" --datasets "$data/datasets" \
+  --run-dir "$data/runs/fjr-llama8b-bfcl" --device "$gpu" --programs 24 --unique-programs \
+  --rates .4 .8 1.6 --batch-size 16 --batch-tokens 2048 --kv-blocks 16384 \
+  --quantum-scale 8 --boundary-scale 16 --keep-resident-kv --refill-idle-slots \
+  --resident-reserve-only --paper-chunked-prefill --resident-decode-headroom --exact-prefix-cache \
+  --recompute-on-swap-full --fused-swap --completion-only --cuda-graphs --graph-context 16384 \
+  --no-scheduler-trace --no-publish-activity
+```
+
+重新采集 LATS 时使用同一份基础模型和本地对话模板。下面的采集执行 15 轮上限的
+HotpotQA 搜索，保存实际调用、并发依赖和生成长度。
+
+```bash
+python scripts/collect_lats.py --backend vllm --source "$data/datasets/lats-source" \
+  --data "$data/datasets/hotpot-train" --model "$model" --device "$gpu" \
+  --chat-template "$data/datasets/llama-31-chat.jinja" --programs 4 --iterations 15 \
+  --max-calls 240 --output "$data/runs/fjr-llama8b-lats/lats-15-trace.json" --resume
+```
+
 ## vLLM 离线回放与续跑
 
 在 `fjr` 的 `autellix-vllm061` 环境中使用同一份 ShareGPT 程序回放。所有程序同时提交，

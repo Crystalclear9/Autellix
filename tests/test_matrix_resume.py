@@ -5,6 +5,7 @@ import sys
 from tempfile import TemporaryDirectory
 from pathlib import Path
 import unittest
+from collections import Counter
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
@@ -17,6 +18,20 @@ finally:
 
 
 class MatrixResumeTests(unittest.TestCase):
+    def test_distinct_mixed_trace_balances_datasets_at_every_rate(self):
+        pool = [dict(program_id=f"{dataset}-{i}", dataset=dataset)
+                for dataset, size in (("sharegpt", 9), ("bfcl", 7), ("lats", 3)) for i in range(size)]
+        slow = matrix.unique_trace(pool, 9, .2, 29, equal_dataset_counts=True)
+        fast = matrix.unique_trace(pool, 9, .4, 29, equal_dataset_counts=True)
+        self.assertEqual(Counter(row["dataset"] for row in slow), {"sharegpt": 3, "bfcl": 3, "lats": 3})
+        self.assertEqual(len({row["program_id"] for row in slow}), 9)
+        for a, b in zip(slow, fast, strict=True):
+            self.assertEqual(a["program_id"], b["program_id"])
+            self.assertAlmostEqual(a["arrival_time"], 2 * b["arrival_time"])
+        self.assertTrue(all("arrival_time" not in row for row in pool))
+        with self.assertRaisesRegex(ValueError, "every dataset"):
+            matrix.unique_trace(pool, 12, .2, 29, equal_dataset_counts=True)
+
     def test_future_rates_and_pending_case_can_change_without_repeating_native(self):
         plan = dict(model="8B", rates=[.02, .05, .1], engine_args=dict(max_total_tokens=32768),
                     cases=[dict(name="native", policy="sglang-native"), dict(name="plas", interval=8)])
