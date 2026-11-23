@@ -10,7 +10,7 @@ from autellix.runtime.window import SchedulingWindow
 class PaperPlan:
     def __init__(self, scheduler, controller, capacity, keep_resident_kv=False, refill_idle_slots=False,
                  chunked_prefill=False, resident_reserve_only=False, recompute_on_swap_full=False,
-                 resident_decode_headroom=False, prefix_cache=None):
+                 resident_decode_headroom=False, prefix_cache=None, deduplicate_prefill=False):
         self.scheduler, self.controller = scheduler, controller
         self.window = SchedulingWindow(controller, capacity, refill_idle_slots=refill_idle_slots,
                                        resident_reserve_only=resident_reserve_only)
@@ -19,6 +19,7 @@ class PaperPlan:
         self.recompute_on_swap_full = recompute_on_swap_full
         self.resident_decode_headroom = resident_decode_headroom
         self.prefix_cache = prefix_cache
+        self.deduplicate_prefill = deduplicate_prefill and prefix_cache is not None
         self.prepared = set()
         self.reserved_slots = set()
 
@@ -145,6 +146,7 @@ class PaperPlan:
             return output(groups)
 
         resident_decodes = set()
+        warming_prefixes = set() if self.deduplicate_prefill else None
         defer_unreserved = False
         if self.chunked_prefill:
             from vllm.core.scheduler import SchedulingBudget
@@ -191,6 +193,13 @@ class PaperPlan:
                 partial = chunk < count
                 count = chunk
             uncached = count - cached
+            prefix_key = None
+            if warming_prefixes is not None and prefill and uncached >= self.prefix_cache.block_size:
+                prefix_key = tuple(group.get_seqs()[0].get_token_ids())
+                if prefix_key in warming_prefixes:
+                    # The first call warms the exact prefix this forward.
+                    # The remaining calls keep their slots and sample separately.
+                    continue
             if (resident_decodes and rid not in resident_decodes
                     and uncached > budget.remaining_token_budget()):
                 defer_unreserved = True
@@ -246,6 +255,8 @@ class PaperPlan:
             if rid in resident or (rid in window.reserve and not prefill):
                 continue
             groups.append(ScheduledSequenceGroup(seq_group=group, token_chunk_size=count))
+            if prefix_key is not None:
+                warming_prefixes.add(prefix_key)
             if cached:
                 uncached_counts[rid] = uncached
             if not partial:

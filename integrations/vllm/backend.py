@@ -21,7 +21,7 @@ class VLLMBackend:
                  publish_activity: bool = True, recompute_on_swap_full: bool = False,
                  resident_decode_headroom: bool = False, qwen3_fused_qk_rope: bool = False,
                  exact_prefix_cache: bool | None = None, completion_only: bool = False,
-                 min_decode_steps: int = 0, **engine_args):
+                 min_decode_steps: int = 0, deduplicate_prefill: bool = False, **engine_args):
         if version("vllm") != "0.6.1":
             raise RuntimeError("this backend requires vllm==0.6.1")
         config = config or PolicyConfig()
@@ -106,7 +106,8 @@ class VLLMBackend:
                                                       resident_reserve_only=resident_reserve_only,
                                                       recompute_on_swap_full=recompute_on_swap_full,
                                                       resident_decode_headroom=resident_decode_headroom,
-                                                      prefix_cache=prefix_cache)
+                                                      prefix_cache=prefix_cache,
+                                                      deduplicate_prefill=deduplicate_prefill)
             self.scheduler._autellix_window = self.scheduler._autellix_paper.window
         worker = self.engine.model_executor.driver_worker
         if tp == 1 and batched_swap and not native:

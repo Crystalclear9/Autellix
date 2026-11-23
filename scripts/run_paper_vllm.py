@@ -47,6 +47,8 @@ def main():
     parser.add_argument("--paper-chunked-prefill", action="store_true", help="use budgeted prefill along with Autellix windows")
     parser.add_argument("--resident-decode-headroom", action="store_true", help="budget one token per selected resident decode")
     parser.add_argument("--exact-prefix-cache", action="store_true", help="match computed prefix accounting in the chunked vLLM controls")
+    parser.add_argument("--deduplicate-prefill", action="store_true",
+                        help="let identical prompts in the same window reuse the first prefetched prefix")
     parser.add_argument("--recompute-on-swap-full", action="store_true", help="recompute paused KV when the host cache fills")
     parser.add_argument("--completion-only", action="store_true", help="return only final outputs for all cases")
     parser.add_argument("--no-publish-activity", action="store_true", help="skip intermediate activity writes for performance replay")
@@ -77,7 +79,8 @@ def main():
                      quantum_scale=args.quantum_scale, boundary_scale=args.boundary_scale)
     options = {name: True for name in ("keep_resident_kv", "publish_activity_at_window", "refill_idle_slots",
                                        "paper_chunked_prefill", "resident_reserve_only", "fused_swap",
-                                       "resident_decode_headroom", "exact_prefix_cache", "recompute_on_swap_full")
+                                       "resident_decode_headroom", "exact_prefix_cache", "recompute_on_swap_full",
+                                       "deduplicate_prefill")
                if getattr(args, name)}
     if options:
         candidate["engine_args"] = options

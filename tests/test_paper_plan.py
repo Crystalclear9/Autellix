@@ -92,6 +92,31 @@ class PaperPlanTests(unittest.TestCase):
         self.assertEqual(out.num_prefill_groups, 1)
         self.assertEqual(out.num_batched_tokens, 5)
 
+    def test_identical_prefills_reuse_first_sibling_prefix_in_next_forward(self):
+        self.ctl.config = PolicyConfig(overprovision=0)
+        first, sibling, different = (Group(rid, True) for rid in ("first", "sibling", "different"))
+        for index, group in enumerate((first, sibling, different)):
+            self.priority[group.request_id] = index
+            group.seq.data.get_num_uncomputed_tokens = lambda: 8
+        first.seq.get_token_ids = sibling.seq.get_token_ids = lambda: [1] * 8
+        different.seq.get_token_ids = lambda: [2] * 8
+        self.s.waiting.extend((first, sibling, different))
+        self.s.scheduler_config.max_num_seqs = 3
+        prefix = NS(block_size=4, reusable_tokens=lambda _: 0)
+        plan = PaperPlan(self.s, self.ctl, 3, chunked_prefill=True, prefix_cache=prefix, deduplicate_prefill=True)
+
+        out = plan.next_step()
+        self.assertEqual([group.seq_group for group in out.scheduled_seq_groups], [first, different])
+        self.assertEqual(list(self.s.waiting), [sibling])
+        self.assertEqual(plan.window.cohort, ["first", "sibling", "different"])
+        first.prefill = different.prefill = False
+        prefix.reusable_tokens = lambda _: 4
+
+        out = plan.next_step()
+        self.assertEqual([group.seq_group for group in out.scheduled_seq_groups], [sibling, first, different])
+        self.assertEqual([fields["tokens"] for event, fields in self.events if event == "plan_step"], [16, 6])
+        self.assertEqual(len(self.refreshes), 1)
+
     def test_swap_state_does_not_override_global_priority(self):
         self.ctl.config = PolicyConfig(overprovision=0)
         self.priority.update(high=0, low=1)

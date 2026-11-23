@@ -249,7 +249,7 @@ def summarize(records, slo_targets=DEFAULT_SLO_TARGETS):
                                      "autellix_mode", "preemption_mode", "observe_native", "batched_swap",
                                      "keep_resident_kv", "recompute_on_swap_full", "paper_chunked_prefill",
                                      "publish_activity_at_window", "refill_idle_slots", "resident_decode_headroom",
-                                     "min_decode_steps", "mixed_decode_quantum"}}
+                                     "min_decode_steps", "mixed_decode_quantum", "deduplicate_prefill"}}
             native_defaults = row["arm"] == "sglang-native" and row["effective_engine_args"].get("autellix_native_defaults", False)
             baseline_defaults = native["effective_engine_args"].get("autellix_native_defaults", False)
             row_options, baseline_options = options(row), options(native)

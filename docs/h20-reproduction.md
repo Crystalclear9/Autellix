@@ -268,6 +268,8 @@ vLLM 复现分支使用 BF16、16 个活动槽、262,144 个 GPU KV token 和 2,
 chunked-prefill 预算。Autellix 在 8 步窗口内使用已经在 GPU 上预备好的请求补位。原生
 vLLM 与原生多步对照的完整 prefill 预算是 32,768 token，chunked-prefill 原生对照和同路径
 FCFS 用于区分执行优化与程序优先级带来的收益。
+`run_paper_vllm.py --paper-chunked-prefill --exact-prefix-cache --deduplicate-prefill` 可补测 LATS 的
+重复 prefill。相同输入的并行调用共用首个调用计算出的前缀，各自保留生成请求和程序依赖。
 
 图 12 的 Llama-3.1-70B 和 Falcon-180B 原配置分别使用 4 张和 8 张 A100。图 14 的副本组数
 分别为 4 和 2，图 15 比较独立引擎扩容。上述 GPU 结果与单卡 8B、CPU 模拟分别汇总。
