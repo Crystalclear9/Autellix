@@ -1,6 +1,7 @@
 """Run the paper evaluation in one physical-GPU queue, with per-case checkpoints."""
 import argparse
 import json
+import math
 import os
 from pathlib import Path
 import subprocess
@@ -121,9 +122,12 @@ def build_plans(args):
         if figures:
             for family in args.workloads:
                 name = f"fig12-13-{family}-{backend}"
-                count = program_count(family, args.online_programs)
-                yield plan(backend, family, name, figures, cases_for(backend, family),
-                           args.rates or END_TO_END_RATES[family], count)
+                count = None if args.online_seconds else program_count(family, args.online_programs)
+                figure = plan(backend, family, name, figures, cases_for(backend, family),
+                              args.rates or END_TO_END_RATES[family], count)
+                if args.online_seconds:
+                    figure["arrival_seconds"] = args.online_seconds
+                yield figure
         if 16 in selected:
             for count in args.offline_sizes:
                 for case in cases_for(backend, "sharegpt"):
@@ -237,7 +241,9 @@ def main():
     parser.add_argument("--backends", nargs="+", choices=("vllm", "sglang"), default=("vllm", "sglang"))
     parser.add_argument("--cases", nargs="+", help="select named inference cases from the figure plans")
     parser.add_argument("--offline-sizes", nargs="+", type=int, default=(1000, 2000, 3000, 4000))
-    parser.add_argument("--online-programs", type=int, help="programs per arrival trace for Figures 12 and 13")
+    online = parser.add_mutually_exclusive_group()
+    online.add_argument("--online-programs", type=int, help="programs per arrival trace for Figures 12 and 13")
+    online.add_argument("--online-seconds", type=float, help="fixed Poisson arrival window for Figures 12 and 13")
     parser.add_argument("--profile-programs", type=int, help="programs per timing trace for Figures 5, 6, 17, and 19")
     parser.add_argument("--simulation-programs", type=int, default=64, help="programs per Figure 18 simulated trace")
     parser.add_argument("--rates", nargs="+", type=float)
@@ -266,6 +272,8 @@ def main():
         parser.error("program counts must be positive")
     if args.diagnostic_seconds < 1 or args.diagnostic_warmup < 0:
         parser.error("Figure 4 duration must be positive and warmup cannot be negative")
+    if args.online_seconds is not None and (not math.isfinite(args.online_seconds) or args.online_seconds <= 0):
+        parser.error("online arrival duration must be finite and positive")
     if args.batch_tokens < args.batch_size + 16:
         parser.error("vLLM chunk budget must hold one KV block and one token per active sequence")
 

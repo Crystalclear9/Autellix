@@ -261,6 +261,7 @@ PLAS 与 ATLAS 在窗口边界只读取已累计服务或等待时间的程序�
 图 12、13 以论文 8B 图的测点为默认扫描范围。ShareGPT、BFCL、LATS 和 Mixed 的上限分别为
 4、0.75、0.35 和 0.85 程序/秒。每条轨迹从源数据抽取不同的完整程序，Mixed 对各来源等量抽样。
 配对各组使用同一轨迹和随机种子。`--rates` 和 `--online-programs` 可调整到达率和样本数。
+`--online-seconds` 可固定泊松到达窗口，Mixed 的各来源样本数最多相差一个。
 `--bfcl-trace`、`--lats-trace` 和 `--mixed-trace` 用于指定新采集的数据文件。
 `collect_bfcl.py --backend vllm` 可用同一基础模型执行 BFCL v3 的工具循环，记录实际调用长度和工具耗时。
 

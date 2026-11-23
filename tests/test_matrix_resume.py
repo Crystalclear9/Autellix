@@ -32,6 +32,16 @@ class MatrixResumeTests(unittest.TestCase):
         self.assertEqual(len({row["program_id"] for row in trace}), len(arrivals))
         self.assertEqual(trace, matrix.timed_trace(pool, 1.5, 27, 10))
 
+    def test_timed_mixed_trace_keeps_poisson_count_and_balances_sources(self):
+        pool = [dict(program_id=f"{dataset}-{i}", dataset=dataset)
+                for dataset in ("sharegpt", "bfcl", "lats") for i in range(20)]
+        original = matrix.timed_trace(pool, 1.5, 27, 10)
+        mixed = matrix.timed_trace(pool, 1.5, 27, 10, equal_dataset_counts=True)
+        self.assertEqual([p["arrival_time"] for p in mixed], [p["arrival_time"] for p in original])
+        sizes = Counter(p["dataset"] for p in mixed)
+        self.assertEqual(len(sizes), 3)
+        self.assertLessEqual(max(sizes.values()) - min(sizes.values()), 1)
+
     def test_distinct_mixed_trace_balances_datasets_at_every_rate(self):
         pool = [dict(program_id=f"{dataset}-{i}", dataset=dataset)
                 for dataset, size in (("sharegpt", 9), ("bfcl", 7), ("lats", 3)) for i in range(size)]

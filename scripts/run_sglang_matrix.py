@@ -55,7 +55,7 @@ def unique_trace(programs, count, rate, seed, *, equal_dataset_counts=False):
     return trace
 
 
-def timed_trace(programs, rate, seed, seconds):
+def timed_trace(programs, rate, seed, seconds, *, equal_dataset_counts=False):
     """Sample distinct programs for a fixed-duration Poisson arrival window."""
     if rate is None or not math.isfinite(rate) or rate <= 0 or not math.isfinite(seconds) or seconds <= 0:
         raise ValueError("Poisson arrival rate and duration must be finite and positive")
@@ -68,7 +68,21 @@ def timed_trace(programs, rate, seed, seconds):
         arrival += rng.expovariate(rate)
     if not arrivals:
         raise ValueError("the arrival window contains no programs")
-    trace = unique_trace(programs, len(arrivals), None, f"{seed}:programs")
+    count = len(arrivals)
+    datasets = {p.get("dataset", "default") for p in programs}
+    sampled_count = math.ceil(count / len(datasets)) * len(datasets) if equal_dataset_counts else count
+    trace = unique_trace(programs, sampled_count, None, f"{seed}:programs",
+                         equal_dataset_counts=equal_dataset_counts)
+    # Poisson counts need not be divisible by the number of datasets. Remove
+    # at most one sample per dataset and keep all of the arrival timestamps.
+    removed = set()
+    for index in range(len(trace) - 1, -1, -1):
+        if len(trace) == count:
+            break
+        dataset = trace[index].get("dataset", "default")
+        if dataset not in removed:
+            del trace[index]
+            removed.add(dataset)
     for program, at in zip(trace, arrivals):
         program["arrival_time"] = at
     return trace
@@ -132,7 +146,8 @@ def main(argv=None):
             seed = plan.get("seed", 100) + repeat
             arrival_seconds = plan.get("arrival_seconds")
             if arrival_seconds is not None:
-                trace = timed_trace(programs, rate, seed, arrival_seconds)
+                trace = timed_trace(programs, rate, seed, arrival_seconds,
+                                    equal_dataset_counts=plan.get("equal_dataset_counts", False))
             elif plan.get("programs") and not plan.get("unique_programs"):
                 trace = sample_trace(programs, plan["programs"], rate, seed,
                                       equal_dataset_counts=plan.get("equal_dataset_counts", False))
