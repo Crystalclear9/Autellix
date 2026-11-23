@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from heapq import heappop, heappush
 from typing import Iterable
 
 from .execution import ExecutionModel, make_execution_model
@@ -82,7 +83,9 @@ class Simulator:
         self.calls: dict[tuple[str, str], CallState] = {}
         self.program_by_id: dict[str, ProgramSpec] = {}
         self.children: dict[tuple[str, str], list[str]] = defaultdict(list)
-        self._pending: set[tuple[str, str]] = set()
+        self._release_events: list[tuple[int, tuple[str, str]]] = []
+        self._parents_remaining: dict[tuple[str, str], int] = {}
+        self._unfinished_calls = 0
         self.gantt: list[dict[str, int | str]] = []
         self.prefetched_calls = 0
         self._build_state()
@@ -100,9 +103,11 @@ class Simulator:
             for spec in program.calls:
                 key = spec.key
                 self.calls[key] = CallState(spec)
-                self._pending.add(key)
                 for parent in spec.parents:
                     self.children[(program.program_id, parent)].append(spec.call_id)
+        self._unfinished_calls = len(self.calls)
+        for key in self.calls:
+            self._track_release(key)
         if isinstance(self.scheduler, SRPTScheduler):
             self.scheduler.set_program_remaining(remaining_by_program)
 
@@ -160,9 +165,10 @@ class Simulator:
                 self.time = min(self.time, program.arrival_time)
         self.program_by_id[spec.program_id] = program
         self.calls[spec.key] = CallState(spec)
-        self._pending.add(spec.key)
+        self._unfinished_calls += 1
         for parent in spec.parents:
             self.children[(spec.program_id, parent)].append(spec.call_id)
+        self._track_release(spec.key)
         if isinstance(self.scheduler, SRPTScheduler):
             remaining = dict(self.scheduler._remaining_by_program)
             remaining[spec.program_id] = remaining.get(spec.program_id, 0) + spec.model_time
@@ -177,21 +183,13 @@ class Simulator:
         self._execute_one_tick(self.time)
 
         self.time += 1
-        if advance_idle and self._idle_with_future_work(self.time):
-            self.time = self._next_possible_release_time(self.time)
+        if advance_idle and self._release_events and not any(
+            engine.running or engine.prefetched or any(engine.queues) for engine in self.engines
+        ):
+            self.time = max(self.time, self._release_events[0][0])
 
     def _finished(self) -> bool:
-        return all(call.status == CallStatus.FINISHED for call in self.calls.values())
-
-    def _idle_with_future_work(self, time: int) -> bool:
-        if any(engine.running or engine.prefetched or any(engine.queues) for engine in self.engines):
-            return False
-        return any(self._earliest_ready_time(key) > time for key in self._pending)
-
-    def _next_possible_release_time(self, time: int) -> int:
-        if not self._pending:
-            return time
-        return max(time, min(self._earliest_ready_time(key) for key in self._pending))
+        return self._unfinished_calls == 0
 
     def _ensure_process_entry(self, program: ProgramSpec) -> ProcessEntry:
         entry = self.process_table.get(program.program_id)
@@ -201,9 +199,11 @@ class Simulator:
         return entry
 
     def _release_ready_calls(self, time: int) -> None:
-        for key in sorted(list(self._pending), key=lambda item: (self.program_by_id[item[0]].arrival_time, item)):
-            if self._earliest_ready_time(key) > time:
-                continue
+        ready = []
+        while self._release_events and self._release_events[0][0] <= time:
+            _, key = heappop(self._release_events)
+            ready.append(key)
+        for key in sorted(ready, key=lambda item: (self.program_by_id[item[0]].arrival_time, item)):
             state = self.calls[key]
             program = self.program_by_id[state.program_id]
             self._ensure_process_entry(program)
@@ -211,9 +211,17 @@ class Simulator:
             self.execution_model.prepare_call(state, engine, self.process_table)
             self._compute_critical_path_service(state)
             self.scheduler.enqueue(state, engine, self.process_table, time)
-            self._pending.remove(key)
+
+    def _track_release(self, key: tuple[str, str]) -> None:
+        parents = self.calls[key].spec.parents
+        remaining = sum(self.calls[(key[0], parent)].finish_time is None for parent in parents)
+        if remaining:
+            self._parents_remaining[key] = remaining
+        else:
+            heappush(self._release_events, (self._earliest_ready_time(key), key))
 
     def _earliest_ready_time(self, key: tuple[str, str]) -> int:
+        # Only roots and calls whose parents finished reach the release heap.
         state = self.calls[key]
         program = self.program_by_id[state.program_id]
         if state.spec.submit_time is not None:
@@ -222,13 +230,8 @@ class Simulator:
             base_time = program.arrival_time
         if not state.spec.parents:
             return base_time + state.spec.release_delay
-        parent_finish_times: list[int] = []
-        for parent_id in state.spec.parents:
-            parent = self.calls[(state.program_id, parent_id)]
-            if parent.finish_time is None:
-                return self.max_time + 1
-            parent_finish_times.append(parent.finish_time)
-        return max(base_time, max(parent_finish_times) + state.spec.release_delay)
+        parent_times = (self.calls[(state.program_id, parent)].finish_time for parent in state.spec.parents)
+        return max(base_time, max(parent_times) + state.spec.release_delay)
 
     def _schedule(self, time: int) -> None:
         for engine in self.engines:
@@ -300,6 +303,13 @@ class Simulator:
                 if call in engine.running:
                     engine.running.remove(call)
                 self.scheduler.complete_call(call, self.process_table, time + 1)
+                self._unfinished_calls -= 1
+                for child in self.children.get(call.key, ()):
+                    key = call.program_id, child
+                    self._parents_remaining[key] -= 1
+                    if not self._parents_remaining[key]:
+                        del self._parents_remaining[key]
+                        heappush(self._release_events, (self._earliest_ready_time(key), key))
 
             self.scheduler.tick_queued_wait(engine, self.process_table)
             if executed:
