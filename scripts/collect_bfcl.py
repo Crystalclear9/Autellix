@@ -122,7 +122,10 @@ def main():
             for name, module in CLASS_FILE_PATH_MAPPING.items()}
     tokenizer = AutoTokenizer.from_pretrained(args.model, local_files_only=True)
     format_prompt, preprocess_functions = official_formatter(source)
+    sampling = {"temperature": .001}
     if args.backend == "vllm":
+        vocab = tokenizer.get_vocab()
+        sampling["stop_token_ids"] = [vocab[token] for token in ("<|eot_id|>", "<|eom_id|>") if token in vocab]
         options = dict(autellix_mode="vllm-opt", observe_native=False, dtype="bfloat16",
                        max_model_len=32768, max_num_seqs=4, max_num_batched_tokens=2048,
                        num_gpu_blocks_override=4096, enforce_eager=False, seed=args.seed,
@@ -138,8 +141,9 @@ def main():
         saved = json.loads(out.with_suffix(".manifest.json").read_text())
         if (saved["model"] != args.model or saved.get("backend", "sglang") != args.backend
                 or saved["seed"] != args.seed or saved["steps_per_turn"] != args.steps_per_turn
+                or saved.get("stop_token_ids", []) != sampling.get("stop_token_ids", [])
                 or (set(p["program_id"] for p in programs) - {task["id"] for task in tasks})):
-            parser.error("resume requires the same model, backend, seed, step budget and task sample")
+            parser.error("resume requires the same model, backend, seed, step budget, stop tokens and task sample")
         outcomes = saved["outcomes"]
     completed = {p["program_id"] for p in programs}
     if completed:
@@ -170,7 +174,7 @@ def main():
                             break
                         cid = str(len(calls))
                         result = engine.submit(sid, input_ids=ids, call_id=cid,
-                                               sampling=dict(temperature=.001, max_tokens=max_output)).result(1800)
+                                               sampling=dict(sampling, max_tokens=max_output)).result(1800)
                         if result["completion_tokens"] == 0:
                             raise RuntimeError("BFCL collection returned no output tokens")
                         calls.append(dict(call_id=cid, prompt=prompt, input_ids=ids,
@@ -205,6 +209,7 @@ def main():
                             model=args.model, backend=args.backend, seed=args.seed,
                             category="multi_turn_base", outcomes=outcomes,
                             steps_per_turn=args.steps_per_turn, max_output_tokens=4096, temperature=.001,
+                            stop_token_ids=sampling.get("stop_token_ids", []),
                             prompt_format="Pinned LlamaFCHandler._format_prompt and language-specific function preprocessing",
                             protocol="Actual Llama multi-turn/tool loop with official FC prompt and simulated tools; fixed captured inputs, lengths and tool delays in replay.",
                             replay_sha256=hashlib.sha256(out.read_bytes()).hexdigest())
