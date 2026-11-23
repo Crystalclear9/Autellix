@@ -22,6 +22,20 @@ def call_concurrency(calls, horizon, interval=5, start=0):
     return samples
 
 
+def steady_state(row, start, end):
+    """Measure completion rates and outstanding work in the same interval."""
+    duration = end - start
+    calls = row["calls"]
+    call_completions = sum(start <= call["completed_seconds"] < end for call in calls)
+    program_completions = sum(start <= at < end for at in row["program_completion_times"].values())
+    outstanding_seconds = sum(max(0., min(call["completed_seconds"], end)
+                                  - max(call["submitted_seconds"], start)) for call in calls)
+    return dict(start_seconds=start, end_seconds=end, call_completions=call_completions,
+                program_completions=program_completions, completed_calls_per_second=call_completions / duration,
+                completed_programs_per_second=program_completions / duration,
+                mean_outstanding_calls=outstanding_seconds / duration)
+
+
 def blocking(row):
     programs = defaultdict(list)
     by_output_tokens, by_program_calls = defaultdict(list), defaultdict(list)
@@ -81,7 +95,14 @@ def prefix_opportunities(programs, block_size=16):
 
 
 def motivation(rows):
-    return [dict(condition=row["condition"], rate=row["rate"], seed=row["seed"],
-                 concurrency=call_concurrency(row["calls"], row["arrival_horizon_seconds"],
-                                              start=row["plan"].get("steady_state_start_seconds", 0)),
-                 blocking=blocking(row)) for row in rows]
+    summaries = []
+    for row in rows:
+        horizon = row["arrival_horizon_seconds"]
+        start = row["plan"].get("steady_state_start_seconds", 0)
+        summary = dict(condition=row["condition"], rate=row["rate"], seed=row["seed"],
+                       concurrency=call_concurrency(row["calls"], horizon, start=start),
+                       blocking=blocking(row))
+        if 4 in row["plan"].get("paper_figures", ()):
+            summary["steady_state"] = steady_state(row, start, horizon)
+        summaries.append(summary)
+    return summaries

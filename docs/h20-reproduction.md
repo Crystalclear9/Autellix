@@ -245,7 +245,7 @@ SHA-256 已核对，记录位于 `data/autellix/import/migration-verification.js
 
 | 原论文 | 单卡工作流 |
 | --- | --- |
-| 图 4–6，负载动机 | ShareGPT 先到达 5 分钟，再采样 1 小时的活动调用数。排队实验按调用输出 token 数和每程序调用数统计阻塞 |
+| 图 4–6，负载动机 | ShareGPT 先到达 5 分钟，再统计 1 小时内未完成调用数与完成速率。排队实验按调用输出 token 数和每程序调用数统计阻塞 |
 | 图 7，前缀局部性 | 从 ShareGPT 和 LATS 的实际输入 token 逐块计算同程序及跨程序前缀复用机会 |
 | 图 11，工作负载分布 | 从 ShareGPT、BFCL、LATS 与 Mixed 回放提取程序长度与调用统计 |
 | 图 12、13，在线均值与尾延迟 | 四类负载的泊松到达率扫描，包含原生 vLLM、两种 vLLM-opt、同路径 FCFS、MLFQ、Autellix，以及原生 SGLang 和它的接入版。汇总同时记录到达窗口完成率和固定延迟目标内完成率 |
