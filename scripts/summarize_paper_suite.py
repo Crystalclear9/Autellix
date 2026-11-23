@@ -150,7 +150,9 @@ def paper_matrix(records, slo_targets=DEFAULT_SLO_TARGETS, *, strict=True):
                       "vllm/fcfs-control",
                       "vllm/mlfq", "sglang/sglang-native", "sglang/fcfs-combined", "sglang/mlfq")
     for slot in at_load.values():
-        for baseline_arm in reference_arms:
+        variants = [arm for arm, (_, point) in slot.items()
+                    if point["policy"] in {"fcfs", "mlfq"} and arm not in reference_arms]
+        for baseline_arm in (*reference_arms, *variants):
             if baseline_arm not in slot:
                 continue
             reference_lengths, reference = slot[baseline_arm]

@@ -155,6 +155,10 @@ class PaperSuiteSummary(unittest.TestCase):
         variant = dict(candidate, condition="plas-experiment", arm="plas", elapsed_seconds=30)
         pairs = summary.paper_matrix([native, candidate, variant])["comparisons"]
         self.assertEqual({p["candidate"] for p in pairs}, {"vllm/autellix", "vllm/plas-experiment"})
+        fcfs = dict(candidate, condition="fcfs-warm-prefix", arm="fcfs")
+        pairs = summary.paper_matrix([native, candidate, variant, fcfs])["comparisons"]
+        self.assertIn(("vllm/fcfs-warm-prefix", "vllm/plas-experiment"),
+                      {(p["baseline"], p["candidate"]) for p in pairs})
         candidate["calls"][0]["completion_tokens"] += 1
         with self.assertRaisesRegex(ValueError, "mismatched trace or work"):
             summary.paper_matrix([native, candidate])
