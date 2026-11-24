@@ -1,6 +1,8 @@
 """IPC contract tests with a deliberately fake worker; no model claims."""
 import os
 import tempfile
+import time
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -59,7 +61,9 @@ class IPCTransportTests(unittest.TestCase):
             dict(call_id="b", prompt="branch", input_ids=[1] * 4),
             dict(call_id="join", prompt="join", input_ids=[1] * 4,
                  parents=["a", "b"], append_parent_outputs=False)])]
-        results = run_workload(self.engine, workload, group_ready_calls=True)["calls"]
+        # The fake worker can finish all three calls within a Windows monotonic tick.
+        with patch("autellix.runtime.benchmark.time", SimpleNamespace(monotonic=time.perf_counter)):
+            results = run_workload(self.engine, workload, group_ready_calls=True)["calls"]
         self.assertEqual({r["workload_call"]: r["metrics"]["admission_size"] for r in results},
                          {"a": 2, "b": 2, "join": 1})
         self.assertEqual(self.engine.table.snapshot(), {})

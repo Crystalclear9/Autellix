@@ -95,10 +95,14 @@ def build_plans(args):
                         if args.deduplicate_prefill:
                             options["deduplicate_prefill"] = True
                 paired_cases.append(dict(case, engine_args=options))
-                if (args.autellix_queue_levels and case["name"] == "autellix"
-                        and set(selected_figures).intersection({12, 13, 16, 17})):
-                    paired_cases.append(dict(case, name="autellix-extended-queues", engine_args=options,
-                                             queue_levels=args.autellix_queue_levels))
+                if case["name"] == "autellix" and set(selected_figures).intersection({12, 13, 16, 17}):
+                    if args.autellix_queue_levels:
+                        paired_cases.append(dict(case, name="autellix-extended-queues", engine_args=options,
+                                                 queue_levels=args.autellix_queue_levels))
+                    if args.autellix_boundary_scale:
+                        scale = args.autellix_boundary_scale
+                        paired_cases.append(dict(case, name=f"autellix-boundaries{scale:g}", engine_args=options,
+                                                 boundary_scale=scale))
             cases = paired_cases
             if timing:
                 args_for_engine.update(observe_native=True, measure_timing=True)
@@ -265,6 +269,8 @@ def main():
     parser.add_argument("--repeats", type=int, default=2)
     parser.add_argument("--autellix-queue-levels", type=int, choices=range(8, 17), metavar="8..16",
                         help="add an Autellix comparison arm that extends the service queues")
+    parser.add_argument("--autellix-boundary-scale", type=float,
+                        help="add an Autellix comparison arm with scaled service boundaries and unchanged quanta")
     parser.add_argument("--qwen3-fused-qk-rope", action="store_true", help="enable Qwen3 fusion in every vLLM arm")
     parser.add_argument("--deduplicate-prefill", action="store_true",
                         help="share identical prefills in the matched vLLM scheduling arms")
@@ -297,6 +303,9 @@ def main():
         parser.error("Figure 4 duration must be positive and warmup cannot be negative")
     if args.online_seconds is not None and (not math.isfinite(args.online_seconds) or args.online_seconds <= 0):
         parser.error("online arrival duration must be finite and positive")
+    if args.autellix_boundary_scale is not None and (
+            not math.isfinite(args.autellix_boundary_scale) or args.autellix_boundary_scale <= 0):
+        parser.error("Autellix boundary scale must be finite and positive")
     if args.batch_tokens < args.batch_size + 16:
         parser.error("vLLM chunk budget must hold one KV block and one token per active sequence")
 
