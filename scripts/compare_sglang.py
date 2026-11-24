@@ -15,7 +15,7 @@ from autellix.runtime.telemetry import GPUMonitor
 
 def trial(model, device, engine_args, trace, arm, reserve=0, interval=8, quantum_scale=1., request_timeout=600,
           boundary_scale=None, beta=8., progress_interval=0, routing="program", backend="sglang",
-          scheduler_trace=True):
+          scheduler_trace=True, queue_levels=None):
     options = dict(engine_args)
     native = arm in {"sglang-native", "vllm", "vllm-opt", "vllm-opt-multistep"}
     if backend == "sglang":
@@ -24,6 +24,8 @@ def trial(model, device, engine_args, trace, arm, reserve=0, interval=8, quantum
         options["autellix_mode"] = arm
         options.setdefault("observe_native", options.get("measure_timing", False))
     defaults = PolicyConfig()
+    if queue_levels is not None:
+        defaults = defaults.extend_queues(queue_levels)
     boundary_scale = quantum_scale if boundary_scale is None else boundary_scale
     policy = PolicyConfig(policy="fcfs" if native else arm,
                           schedule_interval=interval, overprovision=0 if native else reserve,
@@ -60,6 +62,8 @@ def trial(model, device, engine_args, trace, arm, reserve=0, interval=8, quantum
         result["quantum_scale"] = quantum_scale
         result["boundary_scale"] = boundary_scale
         result["beta"] = beta
+        if queue_levels is not None:
+            result["queue_levels"] = queue_levels
         # For these sequential programs the paper metric uses entire response
         # time, including initial admission/driver delay, divided by output count.
         counts = {p["program_id"]: 0 for p in trace}

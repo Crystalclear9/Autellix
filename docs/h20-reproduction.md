@@ -277,6 +277,18 @@ FCFS 用于区分执行优化与程序优先级带来的收益。
 `run_paper_vllm.py --paper-chunked-prefill --exact-prefix-cache --deduplicate-prefill` 可补测 LATS 的
 重复 prefill。相同输入的并行调用共用首个调用计算出的前缀，各自保留生成请求和程序依赖。
 
+对照高服务历史造成的队列饱和时，在图 12、13、16 或 17 的 vLLM 配置上加
+`--autellix-queue-levels 10`。该选项保留原 Autellix 组，再加入同一执行路径的扩展队列组。
+原有低服务时间区间保持不变，最高区间按原来的倍率继续分箱。图 17 的 `admissions_by_queue`
+可核对延迟变化是否伴随优先级分布变化。加 `--deduplicate-prefill` 时，三个自定义调度对照
+及其扩展队列组使用相同的前缀复用策略。
+
+32B 扩展对照可通过 `--sharegpt-trace`、`--bfcl-trace`、`--lats-trace` 和 `--mixed-trace`
+使用 Qwen3 的输入 token。LATS 可将 8B 采集的 HotpotQA 搜索记录传给
+`prepare_h20_qwen32.py --lats-trace`，以 Qwen3 对话模板重新编码，并保留分支、依赖及生成长度。
+单 H20 上的 32B vLLM 组使用 `--batch-size 8 --kv-tokens 65536 --qwen3-fused-qk-rope`，
+同一组原生对照和调度对照共用这些参数。
+
 图 12 的 Llama-3.1-70B 和 Falcon-180B 原配置分别使用 4 张和 8 张 A100。图 14 的副本组数
 分别为 4 和 2，图 15 比较独立引擎扩容。上述 GPU 结果与单卡 8B、CPU 模拟分别汇总。
 [Autellix 论文，第 6 节](https://arxiv.org/html/2502.13965v1#S6)

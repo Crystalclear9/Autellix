@@ -45,6 +45,14 @@ class RuntimePolicyTests(unittest.TestCase):
         self.assertEqual(self.ctl.calls["next"].inherited, 3)
         self.assertEqual(self.ctl.calls["next"].queue, 1)
 
+    def test_extended_queues_preserve_low_service_bins_and_split_high_service(self):
+        default = PolicyConfig()
+        extended = default.extend_queues(10)
+        self.assertEqual(extended.boundaries[:7], default.boundaries[:7])
+        self.assertEqual(extended.quanta[:7], default.quanta)
+        self.assertEqual([default.queue(t) for t in (.7, 1.4, 3., 6.)], [6] * 4)
+        self.assertEqual([extended.queue(t) for t in (.7, 1.4, 3., 6.)], [6, 7, 8, 9])
+
     def test_concurrent_atlas_completions_take_max_not_sum(self):
         self.ctl.admit("a", "p")
         self.ctl.admit("b", "p")

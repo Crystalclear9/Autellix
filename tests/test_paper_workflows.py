@@ -1,7 +1,9 @@
 import concurrent.futures
 import importlib.util
+import json
 import sys
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
 
@@ -19,6 +21,7 @@ def script(name):
 
 bfcl, lats = script("prepare_bfcl_replay"), script("collect_lats")
 collect_bfcl = script("collect_bfcl")
+qwen = script("prepare_h20_qwen32")
 
 
 class PaperWorkflows(unittest.TestCase):
@@ -73,6 +76,25 @@ class PaperWorkflows(unittest.TestCase):
         with self.assertRaises(lats.SearchBudget):
             recorder.gpt("over budget")
         self.assertEqual(len(submitted), 3)
+
+    def test_qwen_lats_replay_uses_generation_prompt_and_keeps_dependencies(self):
+        templates = []
+
+        def template(messages, **kwargs):
+            templates.append((messages, kwargs))
+            return "user prompt assistant"
+
+        tokenizer = SimpleNamespace(apply_chat_template=template, encode=lambda text, **kwargs: [1, 2, 3])
+        with TemporaryDirectory() as directory:
+            trace = Path(directory) / "trace.json"
+            trace.write_text(json.dumps([dict(program_id="test", calls=[
+                dict(call_id="branch", parents=["root"], prompt="Question", max_tokens=7)])]), encoding="utf-8")
+            row, = qwen.agent_replay(trace, tokenizer, "lats")
+        self.assertEqual(templates, [([dict(role="user", content="Question")],
+                                      dict(tokenize=False, add_generation_prompt=True, enable_thinking=False))])
+        self.assertEqual(row["calls"][0]["parents"], ["root"])
+        self.assertEqual(row["calls"][0]["max_tokens"], 7)
+        self.assertEqual(row["calls"][0]["input_ids"], [1, 2, 3])
 
     def test_hotpot_document_lookup_and_answer_normalization(self):
         env = lats.DocumentEnv([dict(question="Which satellite?", answer="The Moon",

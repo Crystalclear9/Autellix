@@ -177,7 +177,8 @@ def main(argv=None):
                                 request_timeout=plan.get("request_timeout", 3600),
                                 progress_interval=plan.get("progress_interval", 30),
                                 routing=case.get("routing", "program"), backend=backend,
-                                scheduler_trace=plan.get("scheduler_trace", True))
+                                scheduler_trace=plan.get("scheduler_trace", True),
+                                queue_levels=case.get("queue_levels"))
                 except Exception as exc:
                     if not args.keep_going:
                         raise

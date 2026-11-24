@@ -6,7 +6,7 @@ import sqlite3
 import time
 import threading
 from functools import wraps
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
 
@@ -48,6 +48,15 @@ class PolicyConfig:
 
     def queue(self, service: float) -> int:
         return next(i for i, hi in enumerate(self.boundaries[1:]) if service < hi)
+
+    def extend_queues(self, levels: int) -> PolicyConfig:
+        if levels < len(self.quanta):
+            raise ValueError("queue levels must be at least the existing count")
+        boundaries, quanta = list(self.boundaries[:-1]), list(self.quanta)
+        for _ in range(levels - len(quanta)):
+            boundaries.append(2 * (boundaries[-1] or quanta[0]))
+            quanta.append(quanta[-1] * 2)
+        return replace(self, boundaries=(*boundaries, math.inf), quanta=tuple(quanta))
 
 
 class ProgramTable:

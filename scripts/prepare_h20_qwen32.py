@@ -35,6 +35,9 @@ def agent_replay(path, tokenizer, kind):
             prompt = call["prompt"]
             if kind == "bfcl":
                 prompt = bfcl_prompt(prompt, tokenizer)
+            elif kind == "lats":
+                prompt = tokenizer.apply_chat_template([dict(role="user", content=prompt)], tokenize=False,
+                                                       add_generation_prompt=True, enable_thinking=False)
             ids = tokenizer.encode(prompt, add_special_tokens=False)
             if len(ids) + call["max_tokens"] >= 32768:
                 raise ValueError(f"{kind} prompt exceeds Qwen32 replay context: {program['program_id']}")
@@ -125,6 +128,8 @@ def main():
     sources.add_argument("--comparison-inputs", type=Path, help="reuse previously prepared Qwen3 traces")
     parser.add_argument("--run-dir", type=Path, required=True)
     parser.add_argument("--device", required=True, type=int, help="one physical H20 GPU index")
+    parser.add_argument("--lats-trace", type=Path, help="retokenize this captured HotpotQA workload")
+    parser.add_argument("--mixed-programs-per-source", type=int, default=2, help="sample this many programs from each Mixed source")
     parser.add_argument("--bfcl-rates", nargs="+", type=float, default=[.24],
                         help="BFCL offered loads in programs/s for comparison plans")
     parser.add_argument("--resident-decode-headroom", action="store_true",
@@ -165,6 +170,8 @@ def main():
         parser.error("--comparison-programs must be positive")
     if args.comparison_batch_size < 1:
         parser.error("--comparison-batch-size must be positive")
+    if args.mixed_programs_per_source < 1:
+        parser.error("--mixed-programs-per-source must be positive")
     if args.comparison_repeats < 1:
         parser.error("--comparison-repeats must be positive")
     if args.comparison_min_decode_steps < 0:
@@ -207,7 +214,7 @@ def main():
         raise ValueError("ShareGPT must contain 128 eligible whole conversations")
     tokenizer.chat_template = original_template
     bfcl = agent_replay(args.datasets / "bfcl-captured64.json", tokenizer, "bfcl")
-    lats = agent_replay(args.datasets / "lats-captured6.json", tokenizer, "lats")
+    lats = agent_replay(args.lats_trace or args.datasets / "lats-captured6.json", tokenizer, "lats")
 
     args.run_dir.mkdir(parents=True, exist_ok=True)
     engine_args = dict(dtype="bfloat16", context_length=32768, tp_size=1, pp_size=1, dp_size=1,
@@ -218,7 +225,8 @@ def main():
     upstream = dict(name="native-default", policy="sglang-native", engine_args=dict(
         autellix_native_defaults=True, attention_backend=None, sampling_backend=None))
     mix_rng = random.Random(2026)
-    mixed = [program for pool in (sharegpt, bfcl, lats) for program in mix_rng.sample(pool, 2)]
+    mixed = [program for pool in (sharegpt, bfcl, lats)
+             for program in mix_rng.sample(pool, args.mixed_programs_per_source)]
     ordered = [("sharegpt", "sharegpt", sharegpt, 24, [.06, .24], "plas"),
                ("bfcl", "bfcl", bfcl, 12, [.12, .48], "plas"),
                ("sharegpt-offline128", "sharegpt", sharegpt, 0, [None], "plas"),

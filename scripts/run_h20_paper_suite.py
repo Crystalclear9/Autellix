@@ -81,6 +81,8 @@ def build_plans(args):
     def plan(backend, family, name, selected_figures, cases, rates, count, *, offline=False, timing=False):
         args_for_engine = dict(engine_args[backend])
         if backend == "vllm":
+            if args.qwen3_fused_qk_rope:
+                args_for_engine["qwen3_fused_qk_rope"] = True
             paired_cases = []
             for case in cases:
                 options = dict(case["engine_args"])
@@ -90,7 +92,13 @@ def build_plans(args):
                     options["exact_prefix_cache"] = True
                     if case["policy"] != "vllm-opt":
                         options["resident_decode_headroom"] = True
+                        if args.deduplicate_prefill:
+                            options["deduplicate_prefill"] = True
                 paired_cases.append(dict(case, engine_args=options))
+                if (args.autellix_queue_levels and case["name"] == "autellix"
+                        and set(selected_figures).intersection({12, 13, 16, 17})):
+                    paired_cases.append(dict(case, name="autellix-extended-queues", engine_args=options,
+                                             queue_levels=args.autellix_queue_levels))
             cases = paired_cases
             if timing:
                 args_for_engine.update(observe_native=True, measure_timing=True)
@@ -240,6 +248,7 @@ def main():
     parser.add_argument("--vllm-preload", help="LD_PRELOAD for the pinned vLLM environment")
     parser.add_argument("--figures", nargs="+", type=int, choices=FIGURES, default=FIGURES)
     parser.add_argument("--workloads", nargs="+", choices=WORKLOADS, default=tuple(WORKLOADS))
+    parser.add_argument("--sharegpt-trace", type=Path, help="ShareGPT replay encoded with the selected model tokenizer")
     parser.add_argument("--bfcl-trace", type=Path, help="replay file with captured BFCL tool calls")
     parser.add_argument("--lats-trace", type=Path, help="replay file with captured HotpotQA programs")
     parser.add_argument("--mixed-trace", type=Path, help="replay file containing balanced-source programs")
@@ -253,6 +262,11 @@ def main():
     parser.add_argument("--simulation-programs", type=int, default=64, help="programs per Figure 18 simulated trace")
     parser.add_argument("--rates", nargs="+", type=float)
     parser.add_argument("--repeats", type=int, default=2)
+    parser.add_argument("--autellix-queue-levels", type=int, choices=range(8, 17), metavar="8..16",
+                        help="add an Autellix comparison arm that extends the service queues")
+    parser.add_argument("--qwen3-fused-qk-rope", action="store_true", help="enable Qwen3 fusion in every vLLM arm")
+    parser.add_argument("--deduplicate-prefill", action="store_true",
+                        help="share identical prefills in the matched vLLM scheduling arms")
     parser.add_argument("--seed", type=int, default=2026)
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--batch-tokens", type=int, default=2048, help="chunked-prefill budget for matched vLLM arms")
@@ -267,7 +281,8 @@ def main():
     parser.add_argument("--plan-only", action="store_true")
     args = parser.parse_args()
     args.workload_files = {name: path.resolve() for name, path in (
-        ("bfcl", args.bfcl_trace), ("lats", args.lats_trace), ("mixed", args.mixed_trace)) if path is not None}
+        ("sharegpt", args.sharegpt_trace), ("bfcl", args.bfcl_trace), ("lats", args.lats_trace),
+        ("mixed", args.mixed_trace)) if path is not None}
     if args.gpu < 0 or args.kv_tokens < 32768 or args.kv_tokens % 16:
         parser.error("use a physical GPU index and a KV capacity divisible by 16 of at least 32768 tokens")
     if min(args.offline_sizes) < 1 or max(args.offline_sizes) > 4000:
