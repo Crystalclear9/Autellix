@@ -103,6 +103,9 @@ def build_plans(args):
                         scale = args.autellix_boundary_scale
                         paired_cases.append(dict(case, name=f"autellix-boundaries{scale:g}", engine_args=options,
                                                  boundary_scale=scale))
+                    if args.autellix_idle_refill:
+                        paired_cases.append(dict(case, name="autellix-idle-refill",
+                                                 engine_args=dict(options, refill_idle_slots=True)))
             cases = paired_cases
             if timing:
                 args_for_engine.update(observe_native=True, measure_timing=True)
@@ -271,6 +274,8 @@ def main():
                         help="add an Autellix comparison arm that extends the service queues")
     parser.add_argument("--autellix-boundary-scale", type=float,
                         help="add an Autellix comparison arm with scaled service boundaries and unchanged quanta")
+    parser.add_argument("--autellix-idle-refill", action="store_true",
+                        help="add an Autellix comparison arm that refills vacancies after its resident reserve")
     parser.add_argument("--qwen3-fused-qk-rope", action="store_true", help="enable Qwen3 fusion in every vLLM arm")
     parser.add_argument("--deduplicate-prefill", action="store_true",
                         help="share identical prefills in the matched vLLM scheduling arms")

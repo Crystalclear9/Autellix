@@ -285,6 +285,8 @@ FCFS 用于区分执行优化与程序优先级带来的收益。
 `--autellix-boundary-scale 128` 加入独立的分箱边界对照，保持队列数量、时间片和引擎资源一致。
 `--group-ready-calls` 将同一个程序在同一时刻就绪的预编码分支一起送到副本。
 LATS 的组间依赖与就绪时间沿用原轨迹，所有对照组使用同一种提交方式。
+要测候补用尽之后的空槽成本，使用 `--autellix-idle-refill` 加入独立对照。
+它沿用活动槽数、驻留候补和窗口长度，在窗口仍有空槽时按当前优先级补位。
 
 32B 扩展对照可通过 `--sharegpt-trace`、`--bfcl-trace`、`--lats-trace` 和 `--mixed-trace`
 使用 Qwen3 的输入 token。LATS 可将 8B 采集的 HotpotQA 搜索记录传给
