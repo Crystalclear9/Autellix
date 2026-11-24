@@ -77,6 +77,29 @@ class PaperWorkflows(unittest.TestCase):
             recorder.gpt("over budget")
         self.assertEqual(len(submitted), 3)
 
+    def test_lats_scores_independent_candidates_together_and_preserves_cache(self):
+        def submit(*args, **kwargs):
+            future = concurrent.futures.Future()
+            future.set_result(dict(text=kwargs["call_id"], completion_tokens=2))
+            return future
+
+        engine = SimpleNamespace(start_session=lambda: "session", submit=submit)
+        tokenizer = SimpleNamespace(apply_chat_template=lambda *args, **kwargs: [1, 2, 3])
+        recorder = lats.Recorder(engine, tokenizer, max_calls=4)
+        recorder.begin()
+        recorder.gpt("expand")
+        task = SimpleNamespace(value_cache={"cached": 7},
+                               value_prompt_wrap=lambda q, y, f, r: "a" if y == "alias" else y,
+                               value_outputs_unwrap=lambda responses: int(responses[0]))
+        upstream = SimpleNamespace(failed_trajectories=[], reflection_map=[], get_unique_trajectories=lambda x: x)
+        scores = lats.parallel_values(upstream, recorder, task, "q", ["a", "cached", "a", "alias", "b"], 1)
+        self.assertEqual(scores, [1, 7, 0, 1, 2])
+        self.assertEqual(task.value_cache, {"cached": 7, "a": 1, "b": 2})
+        recorder.gpt("next expansion")
+        self.assertEqual([c["prompt"] for c in recorder.calls], ["expand", "a", "b", "next expansion"])
+        self.assertEqual([c["parents"] for c in recorder.calls], [[], ["0"], ["0"], ["1", "2"]])
+        self.assertEqual(recorder.calls[1]["think_time"], recorder.calls[2]["think_time"])
+
     def test_qwen_lats_replay_uses_generation_prompt_and_keeps_dependencies(self):
         templates = []
 

@@ -75,20 +75,27 @@ class Recorder:
         self.last_finished = time.monotonic()
 
     def gpt(self, prompt, model=None, temperature=1., max_tokens=100, n=1, stop=None):
-        if len(self.calls) + n > self.max_calls:
+        return self.generate_many([prompt], temperature=temperature, max_tokens=max_tokens, n=n, stop=stop)[0]
+
+    def generate_many(self, prompts, *, temperature=1., max_tokens=100, n=1, stop=None):
+        if not prompts:
+            return []
+        if len(self.calls) + len(prompts) * n > self.max_calls:
             raise SearchBudget()
-        ids = self.tokenizer.apply_chat_template([dict(role="user", content=prompt)],
-                                                  tokenize=True, add_generation_prompt=True)
+        inputs = [self.tokenizer.apply_chat_template([dict(role="user", content=prompt)],
+                                                     tokenize=True, add_generation_prompt=True)
+                  for prompt in prompts]
         think_time = time.monotonic() - self.last_finished
         group, futures = [], []
-        for _ in range(n):
-            cid = str(len(self.calls) + len(group))
-            sampling = dict(temperature=temperature, max_tokens=max_tokens)
-            if stop:
-                sampling["stop"] = stop
-            futures.append(self.engine.submit(self.session, input_ids=ids, call_id=cid, sampling=sampling))
-            group.append(dict(call_id=cid, prompt=prompt, input_ids=ids, input_tokens=len(ids),
-                              parents=list(self.parents), think_time=think_time, append_parent_outputs=False))
+        sampling = dict(temperature=temperature, max_tokens=max_tokens)
+        if stop:
+            sampling["stop"] = stop
+        for prompt, ids in zip(prompts, inputs):
+            for _ in range(n):
+                cid = str(len(self.calls) + len(group))
+                futures.append(self.engine.submit(self.session, input_ids=ids, call_id=cid, sampling=sampling))
+                group.append(dict(call_id=cid, prompt=prompt, input_ids=ids, input_tokens=len(ids),
+                                  parents=list(self.parents), think_time=think_time, append_parent_outputs=False))
         outputs = []
         for call, future in zip(group, futures):
             result = future.result(1800)
@@ -102,10 +109,37 @@ class Recorder:
         self.parents = [c["call_id"] for c in group]
         print(f"CAPTURE calls={len(self.calls)} group_outputs={len(outputs)}", flush=True)
         self.last_finished = time.monotonic()
-        return outputs
+        return [outputs[start:start+n] for start in range(0, len(outputs), n)]
 
 
-def load_official(source, recorder, env, tokenizer):
+def parallel_values(lats, recorder, task, question, candidates, samples, cache_value=True):
+    trajectories = lats.get_unique_trajectories(lats.failed_trajectories)
+    seen, prompt_slots, pending = set(), {}, []
+    values = [0] * len(candidates)
+    for index, candidate in enumerate(candidates):
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        prompt = task.value_prompt_wrap(question, candidate, trajectories, lats.reflection_map)
+        if cache_value and prompt in task.value_cache:
+            values[index] = task.value_cache[prompt]
+            continue
+        slot = prompt_slots.setdefault(prompt, len(pending)) if cache_value else len(pending)
+        if slot == len(pending):
+            pending.append((prompt, []))
+        pending[slot][1].append(index)
+    outputs = recorder.generate_many([prompt for prompt, _ in pending], n=samples)
+    for (prompt, indices), responses in zip(pending, outputs):
+        value = task.value_outputs_unwrap(responses)
+        logging.info("VALUE PROMPT: %s\nVALUE OUTPUTS: %s\nVALUES: %s", prompt, responses, value)
+        if cache_value:
+            task.value_cache[prompt] = value
+        for index in indices:
+            values[index] = value
+    return values
+
+
+def load_official(source, recorder, env, tokenizer, *, parallel_evaluations=False):
     sys.path.insert(0, str(source))
     models = types.ModuleType("models")
     models.gpt = recorder.gpt
@@ -126,6 +160,9 @@ def load_official(source, recorder, env, tokenizer):
         'GPT2Tokenizer.from_pretrained("gpt2")', "_serving_tokenizer")
     exec(compile(text, str(source / "hotpotqa.py"), "exec"), task_module.__dict__)
     import lats
+    if parallel_evaluations:
+        from functools import partial
+        lats.get_values = partial(parallel_values, lats, recorder)
     original_select = lats.select_node
     def select_node(node):
         selected = original_select(node)
@@ -149,6 +186,8 @@ def main():
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--max-calls", type=int, default=400)
     p.add_argument("--iterations", type=int, default=30)
+    p.add_argument("--parallel-evaluations", action="store_true",
+                   help="evaluate independent candidates in each search stage as one parallel call group")
     p.add_argument("--resume", action="store_true")
     args = p.parse_args()
     if args.iterations < 1:
@@ -172,9 +211,10 @@ def main():
         saved = json.loads(out.with_suffix(".manifest.json").read_text())
         if (saved.get("backend", "sglang") != args.backend or saved["search"]["iterations"] != args.iterations
                 or saved["search"]["max_calls"] != args.max_calls or saved["seed"] != args.seed
+                or saved["search"].get("parallel_evaluations", False) != args.parallel_evaluations
                 or saved.get("chat_template_sha256") != template_sha256 or saved["model"] != args.model
                 or saved["indices"] != indices):
-            p.error("resume requires the same model, backend, template, search iterations, and question sample")
+            p.error("resume requires the same model, backend, template, search configuration, and question sample")
         outcomes = saved["outcomes"]
     completed = {p["program_id"] for p in programs}
     if completed:
@@ -193,7 +233,8 @@ def main():
                                              schedule_interval=1 if args.backend == "vllm" else 8),
                          scheduler_trace=args.backend == "sglang") as engine:
         recorder = Recorder(engine, tokenizer, args.max_calls)
-        lats, task_class = load_official(source, recorder, DocumentEnv(rows), tokenizer)
+        lats, task_class = load_official(source, recorder, DocumentEnv(rows), tokenizer,
+                                         parallel_evaluations=args.parallel_evaluations)
         search_log = engine.state_dir / "lats-search.log"
         if args.resume and out.with_suffix(".search.log").exists():
             shutil.copy2(out.with_suffix(".search.log"), search_log)
@@ -230,7 +271,8 @@ def main():
                             model=args.model, backend=args.backend, chat_template_sha256=template_sha256,
                             seed=args.seed, indices=indices, outcomes=outcomes,
                             search=dict(iterations=args.iterations, expansion_width=5, evaluation_samples=1,
-                                        temperature=1., max_output_tokens=100, max_calls=args.max_calls),
+                                        temperature=1., max_output_tokens=100, max_calls=args.max_calls,
+                                        parallel_evaluations=args.parallel_evaluations),
                             environment="HotpotQA supplied distractor documents; local Search/Lookup/Finish",
                             adaptations=["local Llama replaces hosted GPT",
                                          "serving tokenizer selects original long/short prompt templates",
