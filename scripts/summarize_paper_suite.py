@@ -104,6 +104,30 @@ def metrics(row):
                 **cache, **first_call_waits(row["calls"]))
 
 
+def slo_capacity(grouped, stat, target):
+    qualifying = {rate: rows for rate, rows in grouped.items()
+                  if all(len(rows) == row["planned_repeats"] and row["token_latency"][stat] is not None
+                         and row["token_latency"][stat] <= target for row in rows)}
+    completed = max((statistics.mean(row["completed_programs_per_second"] for row in rows)
+                     for rows in qualifying.values()), default=None)
+    in_window = max((statistics.mean(row["arrival_window_completed_programs_per_second"] for row in rows)
+                     for rows in qualifying.values() if all(row["arrival_window_completed_programs_per_second"]
+                                                            is not None for row in rows)), default=None)
+    return max(qualifying, default=None), completed, in_window
+
+
+def slo_points_for_arms(arms, targets):
+    for target in targets:
+        for stat in ("mean", "p95", "p99"):
+            offered, completed, in_window = {}, {}, {}
+            for arm, rates in arms.items():
+                offered[arm], completed[arm], in_window[arm] = slo_capacity(rates, stat, target)
+            yield dict(latency_statistic=stat, seconds_per_token_target=target,
+                       maximum_tested_offered_programs_per_second=offered,
+                       completed_programs_per_second=completed,
+                       arrival_window_completed_programs_per_second=in_window)
+
+
 def paper_matrix(records, slo_targets=DEFAULT_SLO_TARGETS, *, strict=True):
     """Join figure points across runner files and across inference engines."""
     trials, at_load = [], defaultdict(dict)
@@ -120,7 +144,9 @@ def paper_matrix(records, slo_targets=DEFAULT_SLO_TARGETS, *, strict=True):
                          opts["block_size"] * opts["num_gpu_blocks_override"])
         else:
             resources = (opts["dtype"], opts["context_length"], opts["max_running_requests"], opts["max_total_tokens"])
-        config = (figures, plan["workload_family"], len(row["programs"]), row["model"],
+        arrival_seconds = plan.get("arrival_seconds")
+        program_budget = len(row["programs"]) if arrival_seconds is None else None
+        config = (figures, plan["workload_family"], program_budget, arrival_seconds, row["model"],
                   tuple(row["device_groups"]), resources)
         latencies, _ = paper_token_latencies(row)
         make = row["elapsed_seconds"]
@@ -149,7 +175,8 @@ def paper_matrix(records, slo_targets=DEFAULT_SLO_TARGETS, *, strict=True):
     reference_arms = ("vllm/vllm", "vllm/vllm-opt", "vllm/vllm-opt-multistep", "vllm/fcfs-combined",
                       "vllm/fcfs-control",
                       "vllm/mlfq", "sglang/sglang-native", "sglang/fcfs-combined", "sglang/mlfq")
-    for slot in at_load.values():
+    paired_rates = defaultdict(lambda: defaultdict(list))
+    for (config, rate, _), slot in at_load.items():
         variants = [arm for arm, (_, point) in slot.items()
                     if point["policy"] in {"fcfs", "mlfq"} and arm not in reference_arms]
         for baseline_arm in (*reference_arms, *variants):
@@ -170,6 +197,8 @@ def paper_matrix(records, slo_targets=DEFAULT_SLO_TARGETS, *, strict=True):
                     unmatched.append(dict(candidate=arm, baseline=baseline_arm, reason=reason, figures=point["figures"],
                                           workload=point["workload"], rate=point["rate"], seed=point["seed"]))
                     continue
+                if rate is not None:
+                    paired_rates[config, arm, baseline_arm][rate].append((point, reference))
                 ratios = {stat: 100 * (value / reference["token_latency"][stat] - 1)
                           for stat, value in point["token_latency"].items()
                           if value is not None and reference["token_latency"][stat]}
@@ -187,26 +216,26 @@ def paper_matrix(records, slo_targets=DEFAULT_SLO_TARGETS, *, strict=True):
                 by_config[config][arm][rate].append(point)
     slo = []
     for config, arms in by_config.items():
-        figures, workload, programs, model, devices, _ = config
-        for target in slo_targets:
-            for stat in ("mean", "p95", "p99"):
-                offered, completed, in_window = {}, {}, {}
-                for arm, grouped in arms.items():
-                    qualifying = {rate: rows for rate, rows in grouped.items()
-                                  if all(len(rows) == row["planned_repeats"] and row["token_latency"][stat] is not None
-                                         and row["token_latency"][stat] <= target for row in rows)}
-                    offered[arm] = max(qualifying, default=None)
-                    completed[arm] = max((statistics.mean(row["completed_programs_per_second"] for row in rows)
-                                          for rows in qualifying.values()), default=None)
-                    in_window[arm] = max((statistics.mean(row["arrival_window_completed_programs_per_second"] for row in rows)
-                                          for rows in qualifying.values() if all(row["arrival_window_completed_programs_per_second"]
-                                                                                 is not None for row in rows)), default=None)
-                slo.append(dict(figures=figures, workload=workload, programs=programs, model=model, devices=devices,
-                                latency_statistic=stat, seconds_per_token_target=target,
-                                maximum_tested_offered_programs_per_second=offered,
-                                completed_programs_per_second=completed,
-                                arrival_window_completed_programs_per_second=in_window))
-    return dict(trials=trials, comparisons=pairs, unmatched=unmatched, slo_points=slo)
+        figures, workload, programs, arrival_seconds, model, devices, _ = config
+        slo.extend(dict(point, figures=figures, workload=workload, programs=programs, arrival_seconds=arrival_seconds,
+                        model=model, devices=devices)
+                   for point in slo_points_for_arms(arms, slo_targets))
+    paired_slo = []
+    for (config, candidate, baseline), grouped in paired_rates.items():
+        matched = {rate: rows for rate, rows in grouped.items()
+                   if all(len(rows) == point["planned_repeats"] for pair in rows for point in pair)}
+        if not matched:
+            continue
+        figures, workload, programs, arrival_seconds, model, devices, resources = config
+        arms = {arm: {rate: [pair[index] for pair in rows] for rate, rows in matched.items()}
+                for index, arm in enumerate((candidate, baseline))}
+        paired_slo.extend(dict(point, figures=figures, workload=workload, programs=programs,
+                               arrival_seconds=arrival_seconds, model=model, devices=devices,
+                               resources=dict(zip(("dtype", "context_tokens", "batch_size",
+                                                                   "kv_tokens"), resources)),
+                               candidate=candidate, baseline=baseline, shared_rates=sorted(matched))
+                          for point in slo_points_for_arms(arms, slo_targets))
+    return dict(trials=trials, comparisons=pairs, unmatched=unmatched, slo_points=slo, paired_slo_points=paired_slo)
 
 
 def summarize(records, slo_targets=DEFAULT_SLO_TARGETS):

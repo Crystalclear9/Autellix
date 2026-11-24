@@ -196,6 +196,40 @@ class PaperSuiteSummary(unittest.TestCase):
         self.assertEqual(mean["completed_programs_per_second"][arm], .1)
         self.assertEqual(mean["arrival_window_completed_programs_per_second"][arm], .1)
 
+    def test_paired_slo_uses_only_fully_matched_rates(self):
+        native, candidate = self.records()
+        for row, condition in ((native, "mlfq"), (candidate, "autellix")):
+            row.update(condition=condition, versions={"vllm": "0.6.1"},
+                       plan=dict(backend="vllm", workload_family="lats", paper_figures=[12, 13], repeats=2),
+                       effective_engine_args=dict(dtype="bfloat16", max_model_len=32768, max_num_seqs=4,
+                                                  block_size=16, num_gpu_blocks_override=4096))
+        rows = []
+        for seed in (42, 43):
+            rows.extend([dict(native, seed=seed), dict(candidate, seed=seed)])
+            rows.append(dict(candidate, rate=.2, seed=seed))
+            rows.extend([dict(native, rate=.3, seed=seed), dict(candidate, rate=.3, seed=seed,
+                                                               trace_sha256="different")])
+            rows.extend([dict(native, rate=.4, seed=seed, program_token_latencies={p: .95 for p in native["programs"]}),
+                         dict(candidate, rate=.4, seed=seed)])
+            rows.append(dict(candidate, rate=.5, seed=seed))
+        rows.append(dict(native, rate=.5))
+        result = summary.paper_matrix(rows, slo_targets=(.9,), strict=False)
+        max_offered = "maximum_tested_offered_programs_per_second"
+        self.assertEqual(result["slo_points"][0][max_offered]["vllm/autellix"], .5)
+        paired = result["paired_slo_points"][0]
+        self.assertEqual(paired["shared_rates"], [.1, .4])
+        self.assertEqual(paired[max_offered], {"vllm/mlfq": .1, "vllm/autellix": .4})
+        self.assertEqual(paired["arrival_window_completed_programs_per_second"],
+                         {"vllm/mlfq": .1, "vllm/autellix": .1})
+        for row in rows:
+            row["plan"]["arrival_seconds"] = 30
+            if row["seed"] == 42:
+                row["programs"] = {pid: t for pid, t in row["programs"].items() if pid != "0"}
+        timed = summary.paper_matrix(rows, slo_targets=(.9,), strict=False)["paired_slo_points"][0]
+        self.assertEqual(timed["arrival_seconds"], 30)
+        self.assertIsNone(timed["programs"])
+        self.assertEqual(timed["shared_rates"], paired["shared_rates"])
+
 
 if __name__ == "__main__":
     unittest.main()
