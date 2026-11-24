@@ -291,6 +291,9 @@ LATS 的组间依赖与就绪时间沿用原轨迹，所有对照组使用同一
 `prepare_h20_qwen32.py --lats-trace`，以 Qwen3 对话模板重新编码，并保留分支、依赖及生成长度。
 单 H20 上的 32B vLLM 组使用 `--batch-size 8 --kv-tokens 65536 --qwen3-fused-qk-rope`，
 同一组原生对照和调度对照共用这些参数。
+比较 BFCL 的 KV 容量时，可将 `--kv-tokens` 提到 `81920`，对 vLLM-opt、同路径 FCFS、
+MLFQ 和 PLAS 使用同一容量，并保持模型、到达轨迹、批次和前缀缓存设置一致。引擎日志同时记录
+GPU 前缀命中率、KV 占用和换出请求。
 
 图 12 的 Llama-3.1-70B 和 Falcon-180B 原配置分别使用 4 张和 8 张 A100。图 14 的副本组数
 分别为 4 和 2，图 15 比较独立引擎扩容。上述 GPU 结果与单卡 8B、CPU 模拟分别汇总。
