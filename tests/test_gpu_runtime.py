@@ -359,16 +359,18 @@ class CUDASwapTests(unittest.TestCase):
 
         packer = PackedKVLayout(source, channels=2, token_major=True)
         unpacker = PackedKVLayout(target, channels=2, token_major=True)
-        blocks = torch.empty(packer.shape(11), dtype=packer.dtype, pin_memory=True).fill_(-10)
-        for layer in target:
-            layer.zero_()
-        with patch("autellix.runtime.swap.MAX_TRANSFER_BYTES", block_bytes):
-            self.assertEqual(packed_host_swap(packer, blocks, swap_out, to_host=True), 3)
-            self.assertEqual(packed_host_swap(unpacker, blocks, swap_in, to_host=False), 3)
-        for src, dst in zip(source, target):
-            self.assertTrue(torch.equal(src[:, [7, 0, 4]], dst[:, [7, 0, 4]]))
-            self.assertEqual(dst[:, 1].count_nonzero().item(), 0)
-        self.assertTrue(torch.all(blocks[0] == -10).item())
+        blocks = torch.empty(packer.shape(11), dtype=packer.dtype, pin_memory=True)
+        for transfer_bytes, copies in ((block_bytes, 3), (3 * block_bytes, 1)):
+            blocks.fill_(-10)
+            for layer in target:
+                layer.zero_()
+            with patch("autellix.runtime.swap.MAX_TRANSFER_BYTES", transfer_bytes):
+                self.assertEqual(packed_host_swap(packer, blocks, swap_out, to_host=True), copies)
+                self.assertEqual(packed_host_swap(unpacker, blocks, swap_in, to_host=False), copies)
+            for src, dst in zip(source, target):
+                self.assertTrue(torch.equal(src[:, [7, 0, 4]], dst[:, [7, 0, 4]]))
+                self.assertEqual(dst[:, 1].count_nonzero().item(), 0)
+            self.assertTrue(torch.all(blocks[0] == -10).item())
         with self.assertRaises(IndexError):
             packed_host_swap(packer, blocks, [(10, 0), (7, 0)], to_host=True)
 

@@ -258,7 +258,8 @@ SHA-256 已核对，记录位于 `data/autellix/import/migration-verification.js
 ShareGPT 的单程序同时只有一个调用。测图 17 和图 19 的抢占压力时可指定
 `--workloads sharegpt --profile-programs 64`，让同时提交的程序数超过 GPU 的活动槽数。
 图 19 的 `fused-swap-packed-host` 将同一 KV 块的各层连续存放在主机内存，以一次块级索引完成
-主机端整理。`run_paper_vllm.py --packed-host-kv` 可把该布局用于单卡回放。
+主机端整理。连续的主机块直接传入或传出锁页缓存，离散块在一个连续缓冲区中整理后传输。
+`run_paper_vllm.py --packed-host-kv` 可把该布局用于单卡回放。
 
 SGLang 单步预填充预算耗尽后保留已选请求与 decode，GPU KV 或请求槽位耗尽时按优先级收缩窗口。
 PLAS 与 ATLAS 在窗口边界只读取已累计服务或等待时间的程序，其余程序使用零历史。

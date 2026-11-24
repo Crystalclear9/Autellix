@@ -74,16 +74,28 @@ def packed_host_swap(packed, host_cache, mapping, *, to_host):
     with torch.cuda.device(gpu):
         stream = torch.cuda.current_stream(gpu)
         for cpu_index, gpu_index in zip(host_indices.split(blocks_per_transfer), gpu_indices.split(blocks_per_transfer)):
-            shape = packed.shape(len(cpu_index))
-            staging = torch.empty(shape, dtype=packed.dtype, device="cpu", pin_memory=True)
+            count = len(cpu_index)
+            ordered, order = cpu_index.sort()
+            first = int(ordered[0])
+            contiguous = host_cache.is_contiguous() and torch.equal(
+                ordered, torch.arange(first, first + count, dtype=ordered.dtype, device="cpu"))
+            if contiguous:
+                # Both ends follow the physical host block order, allowing DMA
+                # directly into or out of the persistent pinned cache.
+                staging = host_cache.narrow(0, first, count)
+                gpu_index = gpu_index[order]
+            else:
+                staging = torch.empty(packed.shape(count), dtype=packed.dtype, device="cpu", pin_memory=True)
             if to_host:
-                payload = torch.empty(shape, dtype=packed.dtype, device=gpu)
+                payload = torch.empty(packed.shape(count), dtype=packed.dtype, device=gpu)
                 packed.move(gpu_index, payload, pack=True)
                 staging.copy_(payload, non_blocking=True)
                 stream.synchronize()
-                host_cache.index_copy_(0, cpu_index, staging)
+                if not contiguous:
+                    host_cache.index_copy_(0, cpu_index, staging)
             else:
-                torch.index_select(host_cache, 0, cpu_index, out=staging)
+                if not contiguous:
+                    torch.index_select(host_cache, 0, cpu_index, out=staging)
                 packed.move(gpu_index, staging.to(gpu, non_blocking=True), pack=False)
                 stream.synchronize()
     return (len(host_indices) + blocks_per_transfer - 1) // blocks_per_transfer
