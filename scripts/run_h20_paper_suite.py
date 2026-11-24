@@ -363,7 +363,7 @@ def main():
             name = f"fig19-kernel-{blocks}"
             gpu_run(name, [exe, str(root / "cuda/batched_swap_benchmark.py"), "--blocks", str(blocks),
                            "--layers", "32", "--block-bytes", "32768", "--dtype", "bfloat16", "--baseline", "vllm",
-                           "--fused", "--output", str(out / (name + ".json"))], run_env)
+                           "--fused", "--packed-host", "--output", str(out / (name + ".json"))], run_env)
     for plan in plans:
         name, backend = plan["workload_kind"], plan["backend"]
         exe, run_env = interpreters[backend]
