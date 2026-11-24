@@ -178,7 +178,8 @@ def main(argv=None):
                                 progress_interval=plan.get("progress_interval", 30),
                                 routing=case.get("routing", "program"), backend=backend,
                                 scheduler_trace=plan.get("scheduler_trace", True),
-                                queue_levels=case.get("queue_levels"))
+                                queue_levels=case.get("queue_levels"),
+                                group_ready_calls=plan.get("group_ready_calls", False))
                 except Exception as exc:
                     if not args.keep_going:
                         raise

@@ -15,7 +15,7 @@ from autellix.runtime.telemetry import GPUMonitor
 
 def trial(model, device, engine_args, trace, arm, reserve=0, interval=8, quantum_scale=1., request_timeout=600,
           boundary_scale=None, beta=8., progress_interval=0, routing="program", backend="sglang",
-          scheduler_trace=True, queue_levels=None):
+          scheduler_trace=True, queue_levels=None, group_ready_calls=False):
     options = dict(engine_args)
     native = arm in {"sglang-native", "vllm", "vllm-opt", "vllm-opt-multistep"}
     if backend == "sglang":
@@ -43,7 +43,8 @@ def trial(model, device, engine_args, trace, arm, reserve=0, interval=8, quantum
         engine.wait_idle(30)
         devices = sorted({device.strip() for group in groups for device in group.split(",")})
         with GPUMonitor(devices=devices) as monitor:
-            result = run_workload(engine, trace, request_timeout=request_timeout, progress_interval=progress_interval)
+            result = run_workload(engine, trace, request_timeout=request_timeout, progress_interval=progress_interval,
+                                  group_ready_calls=group_ready_calls)
         result["gpu_samples"] = monitor.samples
         result["gpu_sampling_errors"] = monitor.errors
         result["device_groups"] = groups

@@ -9,6 +9,7 @@ import copy
 import math
 import hashlib
 import heapq
+from contextlib import nullcontext
 from importlib.metadata import version, PackageNotFoundError
 from queue import Empty, SimpleQueue
 import time
@@ -109,7 +110,7 @@ def distribution(values):
     return dict(mean=statistics.mean(values), p95=percentile(.95), p99=percentile(.99), count=len(values))
 
 
-def run_workload(engine, programs, request_timeout=600, progress_interval=0):
+def run_workload(engine, programs, request_timeout=600, progress_interval=0, group_ready_calls=False):
     validate_workload(programs)
     arrivals = {p["program_id"]: p.get("arrival_time", 0) for p in programs}
     remaining_calls = {p["program_id"]: len(p["calls"]) for p in programs}
@@ -135,6 +136,11 @@ def run_workload(engine, programs, request_timeout=600, progress_interval=0):
              for key, call in calls.items() if not parents[key]]
     heapq.heapify(ready)
     next_progress = start + progress_interval if progress_interval else math.inf
+
+    def uses_token_ids(key):
+        call = calls[key]
+        return "input_ids" in call and not (parents[key] and call.get("append_parent_outputs", True))
+
     try:
         while len(results) < len(calls):
             now = time.monotonic()
@@ -143,27 +149,33 @@ def run_workload(engine, programs, request_timeout=600, progress_interval=0):
                       f"programs={len(program_times)}/{len(programs)} pending={len(pending)}", flush=True)
                 next_progress = now + progress_interval
             while ready and ready[0][0] <= time.monotonic():
-                _, _, key = heapq.heappop(ready)
-                pid, call_id = key
+                at, _, key = heapq.heappop(ready)
+                pid = key[0]
                 if pid not in sessions:
                     sessions[pid] = engine.start_session()
-                call = calls[key]
-                append_parents = parents[key] and call.get("append_parent_outputs", True)
-                if "input_ids" in call and not append_parents:
-                    inputs = {"input_ids": call["input_ids"]}
-                else:
-                    prompt = call["prompt"]
-                    if append_parents:
-                        prompt += "\nPrevious results:\n" + "\n".join(results[parent]["text"] for parent in parents[key])
-                    inputs = {"prompt": prompt}
-                call_starts[key] = time.monotonic()
-                first_submissions.setdefault(pid, call_starts[key] - start)
-                future = engine.submit(sessions[pid], **inputs, call_id=call_id,
-                                       sampling={"temperature": 0, "max_tokens": call.get("max_tokens", 32),
-                                                 **call.get("sampling", {})})
-                pending[future] = key
-                heapq.heappush(deadlines, (call_starts[key] + request_timeout, order[key], future))
-                future.add_done_callback(lambda done: completed_futures.put((done, time.monotonic())))
+                ready_group = [key]
+                if group_ready_calls and uses_token_ids(key):
+                    while ready and ready[0][0] == at and ready[0][2][0] == pid and uses_token_ids(ready[0][2]):
+                        ready_group.append(heapq.heappop(ready)[2])
+                context = engine.group_pretokenized_submissions() if len(ready_group) > 1 else nullcontext()
+                with context:
+                    for key in ready_group:
+                        call = calls[key]
+                        if uses_token_ids(key):
+                            inputs = {"input_ids": call["input_ids"]}
+                        else:
+                            prompt = call["prompt"]
+                            if parents[key] and call.get("append_parent_outputs", True):
+                                prompt += "\nPrevious results:\n" + "\n".join(results[p]["text"] for p in parents[key])
+                            inputs = {"prompt": prompt}
+                        call_starts[key] = time.monotonic()
+                        first_submissions.setdefault(pid, call_starts[key] - start)
+                        future = engine.submit(sessions[pid], **inputs, call_id=key[1],
+                                               sampling={"temperature": 0, "max_tokens": call.get("max_tokens", 32),
+                                                         **call.get("sampling", {})})
+                        pending[future] = key
+                        heapq.heappush(deadlines, (call_starts[key] + request_timeout, order[key], future))
+                        future.add_done_callback(lambda done: completed_futures.put((done, time.monotonic())))
             while deadlines and deadlines[0][2] not in pending:
                 heapq.heappop(deadlines)
             deadline = deadlines[0][0] if deadlines else math.inf

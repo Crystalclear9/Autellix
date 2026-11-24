@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+from contextlib import contextmanager
 import multiprocessing as mp
 import os
 import queue
@@ -71,6 +72,14 @@ def _worker(index, replica, policy, table_path, trace, commands, events):
             from integrations.sglang.backend import SGLangBackend as Backend
         backend = Backend(replica.model, table_path, policy, trace, **replica.engine_args)
         events.put((index, "ready", None, None))
+
+        def add_requests(requests):
+            for rid, payload in requests:
+                try:
+                    backend.add(rid=rid, **payload)
+                except Exception as exc:
+                    events.put((index, "error", rid, repr(exc)))
+
         closing = False
         while not closing:
             # Bound admission work so a busy producer cannot starve generation.
@@ -84,7 +93,9 @@ def _worker(index, replica, policy, table_path, trace, commands, events):
                     break
                 try:
                     if command == "add":
-                        backend.add(rid=rid, **payload)
+                        add_requests(((rid, payload),))
+                    elif command == "add-group":
+                        add_requests(payload)
                     elif command == "cancel":
                         backend.cancel(rid)
                         events.put((index, "cancelled", rid, None))
@@ -146,6 +157,7 @@ class InferenceEngine:
         self.sessions = {}
         self.pending = {}
         self.rpc = {}
+        self._submission_group = None
         self.loads = [0] * len(replicas)
         self.failed = {}
         self.closed = False
@@ -215,10 +227,36 @@ class InferenceEngine:
             with self.lock:
                 self.rpc.pop(rid, None)
 
+    @contextmanager
+    def group_pretokenized_submissions(self):
+        """Deliver already-ready sibling calls together before the next GPU step."""
+        with self.lock:
+            if self._submission_group is not None:
+                yield
+                return
+            grouped = self._submission_group = {}
+            try:
+                yield
+            finally:
+                self._submission_group = None
+                for index, requests in grouped.items():
+                    active = []
+                    for rid, payload in requests:
+                        if self.pending[rid][0].cancelled():
+                            self._resolve(rid, "cancelled", None)
+                        else:
+                            active.append((rid, payload))
+                    if active:
+                        self.commands[index].put(("add-group", None, active))
+
     def submit(self, pid, *, prompt=None, messages=None, input_ids=None, sampling=None, call_id=None,
                thread_id=None, metadata=None):
         if sum(x is not None for x in (prompt, messages, input_ids)) != 1:
             raise ValueError("supply exactly one of prompt, messages, input_ids")
+        if input_ids is None:
+            with self.lock:
+                if self._submission_group is not None:
+                    raise ValueError("grouped submissions require input_ids")
         tokens = input_ids if input_ids is not None else self.tokenize(prompt=prompt, messages=messages)
         if not tokens or any(type(t) is not int or t < 0 for t in tokens):
             raise ValueError("input_ids must be nonempty nonnegative integers")
@@ -243,10 +281,17 @@ class InferenceEngine:
             self.pending[rid] = (future, pid, index, call_id)
             session["calls"].add(call_id)
             self.loads[index] += 1
-            self.commands[index].put(("add", rid, dict(pid=pid, prompt=list(tokens), sampling=sampling or {})))
+            payload = dict(pid=pid, prompt=list(tokens), sampling=sampling or {})
+            if self._submission_group is None:
+                self.commands[index].put(("add", rid, payload))
+            else:
+                self._submission_group.setdefault(index, []).append((rid, payload))
             def on_done(done):
                 if done.cancelled():
-                    self.commands[index].put(("cancel", rid, {}))
+                    with self.lock:
+                        if rid in self.pending and not any(
+                                staged_rid == rid for staged_rid, _ in (self._submission_group or {}).get(index, ())):
+                            self.commands[index].put(("cancel", rid, {}))
             future.add_done_callback(on_done)
             return future
 

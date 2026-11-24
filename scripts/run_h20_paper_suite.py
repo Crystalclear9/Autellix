@@ -106,6 +106,7 @@ def build_plans(args):
             args_for_engine["autellix_measure_timing"] = True
         if offline or timing:
             args_for_engine["publish_activity" if backend == "vllm" else "autellix_publish_activity"] = False
+        replay_options = {"group_ready_calls": True} if args.group_ready_calls else {}
         return dict(backend=backend, model=str(args.model.resolve()), device=device,
                     experiment="offline" if offline else "online", paper_figures=list(selected_figures),
                     workload=str(workload_path(args, family)), workload_family=family,
@@ -113,7 +114,7 @@ def build_plans(args):
                     repeats=1 if offline or timing else args.repeats, unique_programs=True,
                     request_timeout=args.request_timeout, progress_interval=60,
                     equal_dataset_counts=family == "mixed", scheduler_trace=timing,
-                    compact_calls=True, engine_args=args_for_engine, cases=cases)
+                    compact_calls=True, engine_args=args_for_engine, cases=cases, **replay_options)
 
     for backend in args.backends:
         if backend == "vllm" and 4 in selected and "sharegpt" in args.workloads:
@@ -267,6 +268,8 @@ def main():
     parser.add_argument("--qwen3-fused-qk-rope", action="store_true", help="enable Qwen3 fusion in every vLLM arm")
     parser.add_argument("--deduplicate-prefill", action="store_true",
                         help="share identical prefills in the matched vLLM scheduling arms")
+    parser.add_argument("--group-ready-calls", action="store_true",
+                        help="admit pretokenized siblings with the same release time together")
     parser.add_argument("--seed", type=int, default=2026)
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--batch-tokens", type=int, default=2048, help="chunked-prefill budget for matched vLLM arms")

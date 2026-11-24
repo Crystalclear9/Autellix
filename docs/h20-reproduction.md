@@ -282,6 +282,8 @@ FCFS 用于区分执行优化与程序优先级带来的收益。
 原有低服务时间区间保持不变，最高区间按原来的倍率继续分箱。图 17 的 `admissions_by_queue`
 可核对延迟变化是否伴随优先级分布变化。加 `--deduplicate-prefill` 时，三个自定义调度对照
 及其扩展队列组使用相同的前缀复用策略。
+`--group-ready-calls` 将同一个程序在同一时刻就绪的预编码分支一起送到副本。
+LATS 的组间依赖与就绪时间沿用原轨迹，所有对照组使用同一种提交方式。
 
 32B 扩展对照可通过 `--sharegpt-trace`、`--bfcl-trace`、`--lats-trace` 和 `--mixed-trace`
 使用 Qwen3 的输入 token。LATS 可将 8B 采集的 HotpotQA 搜索记录传给
