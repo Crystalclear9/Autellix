@@ -191,6 +191,11 @@ t=0 提交第一项，计算实际到达率时只计入随后按指数间隔生�
 汇总显示后 120 秒的到达率、完成率、起止积压和这段时间内到达的程序延迟。
 设置预热后，图 12、13 的 SLO 资格使用测量窗口内到达的程序，完成率也使用该窗口。
 同延迟吞吐比较可结合起止积压判断负载是否持续处理得完。
+8B BFCL 的固定窗口对照使用 `--online-warmup 30 --online-seconds 90 --online-with-replacement`，
+配合 `--workloads bfcl --figures 12 13 --backends vllm`。基础 vLLM 测 `.06 .12 .24` 程序/秒，
+Autellix 测 `.24 .72 1.44` 程序/秒，各组设相同的 KV 和活动批次预算。
+复测低速原生组与高速 Autellix 组时，分别在独立目录用 `--cases vllm --rates .06` 和
+`--cases autellix --rates .72`，两组均使用 `--seed 2027 --repeats 2`。
 新检查点同时记录运行代码和输入轨迹的 SHA-256，续跑时校验已记录的版本。
 汇总命令可直接读取 `results.json.gz` 压缩检查点。
 图 12、13 的单卡套件也可用 `--graph-context 32768` 为各 vLLM 组统一 CUDA Graph
