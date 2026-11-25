@@ -98,6 +98,10 @@ class MatrixResumeTests(unittest.TestCase):
                 matrix.completed_trials([row], plan, versions)
         with self.assertRaises(ValueError):
             matrix.completed_trials([row, row], row["plan"], row["versions"])
+        row["implementation_sha256"] = "recorded"
+        self.assertEqual(matrix.completed_trials([row], row["plan"], row["versions"], "recorded"), complete)
+        with self.assertRaisesRegex(ValueError, "same implementation"):
+            matrix.completed_trials([row], row["plan"], row["versions"], "updated")
 
     def test_failure_leaves_other_arms_runnable_and_resumes_only_the_failed_arm(self):
         with TemporaryDirectory() as directory:

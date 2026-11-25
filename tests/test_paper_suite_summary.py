@@ -69,6 +69,22 @@ class PaperSuiteSummary(unittest.TestCase):
         self.assertEqual((window["backlog_start"], window["backlog_end"]), (1, 1))
         self.assertEqual(window["token_latency"]["mean"], 3)
 
+    def test_paper_slo_uses_arrivals_after_warmup(self):
+        native, _ = self.records()
+        native.update(condition="sglang-native",
+                      plan=dict(backend="sglang", workload_family="lats", paper_figures=[12],
+                                arrival_seconds=30, steady_state_start_seconds=15),
+                      effective_engine_args=dict(dtype="bfloat16", context_length=32768,
+                                                 max_running_requests=4, max_total_tokens=65536),
+                      program_token_latencies={"0": 1., "1": 1., "2": 2., "3": 4.})
+        result = summary.paper_matrix([native], slo_targets=(2.5, 3.))
+        self.assertEqual(result["trials"][0]["token_latency"]["mean"], 3.)
+        means = [point for point in result["slo_points"] if point["latency_statistic"] == "mean"]
+        arm = "sglang/sglang-native"
+        self.assertIsNone(means[0]["maximum_tested_offered_programs_per_second"][arm])
+        self.assertEqual(means[1]["arrival_window_completed_programs_per_second"][arm], 2 / 15)
+        self.assertEqual(means[1]["completion_rates_at_maximum_offered"][arm]["mean_backlog_change"], 0)
+
     def test_first_batch_wait_uses_submission_order(self):
         row = self.records()[1]
         earlier = dict(row["calls"][0], submitted_seconds=0.,
@@ -186,6 +202,9 @@ class PaperSuiteSummary(unittest.TestCase):
         pairs = summary.paper_matrix([native, candidate, variant, fcfs])["comparisons"]
         self.assertIn(("vllm/fcfs-warm-prefix", "vllm/plas-experiment"),
                       {(p["baseline"], p["candidate"]) for p in pairs})
+        with self.assertRaisesRegex(ValueError, "mismatched implementation"):
+            summary.paper_matrix([dict(native, implementation_sha256="first"),
+                                  dict(candidate, implementation_sha256="second")])
         candidate["calls"][0]["completion_tokens"] += 1
         with self.assertRaisesRegex(ValueError, "mismatched trace or work"):
             summary.paper_matrix([native, candidate])

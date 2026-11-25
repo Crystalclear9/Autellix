@@ -110,6 +110,7 @@ def metrics(row):
                 condition=row["condition"], rate=row["rate"], seed=row["seed"],
                 model=row["model"], versions=row["versions"], engine_args=row["effective_engine_args"],
                 devices=row["device_groups"], trace_sha256=row["trace_sha256"],
+                implementation_sha256=row.get("implementation_sha256"),
                 programs=len(arrivals), calls=len(row["calls"]), output_tokens=row["completion_tokens"],
                 input_tokens_per_call=distribution(c["prompt_tokens"] for c in row["calls"]),
                 program_response_seconds=distribution(row["programs"].values()),
@@ -127,7 +128,7 @@ def metrics(row):
                 maximum_submission_lag_seconds=max(row["first_submission_lag_seconds"].values()),
                 arrival_quartiles=quartiles, backlog_checkpoints=checkpoints,
                 calls_by_engine=dict(Counter(c["engine_id"] for c in row["calls"])), gpu=gpu,
-                **cache, **first_call_waits(row["calls"]))
+                **cache, **first_call_waits(row["calls"]), **steady_state_window(row, token_times))
 
 
 def slo_capacity(grouped, stat, target):
@@ -148,6 +149,10 @@ def slo_capacity(grouped, stat, target):
             completed_programs_per_second=statistics.mean(row["completed_programs_per_second"] for row in rows),
             arrival_window_completed_programs_per_second=(statistics.mean(window_rates)
                                                           if None not in window_rates else None))
+        windows = [row.get("steady_state_window") for row in rows]
+        if all(windows):
+            observed_at_maximum["mean_backlog_change"] = statistics.mean(
+                w["backlog_end"] - w["backlog_start"] for w in windows)
     return offered, completed, in_window, observed_at_maximum
 
 
@@ -185,22 +190,33 @@ def paper_matrix(records, slo_targets=DEFAULT_SLO_TARGETS, *, strict=True):
         config = (figures, plan["workload_family"], program_budget, arrival_seconds,
                   plan.get("steady_state_start_seconds"), row["model"], tuple(row["device_groups"]), resources)
         latencies, _ = paper_token_latencies(row)
+        window = steady_state_window(row, latencies)
+        if window:
+            measured = window["steady_state_window"]
+            token_latency = measured["token_latency"]
+            completion_rate = measured["completed_programs_per_second"]
+            offered_rate = measured["observed_offered_programs_per_second"]
+        else:
+            token_latency = distribution(latencies.values())
+            completion_rate = (row["completions_during_arrivals"] / row["arrival_horizon_seconds"]
+                               if row["arrival_horizon_seconds"] else None)
+            offered_rate = observed_arrival_rate(row)
         make = row["elapsed_seconds"]
         horizon = row["arrival_horizon_seconds"]
         point = dict(figures=figures, workload=plan["workload_family"], backend=backend,
                      condition=row["condition"], policy=row.get("arm"), model=row["model"], devices=row["device_groups"],
                      resources=dict(zip(("dtype", "context_tokens", "batch_size", "kv_tokens"), resources)),
                      versions=row["versions"], engine_args=opts,
+                     implementation_sha256=row.get("implementation_sha256"),
                      programs=len(row["programs"]), rate=row["rate"], seed=row["seed"],
                      planned_repeats=plan.get("repeats", 1),
                      trace_sha256=row["trace_sha256"], makespan_seconds=make,
                      arrival_horizon_seconds=horizon,
-                     observed_offered_programs_per_second=observed_arrival_rate(row),
-                     token_latency=distribution(latencies.values()), output_tokens=row["completion_tokens"],
+                     observed_offered_programs_per_second=offered_rate,
+                     token_latency=token_latency, output_tokens=row["completion_tokens"],
                      completed_programs_per_second=len(row["programs"]) / make,
-                     arrival_window_completed_programs_per_second=(row["completions_during_arrivals"] / horizon
-                                                                   if horizon else None),
-                     **first_call_waits(row["calls"]), **steady_state_window(row, latencies))
+                     arrival_window_completed_programs_per_second=completion_rate,
+                     **first_call_waits(row["calls"]), **window)
         trials.append(point)
         slot = at_load[config, row["rate"], row["seed"]]
         if arm in slot:
@@ -229,6 +245,9 @@ def paper_matrix(records, slo_targets=DEFAULT_SLO_TARGETS, *, strict=True):
                     reason = "mismatched trace or work"
                 elif point["backend"] == reference["backend"] and point["versions"] != reference["versions"]:
                     reason = "mismatched backend versions"
+                elif (point["implementation_sha256"] and reference["implementation_sha256"]
+                      and point["implementation_sha256"] != reference["implementation_sha256"]):
+                    reason = "mismatched implementation"
                 if reason:
                     if strict:
                         raise ValueError(f"{reason}: {arm} versus {baseline_arm}")
@@ -319,7 +338,8 @@ def summarize(records, slo_targets=DEFAULT_SLO_TARGETS):
                                      "autellix_mode", "preemption_mode", "observe_native", "batched_swap",
                                      "keep_resident_kv", "recompute_on_swap_full", "paper_chunked_prefill",
                                      "publish_activity_at_window", "refill_idle_slots", "resident_decode_headroom", "packed_host_kv",
-                                     "min_decode_steps", "mixed_decode_quantum", "deduplicate_prefill"}}
+                                     "min_decode_steps", "mixed_decode_quantum", "deduplicate_prefill",
+                                     "chunked_prefill_kv"}}
             native_defaults = row["arm"] == "sglang-native" and row["effective_engine_args"].get("autellix_native_defaults", False)
             baseline_defaults = native["effective_engine_args"].get("autellix_native_defaults", False)
             row_options, baseline_options = options(row), options(native)
@@ -328,9 +348,12 @@ def summarize(records, slo_targets=DEFAULT_SLO_TARGETS):
                             "chunked_prefill_size"):
                     row_options.pop(opt, None)
                     baseline_options.pop(opt, None)
+            source, baseline_source = row.get("implementation_sha256"), native.get("implementation_sha256")
             paired = dict(same_trace=row["trace_sha256"] == native["trace_sha256"],
                           same_lengths=lengths(row) == lengths(native), same_options=row_options == baseline_options,
                           same_model=row["model"] == native["model"], same_versions=row["versions"] == native["versions"])
+            if source and baseline_source:
+                paired["same_implementation"] = source == baseline_source
             if not all(paired.values()):
                 raise ValueError(f"unmatched workload or resources: {key}, {paired}")
             per_program, calls_by_program = [], defaultdict(list)

@@ -17,6 +17,18 @@ from summarize_paper_suite import paper_token_latencies
 from autellix.runtime.benchmark import distribution, load_workloads, sample_trace
 
 
+def implementation_sha256():
+    root = Path(__file__).resolve().parents[1]
+    paths = [path for directory in ("autellix", "integrations")
+             for path in (root / directory).rglob("*.py")]
+    paths += [root / "scripts" / name for name in ("run_sglang_matrix.py", "compare_sglang.py")]
+    digest = hashlib.sha256()
+    for path in sorted(paths):
+        digest.update(path.relative_to(root).as_posix().encode() + b"\0")
+        digest.update(hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).digest())
+    return digest.hexdigest()
+
+
 def hash_trace(trace):
     # Match json.dumps(trace, sort_keys=True) without buffering the entire trace.
     digest = hashlib.sha256(b"[")
@@ -88,11 +100,13 @@ def timed_trace(programs, rate, seed, seconds, *, equal_dataset_counts=False, un
     return trace
 
 
-def completed_trials(records, plan, versions):
+def completed_trials(records, plan, versions, source=None):
     completed = {}
     for row in records:
         if row["versions"] != versions:
             raise ValueError("resume requires the same backend versions")
+        if source is not None and row.get("implementation_sha256", source) != source:
+            raise ValueError("resume requires the same implementation")
         if row["plan"] != plan:
             def common(p):
                 return {k: v for k, v in p.items() if k not in {"cases", "rates"}}
@@ -136,8 +150,9 @@ def main(argv=None):
     destination = Path(args.output)
     destination.parent.mkdir(parents=True, exist_ok=True)
     versions = {name: version(name) for name in (backend, "torch", "transformers")}
+    source = implementation_sha256()
     records = json.loads(destination.read_text()) if args.resume and destination.exists() else []
-    completed = completed_trials(records, plan, versions)
+    completed = completed_trials(records, plan, versions, source)
     failures_path = destination.with_name(f"{destination.stem}-failures.json")
     failures = json.loads(failures_path.read_text()) if args.resume and failures_path.exists() else []
     failed = False
@@ -198,7 +213,7 @@ def main(argv=None):
                     continue
                 row.update(condition=case["name"], rate=rate, repeat=repeat, seed=seed,
                            wall_start=started, plan=plan,
-                           trace_sha256=trace_hash, versions=versions)
+                           trace_sha256=trace_hash, versions=versions, implementation_sha256=source)
                 if arrival_seconds is not None:
                     row.update(arrival_horizon_seconds=arrival_seconds,
                                drain_seconds=max(0., row["elapsed_seconds"] - arrival_seconds),
