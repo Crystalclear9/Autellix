@@ -196,6 +196,8 @@ class PaperSuiteSummary(unittest.TestCase):
         self.assertEqual(mean["maximum_tested_offered_programs_per_second"][arm], .2)
         self.assertEqual(mean["completed_programs_per_second"][arm], .1)
         self.assertEqual(mean["arrival_window_completed_programs_per_second"][arm], .1)
+        self.assertEqual(mean["completion_rates_at_maximum_offered"][arm],
+                         dict(completed_programs_per_second=.1, arrival_window_completed_programs_per_second=0.))
 
     def test_paired_slo_uses_only_fully_matched_rates(self):
         native, candidate = self.records()

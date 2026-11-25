@@ -121,19 +121,29 @@ def slo_capacity(grouped, stat, target):
     in_window = max((statistics.mean(row["arrival_window_completed_programs_per_second"] for row in rows)
                      for rows in qualifying.values() if all(row["arrival_window_completed_programs_per_second"]
                                                             is not None for row in rows)), default=None)
-    return max(qualifying, default=None), completed, in_window
+    offered = max(qualifying, default=None)
+    observed_at_maximum = None
+    if offered is not None:
+        rows = qualifying[offered]
+        window_rates = [row["arrival_window_completed_programs_per_second"] for row in rows]
+        observed_at_maximum = dict(
+            completed_programs_per_second=statistics.mean(row["completed_programs_per_second"] for row in rows),
+            arrival_window_completed_programs_per_second=(statistics.mean(window_rates)
+                                                          if None not in window_rates else None))
+    return offered, completed, in_window, observed_at_maximum
 
 
 def slo_points_for_arms(arms, targets):
     for target in targets:
         for stat in ("mean", "p95", "p99"):
-            offered, completed, in_window = {}, {}, {}
+            offered, completed, in_window, at_maximum = {}, {}, {}, {}
             for arm, rates in arms.items():
-                offered[arm], completed[arm], in_window[arm] = slo_capacity(rates, stat, target)
+                offered[arm], completed[arm], in_window[arm], at_maximum[arm] = slo_capacity(rates, stat, target)
             yield dict(latency_statistic=stat, seconds_per_token_target=target,
                        maximum_tested_offered_programs_per_second=offered,
                        completed_programs_per_second=completed,
-                       arrival_window_completed_programs_per_second=in_window)
+                       arrival_window_completed_programs_per_second=in_window,
+                       completion_rates_at_maximum_offered=at_maximum)
 
 
 def paper_matrix(records, slo_targets=DEFAULT_SLO_TARGETS, *, strict=True):
