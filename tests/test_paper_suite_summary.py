@@ -46,6 +46,7 @@ class PaperSuiteSummary(unittest.TestCase):
 
     def test_dag_metric_and_negative_throughput_remain_separate(self):
         result = summary.summarize(self.records())
+        self.assertEqual(result["trials"][0]["observed_offered_programs_per_second"], .1)
         pair = result["comparisons"][0]
         self.assertAlmostEqual(pair["mean_response_change_pct"], 20)
         self.assertAlmostEqual(pair["mean_paper_latency_change_pct"], -25)

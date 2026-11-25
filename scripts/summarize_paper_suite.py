@@ -19,6 +19,13 @@ def distribution(values):
                 p95=values[math.ceil(.95 * len(values))-1], p99=values[math.ceil(.99 * len(values))-1])
 
 
+def observed_arrival_rate(row):
+    horizon = row["arrival_horizon_seconds"]
+    # The fixed-count generator starts one program at t=0 before sampling
+    # exponential gaps. Fixed-duration traces sample even the first arrival.
+    return sum(0 < at <= horizon for at in row["arrival_times"].values()) / horizon if horizon else None
+
+
 def paper_token_latencies(row):
     kind = row["plan"].get("workload_kind", "sharegpt")
     parallel = row["plan"].get("workload_family", kind) in {"lats", "mixed"}
@@ -93,6 +100,7 @@ def metrics(row):
                 output_tokens_per_second=row["output_tokens_per_second"], completed_programs_per_second=len(arrivals)/row["elapsed_seconds"],
                 elapsed_seconds=row["elapsed_seconds"],
                 arrival_horizon_seconds=horizon, drain_seconds=row["drain_seconds"],
+                observed_offered_programs_per_second=observed_arrival_rate(row),
                 completions_during_arrivals=row["completions_during_arrivals"],
                 arrival_window_completed_programs_per_second=(row["completions_during_arrivals"] / horizon
                                                               if horizon > 0 else None),
@@ -158,6 +166,8 @@ def paper_matrix(records, slo_targets=DEFAULT_SLO_TARGETS, *, strict=True):
                      programs=len(row["programs"]), rate=row["rate"], seed=row["seed"],
                      planned_repeats=plan.get("repeats", 1),
                      trace_sha256=row["trace_sha256"], makespan_seconds=make,
+                     arrival_horizon_seconds=horizon,
+                     observed_offered_programs_per_second=observed_arrival_rate(row),
                      token_latency=distribution(latencies.values()), output_tokens=row["completion_tokens"],
                      completed_programs_per_second=len(row["programs"]) / make,
                      arrival_window_completed_programs_per_second=(row["completions_during_arrivals"] / horizon

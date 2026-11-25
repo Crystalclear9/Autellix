@@ -30,6 +30,7 @@ cd /home/nice/qiuzeyu/stu/fjr/code/autellix
 export PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}"
 export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
 export TMPDIR="$(mktemp -d /tmp/fjr-autellix-XXXXXX)"
+export TRITON_CACHE_DIR="$TMPDIR/triton" CUDA_CACHE_PATH="$TMPDIR/cuda" VLLM_NO_USAGE_STATS=1
 data=/home/nice/qiuzeyu/stu/fjr/data/autellix
 model=/data-hdd/opt/models/llama3.1/Meta-Llama-3.1-8B
 python scripts/run_h20_paper.py sharegpt --model "$model" --datasets "$data/datasets" \
@@ -179,6 +180,10 @@ Autellix 按调用剩余输出长度预留窗口 KV，并按新页和写时复�
 分块 prefill 被抢占时只传输已计算的 KV 页，恢复时复用仍有效的 GPU 前缀。
 图 12、13 可组合使用 `--online-seconds` 和 `--online-with-replacement`。
 这样按固定时长产生泊松到达，重复抽中的完整程序分配独立会话，同负载对照共用整条轨迹。
+汇总同时记录设置的泊松参数、轨迹实际到达率和窗口内完成率。固定程序数的回放从
+t=0 提交第一项，计算实际到达率时只计入随后按指数间隔生成的到达。
+图 12、13 的单卡套件也可用 `--graph-context 32768` 为各 vLLM 组统一 CUDA Graph
+覆盖范围，适用于 BFCL 的长工具调用上下文。
 
 同一张卡依次运行匹配 Triton 配置的 SGLang、Autellix PLAS 或 ATLAS，以及采用上游默认优化的
 SGLang。功能验收使用 `check_prefill_priority_gpu.py --modern --mem-fraction-static .88`，

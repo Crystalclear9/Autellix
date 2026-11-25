@@ -135,6 +135,64 @@ class RealInferenceTests(unittest.TestCase):
             engine.end_session(pid)
 
     @unittest.skipUnless(BACKEND == "vllm", "requires vllm")
+    def test_preempted_chunked_prefill_restores_initialized_kv(self):
+        import torch
+        from integrations.vllm.backend import VLLMBackend
+        from vllm.sequence import Sequence, SequenceGroup
+
+        with tempfile.TemporaryDirectory(prefix="autellix-prefill-swap-") as directory:
+            backend = VLLMBackend(MODEL, str(Path(directory, "state.sqlite")),
+                                  PolicyConfig(schedule_interval=4, overprovision=0),
+                                  dtype=VLLM_DTYPE, gpu_memory_utilization=VLLM_MEMORY,
+                                  max_num_seqs=1, max_model_len=128, max_num_batched_tokens=32,
+                                  block_size=16, num_gpu_blocks_override=8, swap_space=.25,
+                                  paper_chunked_prefill=True, recompute_on_swap_full=False)
+            try:
+                backend.table.open("program")
+                prompt = [20 + i % 11 for i in range(65)]
+                sampling = dict(temperature=0, max_tokens=4, ignore_eos=True)
+                backend.add("preempted", "program", prompt, sampling)
+                backend.step()
+                scheduler = backend.scheduler
+                group = scheduler.running[0]
+                self.assertEqual(group.get_seqs()[0].data.get_num_computed_tokens(), 32)
+                outgoing = []
+                scheduler._preempt_by_swap(group, outgoing)
+                scheduler.running.remove(group)
+                scheduler.swapped.append(group)
+                self.assertEqual(len(outgoing), 2)
+                worker = backend.engine.model_executor.driver_worker
+                worker.cache_engine[0].swap_out(torch.tensor(outgoing, dtype=torch.int64))
+
+                manager = scheduler.block_manager
+
+                def clear_gpu_prefix(token):
+                    other = Sequence(900, {"prompt_token_ids": [token] * 128}, 16)
+                    manager.allocate(SequenceGroup("other", [other], 0.))
+                    manager.free(other)
+                    for layer in worker.cache_engine[0].gpu_cache:
+                        layer.zero_()
+
+                # Reuse every GPU page and overwrite its contents. The paused
+                # call has to get both pages back from the pinned host cache.
+                clear_gpu_prefix(40)
+
+                def finish():
+                    while backend.has_work():
+                        for result in backend.step():
+                            if result["finished"]:
+                                return result["token_ids"]
+                    self.fail("no final output")
+
+                restored = finish()
+                clear_gpu_prefix(41)
+                backend.add("uninterrupted", "program", prompt, sampling)
+                self.assertEqual(restored, finish())
+                self.assertEqual(len(restored), 4)
+            finally:
+                backend.close()
+
+    @unittest.skipUnless(BACKEND == "vllm", "requires vllm")
     def test_full_prefill_chunk_preserves_resident_decode(self):
         args = dict(max_model_len=512, max_num_batched_tokens=32, max_num_seqs=2,
                     gpu_memory_utilization=.35, swap_space=.25, dtype="half",

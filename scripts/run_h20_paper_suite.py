@@ -66,7 +66,7 @@ def build_plans(args):
                      max_num_seqs=args.batch_size, max_num_batched_tokens=args.batch_tokens,
                      block_size=16, num_gpu_blocks_override=args.kv_tokens // 16,
                      gpu_memory_utilization=.88, swap_space=args.swap_gib, enforce_eager=args.eager,
-                     max_seq_len_to_capture=8192, completion_only=True, publish_activity=False,
+                     max_seq_len_to_capture=args.graph_context, completion_only=True, publish_activity=False,
                      observe_native=False, seed=0),
         "sglang": dict(dtype="bfloat16", context_length=32768, pp_size=1,
                        max_running_requests=args.batch_size, max_total_tokens=args.kv_tokens,
@@ -290,6 +290,8 @@ def main():
     parser.add_argument("--batch-tokens", type=int, default=2048, help="chunked-prefill budget for matched vLLM arms")
     parser.add_argument("--kv-tokens", type=int, default=262144)
     parser.add_argument("--swap-gib", type=float, default=128)
+    parser.add_argument("--graph-context", type=int, default=8192,
+                        help="maximum CUDA graph context length shared by all vLLM arms")
     parser.add_argument("--recompute-on-swap-full", action="store_true",
                         help="let Figure 16 vLLM Autellix rebuild evicted KV when host swap fills")
     parser.add_argument("--eager", action="store_true")
@@ -317,6 +319,8 @@ def main():
         parser.error("Autellix boundary scale must be finite and positive")
     if args.batch_tokens < args.batch_size + 16:
         parser.error("vLLM chunk budget must hold one KV block and one token per active sequence")
+    if not 1 <= args.graph_context <= 32768:
+        parser.error("CUDA graph context must be between 1 and 32768 tokens")
 
     out = args.run_dir.resolve()
     out.mkdir(parents=True, exist_ok=True)
