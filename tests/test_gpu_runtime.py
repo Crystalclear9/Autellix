@@ -24,6 +24,16 @@ VLLM_DTYPE = os.environ.get("AUTELLIX_TEST_VLLM_DTYPE", "half")
 
 @unittest.skipUnless(BACKEND and MODEL, "requires AUTELLIX_GPU_BACKEND and AUTELLIX_TEST_MODEL")
 class RealInferenceTests(unittest.TestCase):
+    def tearDown(self):
+        if BACKEND == "vllm":
+            import gc
+            import torch
+
+            # Direct vLLM runners and their hooks can outlive a test in
+            # reference cycles. Release their memory before the next worker.
+            gc.collect()
+            torch.cuda.empty_cache()
+
     @unittest.skipUnless(BACKEND == "vllm" and os.environ.get("AUTELLIX_TEST_QWEN3_KERNEL"),
                          "requires AUTELLIX_TEST_QWEN3_KERNEL=1 in the vLLM CUDA environment")
     def test_qwen3_fused_qk_rope_matches_native(self):
@@ -195,7 +205,7 @@ class RealInferenceTests(unittest.TestCase):
     @unittest.skipUnless(BACKEND == "vllm", "requires vllm")
     def test_full_prefill_chunk_preserves_resident_decode(self):
         args = dict(max_model_len=512, max_num_batched_tokens=32, max_num_seqs=2,
-                    gpu_memory_utilization=.35, swap_space=.25, dtype="half",
+                    gpu_memory_utilization=VLLM_MEMORY, swap_space=.25, dtype=VLLM_DTYPE,
                     paper_chunked_prefill=True, keep_resident_kv=True)
         config = PolicyConfig(policy="plas", boundaries=(0, 1e-8, math.inf), quanta=(1e6, 1e6),
                               schedule_interval=4, overprovision=0, beta=1e12)
@@ -223,7 +233,7 @@ class RealInferenceTests(unittest.TestCase):
     @unittest.skipUnless(BACKEND == "vllm", "requires vllm")
     def test_oversized_prefill_does_not_kill_replica(self):
         args = dict(max_model_len=512, max_num_batched_tokens=32, max_num_seqs=1,
-                    gpu_memory_utilization=.35, swap_space=.25, dtype="half")
+                    gpu_memory_utilization=VLLM_MEMORY, swap_space=.25, dtype=VLLM_DTYPE)
         with InferenceEngine([ReplicaConfig("vllm", MODEL, device=DEVICE, engine_args=args)]) as engine:
             bad_pid, good_pid = engine.start_session(), engine.start_session()
             bad = engine.submit(bad_pid, input_ids=[1] * 64, sampling=dict(max_tokens=8))
