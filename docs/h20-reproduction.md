@@ -218,6 +218,11 @@ SGLang。功能验收使用 `check_prefill_priority_gpu.py --modern --mem-fracti
 Mixed 按程序等量抽取，LATS 在模型调用和生成 token 中仍占较高比重。
 输入来源与采集配置见[原始工作负载](paper-workload-experiment.md)。
 
+15 次迭代的并行 LATS 对照复用 6 条 HotpotQA 搜索轨迹，均值为 146.8 次调用和
+69.6 个输出 token/调用。完整提示按 8B 和 32B 的 tokenizer 分别得到
+2,099 和 2,161 个输入 token/调用。论文图 11 的 LATS 均值为 159.7 次调用、
+72.6 个输出 token 和 467.2 个输入 token。运行时另外测量实际复用的前缀及新增 prefill。
+
 ## GPU 功能验收
 
 节点 H20-2 装有 8 张 NVIDIA H20，每张可见 97,871 MiB，CUDA 算力 9.0，驱动
@@ -436,8 +441,9 @@ Llama-3.1-8B BF16、H20 3 号卡、活动批次上限 16。SGLang 的 KV 容量�
 发生在窗口内已有的请求上，其中包含候补转换。这是继续检查 prefill 容量估计和批次形状的依据。
 vLLM 的配对保留相同的 KV 与策略配置，只调整活动视图写入频率，吞吐由 293.35 升至 302.15 token/s。
 
-本地 Figure 2 模拟用相同的四个程序和双槽批次，FCFS、MLFQ、PLAS 的累计等待分别是 18、19、14，
-论文示意为 18、18、12。两组均观察到 PLAS 降低累计等待。[Autellix 论文，图 2](https://arxiv.org/html/2502.13965v1#S1)
+图 2a 为 A1、A2 指定了 4、3 个解码步，图 2d 的甘特条分别画出了 3、4 步。
+本地模拟按图 2a 的调用长度生成逐步轨迹。FCFS、MLFQ、PLAS 的累计等待分别是
+18、19、14，论文图注给出 18、18、12。[Autellix 论文，图 2](https://arxiv.org/html/2502.13965v1#S1)
 
 在 `autellix-sglang` 环境中运行下面的命令，可在 BFCL 上回放启用补齐的版本，并保留原生对照。
 `model`、`data`、`gpu` 沿用前面的单卡设置。
