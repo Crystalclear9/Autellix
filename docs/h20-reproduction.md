@@ -3,7 +3,14 @@
 `h20-env-zy-fjr` 用于代码和数据同步，`h20-gpu-zy-fjr` 用于计算。代码位于
 `/home/nice/qiuzeyu/stu/fjr/code/autellix`，数据、计划、结果保存在
 `/home/nice/qiuzeyu/stu/fjr/data/autellix`，环境为 `fjr` 的 `autellix-sglang`。
-SQLite 和进程间通信使用本机 `/tmp/fjr-autellix-*`，运行记录和调度轨迹在结束后保存到共享目录。
+SQLite、进程间通信和编译缓存使用每次运行独立创建的 `/tmp/fjr-autellix-*` 目录。完成后
+核对服务和 GPU 进程已退出，下载需要留存的计划与检查点，校验后清理对应的临时目录。
+
+本会话的 H20 临时实验资料核验后统一归档到本地
+`outputs/h20-autellix-session-20261125.tar.gz`。归档包含运行计划、检查点和部分只存在于
+临时目录的输入，`manifest.json` 记录每个归档文件的 SHA-256。8B 在线、离线及 70B BFCL
+小样本的原始检查点位于归档中的 `fjr-autellix-paper-parity-20261125/`。
+使用检查点前可按需将归档解包到 `outputs/` 下的独立目录。
 
 实验直接读取共享模型。8B 回放使用 `Meta-Llama-3.1-8B`，大模型配对使用
 `Meta-Llama-3.1-70B`，接口验证使用 `Llama-3.2-1B-Instruct`。四个工作负载使用从
