@@ -24,14 +24,20 @@ class SchedulingWindow:
         boundary = self.remaining == 0 or not cohort
 
         def choose(count, candidates, retained=()):
-            if new_admissions is not None:
-                waiting, slots = new_admissions
-                budget = slots - len(waiting.intersection(retained))
-                fresh = nsmallest(min(count, budget), candidates & waiting, key=ctl.key)
-                if fit_new is not None:
-                    fresh = fit_new(fresh)
-                candidates = (candidates - waiting).union(fresh)
-            return nsmallest(count, candidates, key=ctl.key)
+            if new_admissions is None:
+                return nsmallest(count, candidates, key=ctl.key)
+            waiting, slots = new_admissions
+            budget = slots - len(waiting.intersection(retained))
+            fresh = nsmallest(min(count, budget), candidates & waiting, key=ctl.key)
+            started = candidates - waiting
+            selected = nsmallest(count, started.union(fresh), key=ctl.key)
+            if fit_new is not None:
+                to_start = [rid for rid in selected if rid in waiting]
+                if to_start:
+                    fitted = fit_new(to_start)
+                    if len(fitted) != len(to_start):
+                        selected = nsmallest(count, started.union(fitted), key=ctl.key)
+            return selected
 
         if boundary:
             ctl.refresh()
