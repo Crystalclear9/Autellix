@@ -11,7 +11,8 @@ from integrations.vllm.paper import PaperPlan
 class Group:
     def __init__(self, rid, prefill=False):
         self.request_id, self.prefill = rid, prefill
-        self.seq = NS(data=NS(get_num_uncomputed_tokens=lambda: 4))
+        self.seq = NS(data=NS(get_num_uncomputed_tokens=lambda: 4), get_output_len=lambda: 0)
+        self.sampling_params = NS(max_tokens=32)
 
     def is_prefill(self):
         return self.prefill
@@ -74,7 +75,8 @@ class PaperPlanTests(unittest.TestCase):
         self.s.running.append(decode)
         self.priority.update(fresh=0, decode=1)
         self.s.scheduler_config.max_num_seqs = 2
-        prefix = NS(block_size=16, reusable_tokens=lambda _: 48)
+        prefix = NS(block_size=16, reusable_tokens=lambda _: 48,
+                    can_append_slots=self.s.block_manager.can_append_slots)
         plan = PaperPlan(self.s, self.ctl, 2, chunked_prefill=True, prefix_cache=prefix)
         step = plan.next_step()
         self.assertEqual([(g.seq_group.request_id, g.token_chunk_size) for g in step.scheduled_seq_groups],
@@ -102,7 +104,8 @@ class PaperPlanTests(unittest.TestCase):
         different.seq.get_token_ids = lambda: [2] * 8
         self.s.waiting.extend((first, sibling, different))
         self.s.scheduler_config.max_num_seqs = 3
-        prefix = NS(block_size=4, reusable_tokens=lambda _: 0)
+        prefix = NS(block_size=4, reusable_tokens=lambda _: 0,
+                    can_append_slots=self.s.block_manager.can_append_slots)
         plan = PaperPlan(self.s, self.ctl, 3, chunked_prefill=True, prefix_cache=prefix, deduplicate_prefill=True)
 
         out = plan.next_step()
@@ -475,6 +478,21 @@ class PaperPlanTests(unittest.TestCase):
         self.s.running.remove(a)
         out = plan.next_step()
         self.assertEqual([g.seq_group.request_id for g in out.scheduled_seq_groups], ["reserve"])
+
+    def test_window_reserves_only_kv_that_can_be_used(self):
+        self.ctl.config = PolicyConfig(schedule_interval=8, overprovision=0)
+        self.priority.update(short=0, ending=1, long=2)
+        short = Group("short", True)
+        short.sampling_params.max_tokens = 1
+        ending = Group("ending")
+        ending.seq.get_output_len = lambda: 31
+        long = Group("long")
+        self.s.waiting.append(short)
+        self.s.running.extend((ending, long))
+        slots = []
+        self.s.block_manager.append_slots = lambda seq, lookahead: slots.append(lookahead) or []
+        PaperPlan(self.s, self.ctl, 3).next_step()
+        self.assertEqual(slots, [0, 0, 7])
 
     def test_first_nonfitting_request_ends_window_admission(self):
         self.ctl.config = PolicyConfig(schedule_interval=3, overprovision=0)

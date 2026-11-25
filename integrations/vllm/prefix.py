@@ -78,6 +78,25 @@ class ChunkedPrefixCache:
             computed = seq.data.get_num_computed_tokens()
             self._mark(seq, computed, computed + chunk_size)
 
+    def can_append_slots(self, group, lookahead):
+        # With full-context KV, completed shared prefix pages are immutable.
+        # Existing private pages have space for their tokens without a new
+        # allocation. Shared mutable pages still need copy-on-write capacity.
+        required = 0
+        size = self.block_size
+        for seq in group.get_seqs(status=SequenceStatus.RUNNING):
+            table = self.manager.block_tables[seq.seq_id]
+            needed_slots = seq.get_len() + lookahead
+            if needed_slots == table.num_full_slots:
+                continue
+            first = table.num_full_slots // size
+            end = (needed_slots + size - 1) // size
+            ids = table.physical_block_ids
+            required += max(0, end - len(ids))
+            required += sum(self.allocator._refcounter.get(block_id) > 1
+                            for block_id in ids[first:end])
+        return required <= self.manager.get_num_free_gpu_blocks()
+
     def reusable_tokens(self, seq):
         computed = seq.data.get_num_computed_tokens()
         block_size = self.block_size

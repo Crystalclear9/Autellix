@@ -120,12 +120,15 @@ class PaperPlan:
                     break
             return bool(inactive or suffix)
 
+        can_append_slots = (s.block_manager.can_append_slots if self.prefix_cache is None
+                            else self.prefix_cache.can_append_slots)
+
         def allocation_status(group, lookahead):
             if group in s.waiting:
                 return s.block_manager.can_allocate(group)
             if group in s.swapped:
                 return s.block_manager.can_swap_in(group, lookahead)
-            return (AllocStatus.OK if s.block_manager.can_append_slots(group, lookahead)
+            return (AllocStatus.OK if can_append_slots(group, lookahead)
                     else AllocStatus.LATER)
 
         if not self.keep_resident_kv:
@@ -208,7 +211,14 @@ class PaperPlan:
                 if groups and not self.chunked_prefill:
                     window.retain_prefix(index)
                 break
-            lookahead = window.remaining if rid not in self.reserved_slots and not partial else 0
+            lookahead = 0
+            if rid not in self.reserved_slots and not partial:
+                seq = group.get_seqs()[0]
+                # A prefill samples the first token without appending its KV.
+                # A decode appends one known token now. In either case the
+                # final sampled token never requires a cache slot.
+                remaining_outputs = group.sampling_params.max_tokens - seq.get_output_len()
+                lookahead = min(window.remaining - int(not prefill), max(0, remaining_outputs - 1))
             status = allocation_status(group, lookahead)
             if status != AllocStatus.OK:
                 # Send the current transfer with the admitted prefix and
@@ -240,8 +250,8 @@ class PaperPlan:
                     self.prepared.add(rid)
             # Reserve future KV capacity once per window. Subsequent append
             # calls commit actual token IDs / prefix-cache bookkeeping only.
-            if not s.block_manager.can_append_slots(group, lookahead):
-                if incoming or evict_for(index, lambda: s.block_manager.can_append_slots(group, lookahead)):
+            if not can_append_slots(group, lookahead):
+                if incoming or evict_for(index, lambda: can_append_slots(group, lookahead)):
                     return run_admitted()
                 if not groups:
                     raise RuntimeError("insufficient KV capacity for one scheduling window; reduce schedule_interval")

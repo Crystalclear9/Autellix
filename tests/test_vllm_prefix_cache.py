@@ -83,3 +83,26 @@ class PrefixCacheTests(unittest.TestCase):
         self.allocate(second, next_group)
         self.assertEqual(free_before - self.manager.get_num_free_gpu_blocks(), 1)
         self.assertEqual(prefix.reusable_tokens(second), 64)
+
+    def test_decode_can_fill_its_private_page_when_no_free_page_remains(self):
+        from vllm.core.block_manager_v2 import BlockSpaceManagerV2
+        from integrations.vllm.prefix import ChunkedPrefixCache
+
+        self.manager = BlockSpaceManagerV2(16, 2, 4, enable_caching=True)
+        prefix = ChunkedPrefixCache(self.manager)
+        seq, group = self.make_group(1, size=17)
+        self.allocate(seq, group)
+        self.assertEqual(self.manager.get_num_free_gpu_blocks(), 0)
+        seq.data.append_token_id(100, 0.)
+        self.assertFalse(self.manager.can_append_slots(group, 1))
+        self.assertTrue(prefix.can_append_slots(group, 1))
+        self.assertFalse(prefix.can_append_slots(group, 16))
+        self.assertEqual(self.manager.append_slots(seq, 1), [])
+        self.assertEqual(self.manager.get_num_free_gpu_blocks(), 0)
+
+        child, child_group = self.make_group(2, size=18)
+        from vllm.sequence import SequenceStatus
+        child.status = SequenceStatus.RUNNING
+        self.manager.fork(seq, child)
+        child.data.append_token_id(101, 0.)
+        self.assertFalse(prefix.can_append_slots(child_group, 0))
