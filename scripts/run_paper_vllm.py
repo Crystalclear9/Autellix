@@ -63,7 +63,7 @@ def main():
     parser.add_argument("--fused-swap", action="store_true", help="pack and unpack all CUDA KV layers with the fused kernel")
     parser.add_argument("--packed-host-kv", action="store_true", help="store host KV in contiguous whole blocks on one GPU")
     parser.add_argument("--reuse-decode-inputs", action="store_true",
-                        help="reuse FlashAttention inputs across stable single-GPU decode windows")
+                        help="reuse FlashAttention inputs across stable decode windows")
     parser.add_argument("--no-scheduler-trace", action="store_true", help="measure without per-step scheduler JSONL events")
     parser.add_argument("--cases", nargs="+", help="run only the listed cases")
     parser.add_argument("--label")

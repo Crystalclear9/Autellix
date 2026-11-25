@@ -107,7 +107,7 @@ class MatrixResumeTests(unittest.TestCase):
         with TemporaryDirectory() as directory:
             plan_path = Path(directory, "plan.json")
             output = Path(directory, "result.json")
-            plan_path.write_text(json.dumps(dict(model="8B", workload="sharegpt.json", device="3",
+            plan_path.write_text(json.dumps(dict(model="8B", workload="sharegpt.json", device="3,5;1,2",
                 rates=[.02], engine_args={}, cases=[dict(name="first", policy="plas"),
                                                   dict(name="second", policy="fcfs")])))
             argv = ["--plan", str(plan_path), "--output", str(output), "--resume", "--keep-going"]
@@ -115,9 +115,12 @@ class MatrixResumeTests(unittest.TestCase):
                        program_latency_seconds={"mean": 1})
             with (patch.object(matrix, "version", return_value="pinned"),
                   patch.object(matrix, "load_workloads", return_value=[{"program_id": "program"}]),
-                  patch.object(matrix.subprocess, "check_output", return_value=""),
+                  patch.object(matrix.subprocess, "check_output", return_value="") as gpu_status,
                   patch.object(matrix, "trial", side_effect=[RuntimeError("host KV exhausted"), row.copy()])):
                 self.assertEqual(matrix.main(argv), 1)
+            gpu_status.assert_called_once_with(
+                ["nvidia-smi", "-i", "3,5,1,2", "--query-compute-apps=pid", "--format=csv,noheader,nounits"],
+                text=True)
             self.assertEqual([x["condition"] for x in json.loads(output.read_text())], ["second"])
             errors = json.loads(output.with_name("result-failures.json").read_text())
             self.assertEqual([(e["condition"], e["error"]) for e in errors],

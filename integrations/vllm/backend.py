@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from importlib.metadata import version
 from time import perf_counter
 from types import MethodType
@@ -37,14 +38,16 @@ class VLLMBackend:
         if engine_args.get("pipeline_parallel_size", 1) != 1:
             raise ValueError("pipeline parallelism is not supported; use tensor parallelism")
         tp = engine_args.get("tensor_parallel_size", 1)
-        if packed_host_kv and (not paper or tp != 1 or not batched_swap):
-            raise ValueError("packed host KV requires single-GPU paper mode with batched swap")
-        if reuse_decode_inputs and (not paper or tp != 1):
-            raise ValueError("decode input reuse requires single-GPU paper mode")
+        if packed_host_kv and (not paper or not batched_swap):
+            raise ValueError("packed host KV requires paper mode with batched swap")
+        if reuse_decode_inputs and not paper:
+            raise ValueError("decode input reuse requires paper mode")
         if "num_scheduler_steps" in engine_args and engine_args["num_scheduler_steps"] != config.schedule_interval:
             raise ValueError("num_scheduler_steps must match PolicyConfig.schedule_interval")
         if engine_args.get("enable_chunked_prefill", False) and not native and not paper:
             raise ValueError("chunked prefill is not supported by this pinned integration")
+        if native and tp > 1:
+            os.environ.setdefault("VLLM_WORKER_MULTIPROC_METHOD", "spawn")
         from vllm.engine.arg_utils import EngineArgs
         from vllm.engine.llm_engine import LLMEngine
         import torch
@@ -76,8 +79,9 @@ class VLLMBackend:
             args["enable_chunked_prefill"] = True
             args.setdefault("max_num_batched_tokens", max(args.get("max_model_len", 2048), capacity + config.overprovision))
         if packed_host_kv:
-            from .executor import AutellixPackedHostGPUExecutor
-            args["distributed_executor_backend"] = AutellixPackedHostGPUExecutor
+            from .executor import AutellixPackedHostGPUExecutor, AutellixPackedHostMPExecutor
+            args["distributed_executor_backend"] = (
+                AutellixPackedHostGPUExecutor if tp == 1 else AutellixPackedHostMPExecutor)
         elif tp > 1 and not native:
             from .executor import AutellixFusedSwapMPExecutor, AutellixMPExecutor, AutellixNativeSwapMPExecutor
             executor = AutellixFusedSwapMPExecutor if fused_swap else AutellixMPExecutor

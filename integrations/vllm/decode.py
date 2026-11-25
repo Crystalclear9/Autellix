@@ -9,6 +9,7 @@ def attach_decode_inputs(runner, plan, controller):
     from vllm.utils import async_tensor_h2d
 
     original = runner.prepare_model_input
+    # The TP driver advances its tensors before the normal worker broadcast.
     cached_input = None
     previous_batch = None
     previous_lengths = None

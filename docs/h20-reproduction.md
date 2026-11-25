@@ -200,6 +200,9 @@ Autellix 测 `.24 .72 1.44` 程序/秒，各组设相同的 KV 和活动批次�
 分别从 0.100 增至 0.767、从 0.078 增至 0.644 程序/秒。在相同 0.75 程序/秒到达率下，
 vLLM-opt 与 Autellix 在窗口内分别完成 67 和 73 个程序，平均延迟分别为 52.76 和
 34.77 毫秒/token。
+启用输入复用和连续主机 KV 后，在同一张 H20 上用种子 2027 重测两个档位。
+基础 vLLM 与 Autellix 在 90 秒内分别完成 9 和 70 个程序，平均归一化延迟为
+62.95 和 31.62 毫秒/token。两组均低于 100 毫秒/token，实际窗口完成率相差 7.78 倍。
 新检查点同时记录运行代码和输入轨迹的 SHA-256，续跑时校验已记录的版本。
 汇总命令可直接读取 `results.json.gz` 压缩检查点。
 图 12、13 的单卡套件也可用 `--graph-context 32768` 为各 vLLM 组统一 CUDA Graph
@@ -332,16 +335,33 @@ LATS 的组间依赖与就绪时间沿用原轨迹，所有对照组使用同一
 随后把同一份轨迹传给各调度组。
 要测候补用尽之后的空槽成本，使用 `--autellix-idle-refill` 加入独立对照。
 它沿用活动槽数、驻留候补和窗口长度，在窗口仍有空槽时按当前优先级补位。
-`--reuse-decode-inputs` 在单卡 vLLM 的 PLAS、ATLAS、MLFQ 和同路径 FCFS 中启用 GPU 输入复用。
+`--reuse-decode-inputs` 在 vLLM 的 PLAS、ATLAS、MLFQ 和同路径 FCFS 中启用 GPU 输入复用。
 同一纯解码批次连续执行时，FlashAttention 在设备上推进 token、位置和 KV 槽位。
+张量并行时由主执行进程推进输入，再沿用 vLLM 的张量广播。
+张量并行的原生基线以 spawn 启动 CUDA worker。`--packed-host-kv` 在每个张量并行分片内
+连续存放主机 KV，并用同一套换出与恢复接口。
 批次成员、块表或 CUDA Graph 适用范围变化时重新构造输入。GPU 回归覆盖三请求批次中的
 填充槽、KV 页边界、部分请求提前完成以及跨越 CUDA Graph 上下文上限。
+8B 在线小样本使用单张 H20，逐调用核对输入和输出长度。下表比较 vLLM-opt 与开启输入复用的
+Autellix。BFCL 延迟取 30 秒预热后的 90 秒到达窗口，其余采用完整回放。
+
+| 负载 | 程序数 | 吞吐（token/s） | 平均延迟（毫秒/token） | P95（毫秒/token） |
+| --- | ---: | ---: | ---: | ---: |
+| ShareGPT | 64 | 557.09 → 560.58 | 21.11 → 16.06 | 52.57 → 25.82 |
+| BFCL | 99 | 365.69 → 384.48 | 51.67 → 33.46 | 85.86 → 49.96 |
+| LATS | 6 | 720.65 → 745.05 | 5.48 → 5.29 | 6.33 → 6.06 |
+| Mixed | 36 | 743.66 → 758.91 | 21.84 → 20.56 | 37.15 → 31.63 |
+
+ShareGPT 的 Autellix 无复用组为 536.11 token/s。BFCL 窗口内，vLLM-opt 完成 68 个程序，
+Autellix 与 MLFQ 均完成 73 个。MLFQ 的 P95 为 48.27 毫秒/token。
 
 32B 扩展对照可通过 `--sharegpt-trace`、`--bfcl-trace`、`--lats-trace` 和 `--mixed-trace`
 使用 Qwen3 的输入 token。LATS 可将 8B 采集的 HotpotQA 搜索记录传给
 `prepare_h20_qwen32.py --lats-trace`，以 Qwen3 对话模板重新编码，并保留分支、依赖及生成长度。
 单 H20 上的 32B vLLM 组使用 `--batch-size 8 --kv-tokens 65536 --qwen3-fused-qk-rope`，
 同一组原生对照和调度对照共用这些参数。
+共享目录的 Qwen3-14B 可沿用这套单卡配置。重编码核对 ShareGPT、BFCL、LATS 和 Mixed 后，
+复用的 3,552 条调用输入 token 与原 Qwen 轨迹一致。
 比较 BFCL 的 KV 容量时，可将 `--kv-tokens` 提到 `81920`，对 vLLM-opt、同路径 FCFS、
 MLFQ 和 PLAS 使用同一容量，并保持模型、到达轨迹、批次和前缀缓存设置一致。引擎日志同时记录
 GPU 前缀命中率、KV 占用和换出请求。
@@ -385,6 +405,10 @@ makespan、程序完成率和归一化程序延迟。
 `--autellix-kv-aware-admission` 加入按页预算的对照。接纳新 prefill 前，按已驻留调用的
 实际 KV 页和下一窗口的增长量预留容量，共享的活跃前缀页只按新增需求计入。可用
 `run_paper_vllm.py --kv-aware-admission` 和在途上限组合运行。
+8B 的紧 KV 组使用 128 个不同的 ShareGPT 程序和 32,768 个 GPU KV token。打开按页接纳后，
+Autellix 吞吐由 327.39 升至 367.45 token/s，同轮 vLLM-opt 为 372.35 token/s。
+采样中有调用换出的观测次数从 96 降至 26，程序归一化平均延迟为 130.29 毫秒/token，
+原生组为 151.73 毫秒/token。
 `--offline-active-programs 24` 对同一组离线对照限制同时向引擎提交的程序数。所有程序
 仍在零时刻到达，程序完成后释放名额，最外层排队时间继续计入 makespan 和程序延迟。
 8B 的 1,000 程序配对以种子 2026 无放回抽样，同一张 H20 依次运行两组。每组 5,968 次调用，

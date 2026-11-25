@@ -29,19 +29,6 @@ class BlockMajorHostCacheEngine(CacheEngine):
         return packed_host_swap(self.packed_gpu, self.host_blocks, mapping, to_host=True)
 
 
-class AutellixPackedHostWorker(Worker):
-    def _init_cache_engine(self):
-        cache = BlockMajorHostCacheEngine(self.cache_config, self.model_config,
-                                         self.parallel_config, self.device_config)
-        self.cache_engine = [cache]
-        self.gpu_cache = [cache.gpu_cache]
-
-
-class AutellixPackedHostGPUExecutor(GPUExecutor):
-    def _get_worker_module_and_class(self):
-        return __name__, AutellixPackedHostWorker.__name__, None
-
-
 class AutellixWorker(Worker):
     batched_swap = True
     fused_swap = False
@@ -66,6 +53,21 @@ class AutellixWorker(Worker):
         return model_input, worker_input, extract_previous_hidden_states(data)
 
 
+class AutellixPackedHostWorker(AutellixWorker):
+    batched_swap = False
+
+    def _init_cache_engine(self):
+        cache = BlockMajorHostCacheEngine(self.cache_config, self.model_config,
+                                         self.parallel_config, self.device_config)
+        self.cache_engine = [cache]
+        self.gpu_cache = [cache.gpu_cache]
+
+
+class AutellixPackedHostGPUExecutor(GPUExecutor):
+    def _get_worker_module_and_class(self):
+        return __name__, AutellixPackedHostWorker.__name__, None
+
+
 class AutellixNativeSwapWorker(AutellixWorker):
     batched_swap = False
 
@@ -87,3 +89,7 @@ class AutellixNativeSwapMPExecutor(AutellixMPExecutor):
 
 class AutellixFusedSwapMPExecutor(AutellixMPExecutor):
     worker_class = AutellixFusedSwapWorker
+
+
+class AutellixPackedHostMPExecutor(AutellixMPExecutor):
+    worker_class = AutellixPackedHostWorker

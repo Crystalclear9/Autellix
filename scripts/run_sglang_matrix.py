@@ -135,13 +135,15 @@ def main(argv=None):
     parser.add_argument("--plan", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--resume", action="store_true", help="reuse completed trials with unchanged inputs and settings")
-    parser.add_argument("--keep-going", action="store_true", help="record failed trials and continue on the assigned GPU")
+    parser.add_argument("--keep-going", action="store_true", help="record failed trials and continue on the assigned GPUs")
     args = parser.parse_args(argv)
     plan = json.loads(Path(args.plan).read_text())
     backend = plan.get("backend", "sglang")
     device = str(plan.get("device", "0"))
-    if args.keep_going and not device.isdecimal():
-        parser.error("--keep-going requires one physical GPU index")
+    physical_devices = device.replace(";", ",").split(",")
+    if (not all(index.isdecimal() for index in physical_devices)
+            or len({int(index) for index in physical_devices}) != len(physical_devices)):
+        parser.error("use distinct physical GPU indices across tensor ranks and replicas")
     if "layer_partition" in plan:
         os.environ["SGLANG_PP_LAYER_PARTITION"] = ",".join(map(str, plan["layer_partition"]))
     elif plan["engine_args"].get("pp_size", 1) == 1:
@@ -208,7 +210,7 @@ def main(argv=None):
                     write_checkpoint(failures_path, failures)
                     traceback.print_exc()
                     print(f"FAILED rate={rate} repeat={repeat} case={case['name']}", flush=True)
-                    pids = subprocess.check_output(["nvidia-smi", "-i", device.replace(";", ","), "--query-compute-apps=pid",
+                    pids = subprocess.check_output(["nvidia-smi", "-i", ",".join(physical_devices), "--query-compute-apps=pid",
                                                     "--format=csv,noheader,nounits"], text=True)
                     if any(pid.strip().isdecimal() for pid in pids.splitlines()):
                         raise RuntimeError(f"GPU {device} is still occupied after failed trial") from exc

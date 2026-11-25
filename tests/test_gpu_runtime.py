@@ -150,13 +150,14 @@ class RealInferenceTests(unittest.TestCase):
     @unittest.skipUnless(BACKEND == "vllm", "requires vllm")
     def test_reused_decode_inputs_match_across_page_and_graph_boundaries(self):
         policy = PolicyConfig(policy="fcfs", schedule_interval=8, overprovision=0)
+        device = os.environ.get("AUTELLIX_TEST_TP_DEVICES", DEVICE)
         args = dict(max_model_len=128, max_num_batched_tokens=192, max_num_seqs=3,
                     block_size=16, num_gpu_blocks_override=32, gpu_memory_utilization=VLLM_MEMORY,
                     swap_space=.25, dtype=VLLM_DTYPE, enforce_eager=False, max_seq_len_to_capture=64,
-                    paper_chunked_prefill=True)
+                    paper_chunked_prefill=True, tensor_parallel_size=len(device.split(",")))
         outputs = []
         for reuse in (False, True):
-            replicas = [ReplicaConfig("vllm", MODEL, device=DEVICE,
+            replicas = [ReplicaConfig("vllm", MODEL, device=device,
                                       engine_args=dict(args, reuse_decode_inputs=reuse))]
             with InferenceEngine(replicas, policy=policy) as engine:
                 sessions = [engine.start_session() for _ in range(3)]
@@ -285,7 +286,9 @@ class RealInferenceTests(unittest.TestCase):
         self.assertGreaterEqual(torch.cuda.device_count(), 2)
         devices = os.environ.get("AUTELLIX_TEST_TP_DEVICES", "0,1")
         args = dict(tensor_parallel_size=2, max_model_len=512, max_num_seqs=1,
-                    gpu_memory_utilization=.35, swap_space=.25, dtype="half",
+                    num_gpu_blocks_override=32,
+                    gpu_memory_utilization=VLLM_MEMORY, swap_space=.25, dtype=VLLM_DTYPE,
+                    packed_host_kv=os.environ.get("AUTELLIX_TEST_PACKED_HOST") == "1",
                     batched_swap=os.environ.get("AUTELLIX_TEST_TP_NATIVE_SWAP") != "1")
         policy = PolicyConfig(boundaries=(0, .001, .002, math.inf), quanta=(.0001, .0002, .0004),
                               schedule_interval=1, overprovision=0, beta=1e12)
