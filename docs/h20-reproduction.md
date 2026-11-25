@@ -5,6 +5,7 @@
 `/home/nice/qiuzeyu/stu/fjr/data/autellix`，环境为 `fjr` 的 `autellix-sglang`。
 SQLite、进程间通信和编译缓存使用每次运行独立创建的 `/tmp/fjr-autellix-*` 目录。完成后
 核对服务和 GPU 进程已退出，下载需要留存的计划与检查点，校验后清理对应的临时目录。
+收尾时分别检查计算节点和环境节点的 `/tmp`，并移除 Autellix 已失效的 tmux socket。
 
 2026-11-25 核对时，H20 持久部署目录的运行源码指纹对应 Git 提交 `22434db`。
 与本地 `main` 逐文件比较的 148 项中，111 项一致、36 项不同，缺少
@@ -18,6 +19,8 @@ SQLite、进程间通信和编译缓存使用每次运行独立创建的 `/tmp/f
 临时目录的输入，`manifest.json` 记录每个归档文件的 SHA-256。8B 在线、离线及 70B BFCL
 小样本的原始检查点位于归档中的 `fjr-autellix-paper-parity-20261125/`。
 使用检查点前可按需将归档解包到 `outputs/` 下的独立目录。
+2026-11-25 复查了归档内 259 个文件及最近一次 8B BFCL 的计划和检查点。
+计算节点和环境节点已清理本会话的实验临时目录、安装缓存和失效 socket。
 
 实验直接读取共享模型。8B 回放使用 `Meta-Llama-3.1-8B`，大模型配对使用
 `Meta-Llama-3.1-70B`，接口验证使用 `Llama-3.2-1B-Instruct`。四个工作负载使用从
