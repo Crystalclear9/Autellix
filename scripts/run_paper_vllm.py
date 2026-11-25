@@ -25,6 +25,8 @@ def main():
     parser.add_argument("--unique-programs", action="store_true", help="sample each source program at most once per trace")
     parser.add_argument("--rates", type=float, nargs="+")
     parser.add_argument("--batch-size", type=int, default=16)
+    parser.add_argument("--max-inflight-calls", type=int,
+                        help="limit the combined number of resident and swapped calls")
     parser.add_argument("--batch-tokens", type=int, default=32768)
     parser.add_argument("--kv-blocks", type=int, help="set identical GPU KV capacity in 16-token blocks")
     parser.add_argument("--swap-gib", type=float, default=32)
@@ -74,6 +76,8 @@ def main():
         parser.error("offline programs all arrive at time zero")
     if args.all_programs and args.experiment != "offline":
         parser.error("--all-programs requires an offline replay")
+    if args.max_inflight_calls is not None and args.max_inflight_calls < args.batch_size:
+        parser.error("in-flight limit must cover the active batch")
     count = args.programs if args.programs is not None else count
     if count < 1 or (args.workload == "mixed" and count % 3):
         parser.error("use a positive program count divisible by three for Mixed")
@@ -87,6 +91,8 @@ def main():
                                        "resident_decode_headroom", "exact_prefix_cache", "recompute_on_swap_full",
                                        "deduplicate_prefill", "packed_host_kv")
                if getattr(args, name)}
+    if args.max_inflight_calls is not None:
+        options["max_inflight_calls"] = args.max_inflight_calls
     if options:
         candidate["engine_args"] = options
     baselines = [dict(name=name, policy=name, interval=steps, engine_args={"preemption_mode": None}) for name, steps in (

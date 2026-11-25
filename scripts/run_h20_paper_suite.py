@@ -106,6 +106,10 @@ def build_plans(args):
                     if args.autellix_last_queue_fifo:
                         paired_cases.append(dict(case, name="autellix-last-queue-fifo", engine_args=options,
                                                  last_queue_fifo=True))
+                    if args.autellix_max_inflight_calls is not None:
+                        limit = args.autellix_max_inflight_calls
+                        paired_cases.append(dict(case, name=f"autellix-inflight-{limit}",
+                                                 engine_args=dict(options, max_inflight_calls=limit)))
                     if args.autellix_idle_refill:
                         paired_cases.append(dict(case, name="autellix-idle-refill",
                                                  engine_args=dict(options, refill_idle_slots=True)))
@@ -287,6 +291,8 @@ def main():
                         help="add an Autellix comparison arm with scaled service boundaries and unchanged quanta")
     parser.add_argument("--autellix-last-queue-fifo", action="store_true",
                         help="add an Autellix arm that keeps FIFO order in the lowest priority queue")
+    parser.add_argument("--autellix-max-inflight-calls", type=int,
+                        help="add an Autellix arm with a shared limit on resident and swapped calls")
     parser.add_argument("--autellix-idle-refill", action="store_true",
                         help="add an Autellix comparison arm that refills vacancies after its resident reserve")
     parser.add_argument("--qwen3-fused-qk-rope", action="store_true", help="enable Qwen3 fusion in every vLLM arm")
@@ -329,6 +335,8 @@ def main():
     if args.autellix_boundary_scale is not None and (
             not math.isfinite(args.autellix_boundary_scale) or args.autellix_boundary_scale <= 0):
         parser.error("Autellix boundary scale must be finite and positive")
+    if args.autellix_max_inflight_calls is not None and args.autellix_max_inflight_calls < args.batch_size:
+        parser.error("Autellix in-flight limit must cover the active batch")
     if args.batch_tokens < args.batch_size + 16:
         parser.error("vLLM chunk budget must hold one KV block and one token per active sequence")
     if not 1 <= args.graph_context <= 32768:

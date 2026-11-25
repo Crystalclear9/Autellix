@@ -13,7 +13,7 @@ class SchedulingWindow:
         self.active = set()
         self.reserve = set()
 
-    def select(self, available, resident):
+    def select(self, available, resident, *, new_admissions=None):
         ctl = self.controller
         available = set(available)
         if not available:
@@ -22,21 +22,30 @@ class SchedulingWindow:
         resident = set(resident)
         cohort = [rid for rid in self.cohort if rid in available]
         boundary = self.remaining == 0 or not cohort
+
+        def choose(count, candidates, retained=()):
+            if new_admissions is not None:
+                waiting, slots = new_admissions
+                budget = slots - len(waiting.intersection(retained))
+                fresh = nsmallest(budget, candidates & waiting, key=ctl.key)
+                candidates = (candidates - waiting).union(fresh)
+            return nsmallest(count, candidates, key=ctl.key)
+
         if boundary:
             ctl.refresh()
             reserve_size = ctl.config.overprovision
             if self.resident_reserve_only:
-                cohort = nsmallest(self.capacity, available, key=ctl.key)
+                cohort = choose(self.capacity, available)
                 cohort.extend(nsmallest(reserve_size, (available & resident).difference(cohort), key=ctl.key))
             else:
-                cohort = nsmallest(self.capacity + reserve_size, available, key=ctl.key)
+                cohort = choose(self.capacity + reserve_size, available)
             self.remaining = ctl.config.schedule_interval
             self.capacity_limited = False
             ctl.emit("schedule_window", requests=cohort, decode_steps=self.remaining)
         elif (self.refill_idle_slots and len(cohort) < self.capacity
               and (not self.capacity_limited or len(cohort) < len(self.cohort))):
             spare = self.capacity - len(cohort)
-            refill = nsmallest(spare, available.difference(cohort), key=ctl.key)
+            refill = choose(spare, available.difference(cohort), cohort)
             if refill:
                 # A completion can free KV after a failed admission. Retry
                 # only after that change and preserve the surviving order.

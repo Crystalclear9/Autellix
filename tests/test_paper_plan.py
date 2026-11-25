@@ -67,6 +67,31 @@ class PaperPlanTests(unittest.TestCase):
         self.assertEqual([g.seq_group.request_id for g in out.scheduled_seq_groups], ["high"])
         self.assertEqual(len(self.s.waiting), 1)
 
+    def test_inflight_limit_counts_swap_and_reopens_admission_on_completion(self):
+        self.ctl.config = PolicyConfig(schedule_interval=3, overprovision=0)
+        self.priority.update(fresh=0, active=1, swapped=2)
+        running = Group("active")
+        self.s.running.append(running)
+        self.s.swapped.append(Group("swapped"))
+        self.s.waiting.append(Group("fresh", True))
+        plan = PaperPlan(self.s, self.ctl, 1, keep_resident_kv=True, max_inflight_calls=2)
+        first = plan.next_step()
+        self.assertEqual([g.seq_group.request_id for g in first.scheduled_seq_groups], ["active"])
+        self.s.running.remove(running)
+        second = plan.next_step()
+        self.assertEqual([g.seq_group.request_id for g in second.scheduled_seq_groups], ["fresh"])
+
+    def test_inflight_limit_reserves_slots_for_unadmitted_window_members(self):
+        from autellix.runtime.window import SchedulingWindow
+
+        self.ctl.config = PolicyConfig(schedule_interval=3, overprovision=0)
+        self.priority.update(active=0, fresh=1, other=2)
+        window = SchedulingWindow(self.ctl, 2, refill_idle_slots=True)
+        window.select(["active", "fresh", "other"], {"active"}, new_admissions=({"fresh", "other"}, 1))
+        self.assertEqual(window.cohort, ["active", "fresh"])
+        window.select(["fresh", "other"], set(), new_admissions=({"fresh", "other"}, 1))
+        self.assertEqual(window.cohort, ["fresh"])
+
     def test_completed_prefix_only_consumes_uncached_forward_budget(self):
         self.ctl.config = PolicyConfig(overprovision=0)
         fresh, decode = Group("fresh", True), Group("decode")

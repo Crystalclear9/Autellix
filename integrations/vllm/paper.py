@@ -10,7 +10,8 @@ from autellix.runtime.window import SchedulingWindow
 class PaperPlan:
     def __init__(self, scheduler, controller, capacity, keep_resident_kv=False, refill_idle_slots=False,
                  chunked_prefill=False, resident_reserve_only=False, recompute_on_swap_full=False,
-                 resident_decode_headroom=False, prefix_cache=None, deduplicate_prefill=False):
+                 resident_decode_headroom=False, prefix_cache=None, deduplicate_prefill=False,
+                 max_inflight_calls=None):
         self.scheduler, self.controller = scheduler, controller
         self.window = SchedulingWindow(controller, capacity, refill_idle_slots=refill_idle_slots,
                                        resident_reserve_only=resident_reserve_only)
@@ -20,6 +21,7 @@ class PaperPlan:
         self.resident_decode_headroom = resident_decode_headroom
         self.prefix_cache = prefix_cache
         self.deduplicate_prefill = deduplicate_prefill and prefix_cache is not None
+        self.max_inflight_calls = max_inflight_calls
         self.prepared = set()
         self.reserved_slots = set()
 
@@ -91,7 +93,13 @@ class PaperPlan:
         boundary = window.remaining == 0 or not any(r in by_id for r in window.cohort)
         if boundary:
             self.reserved_slots.clear()
-        chosen, resident = window.select(by_id, self.prepared & running.keys())
+        new_admissions = None
+        if self.max_inflight_calls is not None:
+            # GPU-resident and swapped calls share one admission budget.
+            waiting = {group.request_id for group in s.waiting}
+            slots = self.max_inflight_calls - len(running) - len(s.swapped)
+            new_admissions = waiting, slots
+        chosen, resident = window.select(by_id, self.prepared & running.keys(), new_admissions=new_admissions)
         self.prepared.intersection_update(by_id)
 
         def evict(group):

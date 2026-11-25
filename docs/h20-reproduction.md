@@ -357,6 +357,9 @@ makespan、程序完成率和归一化程序延迟。
 图 16 的 vLLM Autellix 可用 `--recompute-on-swap-full` 补跑主机 KV 空间耗尽的配置。
 主机块充足时沿用换出，空间耗尽时释放被抢占请求的 GPU KV，并在再次调度时按已有 token 重建。
 补跑沿用原轨迹、GPU KV 容量和批次上限，使用独立输出目录保留原始失败记录。
+`--autellix-max-inflight-calls 24` 加入离线接纳对照，合计限制已有 GPU KV 及主机换出 KV 的调用数。
+每次有调用结束并释放名额时，按 PLAS 或 ATLAS 优先级接纳新调用。活动批次上限独立设置。
+`run_paper_vllm.py --max-inflight-calls 24` 可在同一个离线计划里配合 `--packed-host-kv` 使用。
 
 ShareGPT 的 4,000 条回放含 23,575 次调用，平均输出 279 token、带完整历史的平均输入
 2,962 token。BFCL 回放使用官方 v3 工具循环已采集的输入和输出长度，推理引擎统一使用

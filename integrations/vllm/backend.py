@@ -22,7 +22,7 @@ class VLLMBackend:
                  resident_decode_headroom: bool = False, qwen3_fused_qk_rope: bool = False,
                  exact_prefix_cache: bool | None = None, completion_only: bool = False,
                  min_decode_steps: int = 0, deduplicate_prefill: bool = False,
-                 packed_host_kv: bool = False, **engine_args):
+                 packed_host_kv: bool = False, max_inflight_calls: int | None = None, **engine_args):
         if version("vllm") != "0.6.1":
             raise RuntimeError("this backend requires vllm==0.6.1")
         config = config or PolicyConfig()
@@ -61,6 +61,9 @@ class VLLMBackend:
         # mode uses our policy window plus native per-step tensor/block updates.
         refill_mode = (paper or config.overprovision > 0 or tp > 1) and not native
         capacity = args["max_num_seqs"]
+        if max_inflight_calls is not None and (
+                not paper or type(max_inflight_calls) is not int or max_inflight_calls < capacity):
+            raise ValueError("max_inflight_calls requires paper mode and must cover the active batch")
         args["num_scheduler_steps"] = 1 if refill_mode else config.schedule_interval
         if refill_mode:
             args["max_num_seqs"] = capacity + config.overprovision
@@ -113,7 +116,8 @@ class VLLMBackend:
                                                       recompute_on_swap_full=recompute_on_swap_full,
                                                       resident_decode_headroom=resident_decode_headroom,
                                                       prefix_cache=prefix_cache,
-                                                      deduplicate_prefill=deduplicate_prefill)
+                                                      deduplicate_prefill=deduplicate_prefill,
+                                                      max_inflight_calls=max_inflight_calls)
             self.scheduler._autellix_window = self.scheduler._autellix_paper.window
         worker = self.engine.model_executor.driver_worker
         if tp == 1 and batched_swap and not native and not packed_host_kv:
