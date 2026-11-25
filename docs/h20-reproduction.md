@@ -355,6 +355,20 @@ Autellix。BFCL 延迟取 30 秒预热后的 90 秒到达窗口，其余采用�
 ShareGPT 的 Autellix 无复用组为 536.11 token/s。BFCL 窗口内，vLLM-opt 完成 68 个程序，
 Autellix 与 MLFQ 均完成 73 个。MLFQ 的 P95 为 48.27 毫秒/token。
 
+Llama-3.1-70B 的 BFCL 小样本使用两张 H20、BF16、TP=2、8 个活动槽和 65,536 个 GPU
+KV token。三组按同一条每秒 0.48 程序的到达轨迹回放 12 个程序，每组完成 131 次调用，
+共输入 1,023,260 个 token、输出 4,751 个 token。另用双卡真实生成验证了输入复用、
+连续主机 KV 换出与恢复，以及逐 token 的生成一致性。
+
+| 70B BFCL | 整批耗时（秒） | 吞吐（token/s） | 平均延迟（毫秒/token） | P95（毫秒/token） |
+| --- | ---: | ---: | ---: | ---: |
+| 基础 vLLM | 617.35 | 7.70 | 1,244.87 | 1,832.10 |
+| vLLM-opt | 72.90 | 65.17 | 170.40 | 342.40 |
+| Autellix | 68.37 | 69.49 | 162.90 | 357.55 |
+
+Autellix 相对基础 vLLM 的整批完成率为 9.03 倍。相对 vLLM-opt，吞吐提高 6.6%，
+平均归一化延迟下降 4.4%，P95 增加 4.4%。
+
 32B 扩展对照可通过 `--sharegpt-trace`、`--bfcl-trace`、`--lats-trace` 和 `--mixed-trace`
 使用 Qwen3 的输入 token。LATS 可将 8B 采集的 HotpotQA 搜索记录传给
 `prepare_h20_qwen32.py --lats-trace`，以 Qwen3 对话模板重新编码，并保留分支、依赖及生成长度。
