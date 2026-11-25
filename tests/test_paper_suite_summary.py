@@ -1,6 +1,7 @@
 import copy
 import gzip
 import importlib.util
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -84,6 +85,17 @@ class PaperSuiteSummary(unittest.TestCase):
         self.assertIsNone(means[0]["maximum_tested_offered_programs_per_second"][arm])
         self.assertEqual(means[1]["arrival_window_completed_programs_per_second"][arm], 2 / 15)
         self.assertEqual(means[1]["completion_rates_at_maximum_offered"][arm]["mean_backlog_change"], 0)
+        legacy = summary.summarize([native], slo_targets=(2.5, 3.))
+        self.assertIsNone(legacy["slo_points"][0]["maximum_tested_rate_meeting_latency"]["sglang-native"])
+        self.assertEqual(legacy["observed_slo_points"][1]["maximum_arrival_window_completion_rate"]
+                         ["mean"]["sglang-native"], 2 / 15)
+
+    def test_compressed_trial_checkpoint(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory, "results.json.gz")
+            with gzip.open(path, "wt", encoding="utf-8") as stream:
+                json.dump(self.records(), stream)
+            self.assertEqual(summary.load_trial_rows(path), self.records())
 
     def test_first_batch_wait_uses_submission_order(self):
         row = self.records()[1]

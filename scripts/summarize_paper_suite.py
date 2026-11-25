@@ -1,6 +1,7 @@
 """Summarize complete paired paper-workload trials and arrival-window behavior."""
 import argparse
 from collections import Counter, defaultdict
+import gzip
 import hashlib
 import json
 from pathlib import Path
@@ -80,6 +81,12 @@ def metrics(row):
     token_times, paper_metric = paper_token_latencies(row)
     arrivals, completed = row["arrival_times"], row["program_completion_times"]
     horizon = row["arrival_horizon_seconds"]
+    window = steady_state_window(row, token_times)
+    measured = window.get("steady_state_window", {})
+    start = measured.get("start_seconds", 0.)
+    completion_rate = row["completions_during_arrivals"] / horizon if horizon > 0 else None
+    if measured:
+        completion_rate = measured["completed_programs_per_second"]
     checkpoints = []
     for index in range(1, 11):
         at = horizon * index / 10
@@ -121,14 +128,14 @@ def metrics(row):
                 arrival_horizon_seconds=horizon, drain_seconds=row["drain_seconds"],
                 observed_offered_programs_per_second=observed_arrival_rate(row),
                 completions_during_arrivals=row["completions_during_arrivals"],
-                arrival_window_completed_programs_per_second=(row["completions_during_arrivals"] / horizon
-                                                              if horizon > 0 else None),
+                arrival_window_seconds=horizon - start,
+                arrival_window_completed_programs_per_second=completion_rate,
                 arrival_window_token_latencies=[token_times[pid] for pid, at in completed.items()
-                                                if at <= horizon],
+                                                if start < at <= horizon],
                 maximum_submission_lag_seconds=max(row["first_submission_lag_seconds"].values()),
                 arrival_quartiles=quartiles, backlog_checkpoints=checkpoints,
                 calls_by_engine=dict(Counter(c["engine_id"] for c in row["calls"])), gpu=gpu,
-                **cache, **first_call_waits(row["calls"]), **steady_state_window(row, token_times))
+                **cache, **first_call_waits(row["calls"]), **window)
 
 
 def slo_capacity(grouped, stat, target):
@@ -386,14 +393,21 @@ def summarize(records, slo_targets=DEFAULT_SLO_TARGETS):
             configurations[trial["workload"], trial["model"], ranks, tuple(sorted(trial["versions"].items()))].append(trial)
     slo_points = []
     tail_slo_points = []
+
+    def meets_latency(row, stat, target):
+        window = row.get("steady_state_window")
+        latencies = window["token_latency"] if window else row["paper_token_latency"]
+        return latencies[stat] is not None and latencies[stat] <= target
+
     for (workload, model, ranks, versions), selected in sorted(configurations.items()):
         by_condition_and_rate = defaultdict(lambda: defaultdict(list))
         for trial in selected:
             by_condition_and_rate[trial["condition"]][trial["rate"]].append(trial)
+
         for target in slo_targets:
             qualified = {
                 condition: {rate: rows for rate, rows in rates.items()
-                            if all(row["paper_token_latency"]["mean"] <= target for row in rows)}
+                            if all(meets_latency(row, "mean", target) for row in rows)}
                 for condition, rates in sorted(by_condition_and_rate.items())}
             slo_points.append(dict(workload=workload, model=model, ranks_per_replica=ranks, versions=dict(versions),
                                    mean_seconds_per_output_token_target=target,
@@ -408,7 +422,7 @@ def summarize(records, slo_targets=DEFAULT_SLO_TARGETS):
                 observed = {}
                 for condition, rates in by_condition_and_rate.items():
                     matches = [rows for rows in rates.values()
-                               if all(row["paper_token_latency"][statistic] <= target for row in rows)]
+                               if all(meets_latency(row, statistic, target) for row in rows)]
                     observed[condition] = max((statistics.mean(row["arrival_window_completed_programs_per_second"]
                                                                for row in rows) for rows in matches
                                                if all(row["arrival_window_completed_programs_per_second"] is not None
@@ -420,8 +434,8 @@ def summarize(records, slo_targets=DEFAULT_SLO_TARGETS):
                                         maximum_arrival_window_goodput={
                                             condition: max((statistics.mean(
                                                 sum(v is not None and v <= target for v in row["arrival_window_token_latencies"])
-                                                / row["arrival_horizon_seconds"] for row in rows)
-                                                for rows in rates.values() if all(row["arrival_horizon_seconds"] > 0
+                                                / row["arrival_window_seconds"] for row in rows)
+                                                for rows in rates.values() if all(row["arrival_window_seconds"] > 0
                                                                                  for row in rows)), default=None)
                                             for condition, rates in by_condition_and_rate.items()}))
     for trial in trials:
@@ -429,6 +443,13 @@ def summarize(records, slo_targets=DEFAULT_SLO_TARGETS):
     return dict(trials=trials, comparisons=comparisons, slo_points=slo_points, observed_slo_points=tail_slo_points,
                 paper_matrix=paper_matrix(records, slo_targets),
                 slo_definition="Largest measured offered rate with mean program token latency within target in every measured repeat; completed rates average repeats at each rate. Finite-trace backlog and drain are reported separately.")
+
+
+def load_trial_rows(path):
+    path = Path(path)
+    with (gzip.open(path, "rt", encoding="utf-8") if path.suffix == ".gz"
+          else path.open(encoding="utf-8")) as stream:
+        return json.load(stream)
 
 
 def main():
@@ -439,7 +460,7 @@ def main():
                         help="mean program seconds per token targets")
     parser.add_argument("--matrix-only", action="store_true", help="join figure results across separate runs")
     args = parser.parse_args()
-    rows = (row for file in args.inputs for row in json.loads(Path(file).read_text(encoding="utf-8")))
+    rows = (row for file in args.inputs for row in load_trial_rows(file))
     result = paper_matrix(rows, slo_targets=args.slo) if args.matrix_only else summarize(list(rows), slo_targets=args.slo)
     Path(args.output).write_text(json.dumps(result, indent=2), encoding="utf-8")
     print(json.dumps(result["comparisons"], indent=2))
