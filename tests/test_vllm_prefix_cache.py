@@ -28,8 +28,10 @@ class PrefixCacheTests(unittest.TestCase):
         first, group = self.make_group(1)
         second, other = self.make_group(2)
         self.allocate(first, group)
+        self.assertEqual(list(self.manager.get_common_computed_block_ids([first])), [])
         self.manager.mark_blocks_as_computed(group, 16)
         first.data.update_num_computed_tokens(16)
+        self.assertEqual(len(self.manager.get_common_computed_block_ids([first])), 1)
         self.assertEqual(self.prefix.reusable_tokens(second), 16)
         self.allocate(second, other)
         self.assertEqual(len(self.manager.get_common_computed_block_ids([second])), 1)
@@ -107,11 +109,12 @@ class PrefixCacheTests(unittest.TestCase):
         self.assertEqual(prefix.reusable_tokens(second), 64)
 
     def test_releasing_lookahead_keeps_only_token_backed_pages(self):
-        seq, group = self.make_group(1, size=17)
+        seq, group = self.make_group(1, size=32)
         self.allocate(seq, group)
-        self.manager.mark_blocks_as_computed(group, 16)
-        seq.data.update_num_computed_tokens(16)
+        self.manager.mark_blocks_as_computed(group, 32)
+        seq.data.update_num_computed_tokens(32)
         self.manager.append_slots(seq, 32)
+        self.assertEqual(len(self.manager.get_common_computed_block_ids([seq])), 2)
         allocated = self.manager.get_block_table(seq).copy()
         before = self.manager.get_num_free_gpu_blocks()
         self.assertEqual(len(allocated), 4)
@@ -120,6 +123,25 @@ class PrefixCacheTests(unittest.TestCase):
         self.assertEqual(len(self.manager.get_common_computed_block_ids([seq])), 1)
         self.assertEqual(self.manager.get_num_free_gpu_blocks(), before + 2)
         self.assertEqual(self.prefix.release_lookahead(group), 0)
+
+    def test_swap_admission_counts_the_next_token_after_a_full_page(self):
+        from vllm.core.block_manager_v2 import BlockSpaceManagerV2
+        from vllm.core.interfaces import AllocStatus
+        from vllm.sequence import SequenceStatus
+        from integrations.vllm.prefix import ChunkedPrefixCache
+
+        self.manager = BlockSpaceManagerV2(16, 2, 4, enable_caching=True)
+        prefix = ChunkedPrefixCache(self.manager)
+        seq, group = self.make_group(1, size=32)
+        self.allocate(seq, group)
+        self.manager.mark_blocks_as_computed(group, 32)
+        seq.data.update_num_computed_tokens(32)
+        self.manager.swap_out(group)
+        seq.status = SequenceStatus.SWAPPED
+        self.assertEqual(prefix.can_swap_in(group, 0), AllocStatus.OK)
+        seq.data.append_token_id(100, 0.)
+        self.assertEqual(self.manager.can_swap_in(group, 0), AllocStatus.OK)
+        self.assertEqual(prefix.can_swap_in(group, 0), AllocStatus.NEVER)
 
     def test_decode_can_fill_its_private_page_when_no_free_page_remains(self):
         from vllm.core.block_manager_v2 import BlockSpaceManagerV2

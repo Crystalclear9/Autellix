@@ -137,6 +137,8 @@ class PaperPlan:
             if group in s.waiting:
                 return s.block_manager.can_allocate(group)
             if group in s.swapped:
+                if self.prefix_cache is not None:
+                    return self.prefix_cache.can_swap_in(group, lookahead)
                 return s.block_manager.can_swap_in(group, lookahead)
             return (AllocStatus.OK if can_append_slots(group, lookahead)
                     else AllocStatus.LATER)

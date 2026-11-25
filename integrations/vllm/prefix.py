@@ -15,6 +15,7 @@ class ChunkedPrefixCache:
         swap_in = manager.swap_in
         swap_out = manager.swap_out
         can_allocate = manager.can_allocate
+        tracker = manager._computed_blocks_tracker
 
         def release(block):
             block_id = block.block_id
@@ -27,7 +28,7 @@ class ChunkedPrefixCache:
                 free_block(block)
 
         def contiguous(previous, block_ids, skip_last_block_id=True):
-            end = len(block_ids) - int(skip_last_block_id)
+            end = max(0, len(block_ids) - int(skip_last_block_id))
             if len(previous) > end:
                 del previous[end:]
             for i in range(len(previous), end):
@@ -35,6 +36,12 @@ class ChunkedPrefixCache:
                     break
                 previous.append(block_ids[i])
             return previous
+
+        def computed_prefix(seq_id, block_ids):
+            # A gap in a chunked prefill can be filled in a subsequent
+            # forward. Revisit the first uncomputed page on every lookup.
+            previous, _ = tracker._cached_computed_seq_blocks[seq_id]
+            return contiguous(previous, block_ids)
 
         def valid_sources(group, status, device):
             sources = set()
@@ -71,7 +78,6 @@ class ChunkedPrefixCache:
                     if allocator._cached_blocks.get(content_hash) == gpu_id and allocator.block_is_computed(gpu_id):
                         continue
                 restored.append((src, dest))
-            tracker = manager._computed_blocks_tracker
             for seq in group.get_seqs(status=SequenceStatus.SWAPPED):
                 tracker.remove_seq(seq.seq_id)
                 tracker.add_seq(seq.seq_id)
@@ -93,6 +99,7 @@ class ChunkedPrefixCache:
 
         allocator._free_block_id = release
         allocator.get_computed_block_ids = contiguous
+        tracker.get_cached_computed_blocks_and_update = computed_prefix
         manager.mark_blocks_as_computed = self.mark
         manager.swap_in = restore
         manager.swap_out = save
@@ -146,6 +153,20 @@ class ChunkedPrefixCache:
                 released += len(blocks) - used
                 table.update(blocks[:used])
         return released
+
+    def can_swap_in(self, group, lookahead):
+        manager = self.manager
+        required = 0
+        for seq in group.get_seqs(status=SequenceStatus.SWAPPED):
+            blocks = manager.block_tables[seq.seq_id].blocks
+            needed = (seq.get_len() + lookahead + self.block_size - 1) // self.block_size
+            required += manager.block_allocator.get_num_blocks_touched(blocks, Device.GPU)
+            required += max(0, needed - len(blocks))
+        if required > manager.num_total_gpu_blocks:
+            return AllocStatus.NEVER
+        if required + manager.watermark_blocks > manager.get_num_free_gpu_blocks():
+            return AllocStatus.LATER
+        return AllocStatus.OK
 
     def reusable_tokens(self, seq):
         computed = seq.data.get_num_computed_tokens()
