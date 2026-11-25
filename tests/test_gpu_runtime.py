@@ -121,6 +121,20 @@ class RealInferenceTests(unittest.TestCase):
         self.assertEqual(*outputs)
 
     @unittest.skipUnless(BACKEND == "vllm", "requires vllm")
+    def test_decode_window_uses_last_private_kv_page(self):
+        args = dict(max_model_len=64, max_num_batched_tokens=64, max_num_seqs=1,
+                    block_size=16, num_gpu_blocks_override=4, gpu_memory_utilization=VLLM_MEMORY,
+                    swap_space=.25, dtype=VLLM_DTYPE, paper_chunked_prefill=True)
+        config = PolicyConfig(policy="plas", schedule_interval=8, overprovision=0)
+        with InferenceEngine([ReplicaConfig("vllm", MODEL, device=DEVICE, engine_args=args)],
+                             policy=config, scheduler_trace=False) as engine:
+            pid = engine.start_session()
+            result = engine.submit(pid, input_ids=[21] * 61,
+                                   sampling=dict(temperature=0, max_tokens=3, ignore_eos=True)).result(180)
+            self.assertEqual(result["completion_tokens"], 3)
+            engine.end_session(pid)
+
+    @unittest.skipUnless(BACKEND == "vllm", "requires vllm")
     def test_full_prefill_chunk_preserves_resident_decode(self):
         args = dict(max_model_len=512, max_num_batched_tokens=32, max_num_seqs=2,
                     gpu_memory_utilization=.35, swap_space=.25, dtype="half",

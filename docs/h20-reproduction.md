@@ -172,8 +172,12 @@ prefill 且关闭前缀缓存。vLLM 0.6.1 的分块 prefill 和原生多步执�
 对照通过目标的最高实测输入速率，并同时检查到达窗口内的完成率和整段回放完成率。
 `fcfs-combined` 保留分块 prefill、精确前缀 KV 和多步窗口，使用 FCFS 排队。
 它与 MLFQ、PLAS 和 ATLAS 共用执行路径，便于比较调度策略。
-测量原生路径时分别查看 `vllm-opt` 和 `vllm-opt-multistep`。
+原生 vLLM 0.6.1 将分块 prefill 和多步调度设为互斥。两种原生配置分别由
+`vllm-opt` 和 `vllm-opt-multistep` 测量，两组都开启前缀缓存。
+[vLLM 0.6.1 配置校验](https://github.com/vllm-project/vllm/blob/v0.6.1/vllm/engine/arg_utils.py#L939-L946)
 Autellix 按调用剩余输出长度预留窗口 KV，并按新页和写时复制的实际需求判断 GPU 空间。
+图 12、13 可组合使用 `--online-seconds` 和 `--online-with-replacement`。
+这样按固定时长产生泊松到达，重复抽中的完整程序分配独立会话，同负载对照共用整条轨迹。
 
 同一张卡依次运行匹配 Triton 配置的 SGLang、Autellix PLAS 或 ATLAS，以及采用上游默认优化的
 SGLang。功能验收使用 `check_prefill_priority_gpu.py --modern --mem-fraction-static .88`，

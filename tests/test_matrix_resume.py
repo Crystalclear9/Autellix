@@ -56,6 +56,19 @@ class MatrixResumeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "every dataset"):
             matrix.unique_trace(pool, 12, .2, 29, equal_dataset_counts=True)
 
+    def test_poisson_window_can_exceed_the_number_of_source_programs(self):
+        pool = [dict(program_id=kind, dataset=kind, calls=[dict(call_id="a", prompt="input")])
+                for kind in ("sharegpt", "bfcl", "lats")]
+        trace = matrix.timed_trace(pool, 1.5, 27, 10, equal_dataset_counts=True, unique_programs=False)
+        self.assertGreater(len(trace), len(pool))
+        self.assertEqual(len({row["program_id"] for row in trace}), len(trace))
+        distribution = Counter(row["dataset"] for row in trace)
+        self.assertEqual(len(distribution), 3)
+        self.assertLessEqual(max(distribution.values()) - min(distribution.values()), 1)
+        distinct_pool = [dict(program_id=str(i)) for i in range(40)]
+        self.assertEqual([row["arrival_time"] for row in trace],
+                         [row["arrival_time"] for row in matrix.timed_trace(distinct_pool, 1.5, 27, 10)])
+
     def test_future_rates_and_pending_case_can_change_without_repeating_native(self):
         plan = dict(model="8B", rates=[.02, .05, .1], engine_args=dict(max_total_tokens=32768),
                     cases=[dict(name="native", policy="sglang-native"), dict(name="plas", interval=8)])

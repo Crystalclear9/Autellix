@@ -144,6 +144,8 @@ def build_plans(args):
                 count = None if args.online_seconds else program_count(family, args.online_programs)
                 figure = plan(backend, family, name, figures, cases_for(backend, family),
                               args.rates or END_TO_END_RATES[family], count)
+                if args.online_with_replacement:
+                    figure["unique_programs"] = False
                 if args.online_seconds:
                     figure["arrival_seconds"] = args.online_seconds
                 yield figure
@@ -266,6 +268,8 @@ def main():
     online = parser.add_mutually_exclusive_group()
     online.add_argument("--online-programs", type=int, help="programs per arrival trace for Figures 12 and 13")
     online.add_argument("--online-seconds", type=float, help="fixed Poisson arrival window for Figures 12 and 13")
+    parser.add_argument("--online-with-replacement", action="store_true",
+                        help="allow repeated source programs in the Figures 12 and 13 Poisson replays")
     parser.add_argument("--profile-programs", type=int, help="programs per timing trace for Figures 5, 6, 17, and 19")
     parser.add_argument("--simulation-programs", type=int, default=64, help="programs per Figure 18 simulated trace")
     parser.add_argument("--rates", nargs="+", type=float)
