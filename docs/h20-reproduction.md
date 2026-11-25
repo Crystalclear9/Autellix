@@ -176,6 +176,7 @@ prefill 且关闭前缀缓存。vLLM 0.6.1 的分块 prefill 和原生多步执�
 `vllm-opt` 和 `vllm-opt-multistep` 测量，两组都开启前缀缓存。
 [vLLM 0.6.1 配置校验](https://github.com/vllm-project/vllm/blob/v0.6.1/vllm/engine/arg_utils.py#L939-L946)
 Autellix 按调用剩余输出长度预留窗口 KV，并按新页和写时复制的实际需求判断 GPU 空间。
+分块 prefill 被抢占时只传输已计算的 KV 页，恢复时复用仍有效的 GPU 前缀。
 图 12、13 可组合使用 `--online-seconds` 和 `--online-with-replacement`。
 这样按固定时长产生泊松到达，重复抽中的完整程序分配独立会话，同负载对照共用整条轨迹。
 

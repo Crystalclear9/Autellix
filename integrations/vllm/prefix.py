@@ -13,6 +13,7 @@ class ChunkedPrefixCache:
         self.allocator = allocator
         free_block = allocator._free_block_id
         swap_in = manager.swap_in
+        swap_out = manager.swap_out
         can_allocate = manager.can_allocate
 
         def release(block):
@@ -33,8 +34,41 @@ class ChunkedPrefixCache:
                 previous.append(block_ids[i])
             return previous
 
+        def valid_sources(group, status, device):
+            sources = set()
+            valid_gpu_prefixes = {}
+            for seq in group.get_seqs(status=status):
+                tokens = seq.data.get_num_computed_tokens()
+                valid = (tokens + self.block_size - 1) // self.block_size
+                blocks = manager.block_tables[seq.seq_id].blocks[:valid]
+                for block in blocks:
+                    src = manager.block_allocator.get_physical_block_id(device, block.block_id)
+                    sources.add(src)
+                    if device == Device.CPU:
+                        gpu_id = allocator._cached_blocks.get(block.content_hash)
+                        if gpu_id is not None and allocator.block_is_computed(gpu_id):
+                            dest = manager.block_allocator.get_physical_block_id(Device.GPU, gpu_id)
+                            valid_gpu_prefixes[src, dest] = gpu_id, block.content_hash
+            return sources, valid_gpu_prefixes
+
+        def save(group):
+            # Chunked prefill allocates the full prompt table before running
+            # the first chunk. Only initialized KV belongs in the transfer.
+            sources, _ = valid_sources(group, SequenceStatus.RUNNING, Device.GPU)
+            return [(src, dest) for src, dest in swap_out(group) if src in sources]
+
         def restore(group):
-            restored = swap_in(group)
+            sources, valid_gpu_prefixes = valid_sources(group, SequenceStatus.SWAPPED, Device.CPU)
+            restored = []
+            for src, dest in swap_in(group):
+                if src not in sources:
+                    continue
+                previous = valid_gpu_prefixes.get((src, dest))
+                if previous:
+                    gpu_id, content_hash = previous
+                    if allocator._cached_blocks.get(content_hash) == gpu_id and allocator.block_is_computed(gpu_id):
+                        continue
+                restored.append((src, dest))
             tracker = manager._computed_blocks_tracker
             for seq in group.get_seqs(status=SequenceStatus.SWAPPED):
                 tracker.remove_seq(seq.seq_id)
@@ -59,6 +93,7 @@ class ChunkedPrefixCache:
         allocator.get_computed_block_ids = contiguous
         manager.mark_blocks_as_computed = self.mark
         manager.swap_in = restore
+        manager.swap_out = save
         manager.can_allocate = allocate_status
 
     def _mark(self, seq, previous_tokens, total_tokens):
