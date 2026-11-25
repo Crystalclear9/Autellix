@@ -92,6 +92,26 @@ class PaperPlanTests(unittest.TestCase):
         window.select(["fresh", "other"], set(), new_admissions=({"fresh", "other"}, 1))
         self.assertEqual(window.cohort, ["fresh"])
 
+    def test_kv_aware_admission_leaves_pages_for_resident_decode(self):
+        self.ctl.config = PolicyConfig(schedule_interval=3, overprovision=0)
+        self.priority.update(fresh=0, resident=1)
+        resident, fresh = Group("resident"), Group("fresh", True)
+        self.s.running.append(resident)
+        self.s.waiting.append(fresh)
+        self.s.block_manager.get_num_free_gpu_blocks = lambda: 5
+        self.s.block_manager.watermark_blocks = 1
+        prefix = NS(decode_block_growth=lambda g, steps: 2,
+                    waiting_block_cost=lambda seq: 3,
+                    can_append_slots=self.s.block_manager.can_append_slots)
+        plan = PaperPlan(self.s, self.ctl, 2, keep_resident_kv=True, prefix_cache=prefix, kv_aware_admission=True)
+        step = plan.next_step()
+        self.assertEqual([g.seq_group.request_id for g in step.scheduled_seq_groups], ["resident"])
+        self.assertIn(("defer_prefill", dict(rid="fresh", available_blocks=2)), self.events)
+        self.assertFalse(step.blocks_to_swap_out)
+        self.s.running.remove(resident)
+        step = plan.next_step()
+        self.assertEqual([g.seq_group.request_id for g in step.scheduled_seq_groups], ["fresh"])
+
     def test_completed_prefix_only_consumes_uncached_forward_budget(self):
         self.ctl.config = PolicyConfig(overprovision=0)
         fresh, decode = Group("fresh", True), Group("decode")

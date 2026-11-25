@@ -22,7 +22,8 @@ class VLLMBackend:
                  resident_decode_headroom: bool = False, qwen3_fused_qk_rope: bool = False,
                  exact_prefix_cache: bool | None = None, completion_only: bool = False,
                  min_decode_steps: int = 0, deduplicate_prefill: bool = False,
-                 packed_host_kv: bool = False, max_inflight_calls: int | None = None, **engine_args):
+                 packed_host_kv: bool = False, max_inflight_calls: int | None = None,
+                 reuse_decode_inputs: bool = False, kv_aware_admission: bool = False, **engine_args):
         if version("vllm") != "0.6.1":
             raise RuntimeError("this backend requires vllm==0.6.1")
         config = config or PolicyConfig()
@@ -38,6 +39,8 @@ class VLLMBackend:
         tp = engine_args.get("tensor_parallel_size", 1)
         if packed_host_kv and (not paper or tp != 1 or not batched_swap):
             raise ValueError("packed host KV requires single-GPU paper mode with batched swap")
+        if reuse_decode_inputs and (not paper or tp != 1):
+            raise ValueError("decode input reuse requires single-GPU paper mode")
         if "num_scheduler_steps" in engine_args and engine_args["num_scheduler_steps"] != config.schedule_interval:
             raise ValueError("num_scheduler_steps must match PolicyConfig.schedule_interval")
         if engine_args.get("enable_chunked_prefill", False) and not native and not paper:
@@ -96,6 +99,8 @@ class VLLMBackend:
                                  self.engine.model_config.get_sliding_window() is None)
         if exact_prefix_cache is None:
             exact_prefix_cache = paper and paper_chunked_prefill and supports_exact_prefix
+        if kv_aware_admission and (not paper or not exact_prefix_cache):
+            raise ValueError("KV-aware admission requires paper mode with exact prefix caching")
         if exact_prefix_cache:
             if not supports_exact_prefix:
                 raise ValueError("exact_prefix_cache requires full-context prefix caching with block manager v2")
@@ -117,7 +122,8 @@ class VLLMBackend:
                                                       resident_decode_headroom=resident_decode_headroom,
                                                       prefix_cache=prefix_cache,
                                                       deduplicate_prefill=deduplicate_prefill,
-                                                      max_inflight_calls=max_inflight_calls)
+                                                      max_inflight_calls=max_inflight_calls,
+                                                      kv_aware_admission=kv_aware_admission)
             self.scheduler._autellix_window = self.scheduler._autellix_paper.window
         worker = self.engine.model_executor.driver_worker
         if tp == 1 and batched_swap and not native and not packed_host_kv:
@@ -184,6 +190,9 @@ class VLLMBackend:
                 _worker._autellix_transferred_input = worker_input
             worker.execute_worker = MethodType(execute_worker_once, worker)
         runner = worker.model_runner
+        if reuse_decode_inputs:
+            from .decode import attach_decode_inputs
+            attach_decode_inputs(runner, self.scheduler._autellix_paper, self.controller)
         original = runner.execute_model
         controller, scheduler = self.controller, self.scheduler
         start, end = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)

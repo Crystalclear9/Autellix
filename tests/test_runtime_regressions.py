@@ -62,6 +62,35 @@ class RuntimeRegressions(unittest.TestCase):
         self.assertEqual([row["program_id"] for row in trace], ["p-0", "p-1", "p-2"])
         self.assertEqual(source[0]["arrival_time"], 3)
 
+    def test_offline_active_program_slots_hold_until_last_call(self):
+        from autellix.runtime.benchmark import run_workload
+        clock, events = [0.], []
+
+        def submit(pid, **kwargs):
+            events.append((pid, kwargs["call_id"]))
+            clock[0] += 1
+            result = concurrent.futures.Future()
+            result.set_result(dict(text="answer", token_ids=[1]))
+            return result
+
+        sessions = iter(("first", "second"))
+        engine = SimpleNamespace(start_session=lambda: next(sessions),
+                                 end_session=lambda pid: events.append((pid, "end")), submit=submit,
+                                 policy=SimpleNamespace(policy="plas"),
+                                 replicas=[SimpleNamespace(backend="test")], model="m")
+        workload = [
+            dict(program_id="p", calls=[dict(call_id="a", prompt="prompt"),
+                                       dict(call_id="b", prompt="follow-up", parents=["a"])]),
+            dict(program_id="q", calls=[dict(call_id="c", prompt="prompt")]),
+        ]
+        with patch("autellix.runtime.benchmark.time.monotonic", lambda: clock[0]):
+            row = run_workload(engine, workload, max_active_programs=1)
+        self.assertEqual(events, [("first", "a"), ("first", "b"), ("first", "end"),
+                                  ("second", "c"), ("second", "end")])
+        self.assertEqual(row["arrival_times"], {"p": 0, "q": 0})
+        self.assertEqual(row["programs"], {"p": 2, "q": 3})
+        self.assertEqual(row["first_submission_lag_seconds"], {"p": 0, "q": 2})
+
     def test_window_activity_preserves_measured_waiting_time(self):
         timings = []
         for publish_each_step, publish_at_window, publish in (

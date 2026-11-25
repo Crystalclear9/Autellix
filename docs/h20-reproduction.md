@@ -288,7 +288,7 @@ SHA-256 已核对，记录位于 `data/autellix/import/migration-verification.js
 | 图 7，前缀局部性 | 从 ShareGPT 和 LATS 的实际输入 token 逐块计算同程序及跨程序前缀复用机会 |
 | 图 11，工作负载分布 | 从 ShareGPT、BFCL、LATS 与 Mixed 回放提取程序长度与调用统计 |
 | 图 12、13，在线均值与尾延迟 | 四类负载的泊松到达率扫描，包含原生 vLLM、两种 vLLM-opt、同路径 FCFS、MLFQ、Autellix，以及原生 SGLang 和它的接入版。汇总同时记录到达窗口完成率和固定延迟目标内完成率 |
-| 图 14、15，多副本路由与扩展 | 原数据的多副本模拟。论文的多物理 GPU 性能依赖各副本拥有独立计算资源 |
+| 图 14、15，多副本路由与扩展 | `--replica-gpus` 为每个 vLLM 副本分配独立物理卡，运行程序亲和、最少负载和轮询路由，并逐级增加副本数。省略该参数时运行多副本模拟 |
 | 图 16，离线 makespan | 从同一 4,000 程序池抽取 1,000、2,000、3,000 和 4,000 个不同程序，每组同时提交，记录整批完成时间。对照包含三项组合优化的 FCFS、原生 vLLM、原生 SGLang、MLFQ 和两种 Autellix 接入。关闭 SQLite 的瞬时活动发布，调度和完成统计继续更新 |
 | 图 17，开销拆分 | vLLM-opt、MLFQ 和 Autellix 分别测量 ShareGPT、LATS 的模型、调度、KV 搬运和请求累计排队时间，并分开统计逻辑输入、命中前缀和模型实际计算的 prefill token |
 | 图 18，最优调度对照 | ShareGPT 与 LATS 各抽取 64 个程序，扫描至积压区间的等步长模拟，含可提前获知剩余服务量的 SRPT |
@@ -332,6 +332,10 @@ LATS 的组间依赖与就绪时间沿用原轨迹，所有对照组使用同一
 随后把同一份轨迹传给各调度组。
 要测候补用尽之后的空槽成本，使用 `--autellix-idle-refill` 加入独立对照。
 它沿用活动槽数、驻留候补和窗口长度，在窗口仍有空槽时按当前优先级补位。
+`--reuse-decode-inputs` 在单卡 vLLM 的 PLAS、ATLAS、MLFQ 和同路径 FCFS 中启用 GPU 输入复用。
+同一纯解码批次连续执行时，FlashAttention 在设备上推进 token、位置和 KV 槽位。
+批次成员、块表或 CUDA Graph 适用范围变化时重新构造输入。GPU 回归覆盖三请求批次中的
+填充槽、KV 页边界、部分请求提前完成以及跨越 CUDA Graph 上下文上限。
 
 32B 扩展对照可通过 `--sharegpt-trace`、`--bfcl-trace`、`--lats-trace` 和 `--mixed-trace`
 使用 Qwen3 的输入 token。LATS 可将 8B 采集的 HotpotQA 搜索记录传给
@@ -349,6 +353,12 @@ Qwen3-32B 的 16 程序 BFCL 压力组中，默认边界使 201 次调用中的 
 图 12 的 Llama-3.1-70B 和 Falcon-180B 原配置分别使用 4 张和 8 张 A100。图 14 的副本组数
 分别为 4 和 2，图 15 比较独立引擎扩容。上述 GPU 结果与单卡 8B、CPU 模拟分别汇总。
 [Autellix 论文，第 6 节](https://arxiv.org/html/2502.13965v1#S6)
+
+`--figures 14 15 --gpu 1 --replica-gpus 1 2 5 --backends vllm --workloads sharegpt`
+生成三卡路由及单、双、三副本扩展计划。各副本使用相同的活动批次和 KV 容量配置。
+各副本数以相同的 `--rates` 到达率扫描，配合 `--online-seconds` 和 `--online-warmup`
+读取相同测量窗口的实际完成率和归一化延迟。
+
 单、双 H20 的 8B ShareGPT 路由验证使用相同的 48 个程序、2.5 程序/秒的到达率，
 每副本 8 个活动槽和 8,192 个 KV 块。按程序路由时，单、双副本分别达到 367.77、461.90
 token/s，平均程序归一化延迟分别为 28.41、13.91 毫秒/token。双副本的最少负载和
@@ -372,6 +382,11 @@ makespan、程序完成率和归一化程序延迟。
 `--autellix-max-inflight-calls 24` 加入离线接纳对照，合计限制已有 GPU KV 及主机换出 KV 的调用数。
 每次有调用结束并释放名额时，按 PLAS 或 ATLAS 优先级接纳新调用。活动批次上限独立设置。
 `run_paper_vllm.py --max-inflight-calls 24` 可在同一个离线计划里配合 `--packed-host-kv` 使用。
+`--autellix-kv-aware-admission` 加入按页预算的对照。接纳新 prefill 前，按已驻留调用的
+实际 KV 页和下一窗口的增长量预留容量，共享的活跃前缀页只按新增需求计入。可用
+`run_paper_vllm.py --kv-aware-admission` 和在途上限组合运行。
+`--offline-active-programs 24` 对同一组离线对照限制同时向引擎提交的程序数。所有程序
+仍在零时刻到达，程序完成后释放名额，最外层排队时间继续计入 makespan 和程序延迟。
 8B 的 1,000 程序配对以种子 2026 无放回抽样，同一张 H20 依次运行两组。每组 5,968 次调用，
 生成 1,681,135 个 token，活动批次上限 16，GPU KV 容量 262,144 token。vLLM-opt 整批用时
 3,895.20 秒，Autellix PLAS 在途上限 24 的一组用时 3,920.33 秒，平均程序归一化延迟分别为

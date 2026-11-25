@@ -27,6 +27,10 @@ def main():
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--max-inflight-calls", type=int,
                         help="limit the combined number of resident and swapped calls")
+    parser.add_argument("--kv-aware-admission", action="store_true",
+                        help="reserve the next decode window's KV pages before new prefill admission")
+    parser.add_argument("--offline-active-programs", type=int,
+                        help="bound concurrently dispatched programs in all offline arms")
     parser.add_argument("--batch-tokens", type=int, default=32768)
     parser.add_argument("--kv-blocks", type=int, help="set identical GPU KV capacity in 16-token blocks")
     parser.add_argument("--swap-gib", type=float, default=32)
@@ -58,6 +62,8 @@ def main():
     parser.add_argument("--no-publish-activity", action="store_true", help="skip intermediate activity writes for performance replay")
     parser.add_argument("--fused-swap", action="store_true", help="pack and unpack all CUDA KV layers with the fused kernel")
     parser.add_argument("--packed-host-kv", action="store_true", help="store host KV in contiguous whole blocks on one GPU")
+    parser.add_argument("--reuse-decode-inputs", action="store_true",
+                        help="reuse FlashAttention inputs across stable single-GPU decode windows")
     parser.add_argument("--no-scheduler-trace", action="store_true", help="measure without per-step scheduler JSONL events")
     parser.add_argument("--cases", nargs="+", help="run only the listed cases")
     parser.add_argument("--label")
@@ -78,6 +84,8 @@ def main():
         parser.error("--all-programs requires an offline replay")
     if args.max_inflight_calls is not None and args.max_inflight_calls < args.batch_size:
         parser.error("in-flight limit must cover the active batch")
+    if args.offline_active_programs is not None and (args.experiment != "offline" or args.offline_active_programs < 1):
+        parser.error("--offline-active-programs requires a positive limit and offline replay")
     count = args.programs if args.programs is not None else count
     if count < 1 or (args.workload == "mixed" and count % 3):
         parser.error("use a positive program count divisible by three for Mixed")
@@ -89,7 +97,8 @@ def main():
     options = {name: True for name in ("keep_resident_kv", "publish_activity_at_window", "refill_idle_slots",
                                        "paper_chunked_prefill", "resident_reserve_only", "fused_swap",
                                        "resident_decode_headroom", "exact_prefix_cache", "recompute_on_swap_full",
-                                       "deduplicate_prefill", "packed_host_kv")
+                                       "deduplicate_prefill", "packed_host_kv", "reuse_decode_inputs",
+                                       "kv_aware_admission")
                if getattr(args, name)}
     if args.max_inflight_calls is not None:
         options["max_inflight_calls"] = args.max_inflight_calls
@@ -138,6 +147,8 @@ def main():
                 cases=cases)
     if args.unique_programs:
         plan["unique_programs"] = True
+    if args.offline_active_programs is not None:
+        plan["max_active_programs"] = args.offline_active_programs
     if args.completion_only:
         plan["engine_args"]["completion_only"] = True
     if args.graph_context is not None:

@@ -9,6 +9,7 @@ import copy
 import math
 import hashlib
 import heapq
+from collections import deque
 from contextlib import nullcontext
 from importlib.metadata import version, PackageNotFoundError
 from queue import Empty, SimpleQueue
@@ -110,9 +111,13 @@ def distribution(values):
     return dict(mean=statistics.mean(values), p95=percentile(.95), p99=percentile(.99), count=len(values))
 
 
-def run_workload(engine, programs, request_timeout=600, progress_interval=0, group_ready_calls=False):
+def run_workload(engine, programs, request_timeout=600, progress_interval=0, group_ready_calls=False,
+                 max_active_programs=None):
     validate_workload(programs)
     arrivals = {p["program_id"]: p.get("arrival_time", 0) for p in programs}
+    if max_active_programs is not None and (type(max_active_programs) is not int
+                                            or max_active_programs < 1 or any(arrivals.values())):
+        raise ValueError("an active program limit requires positive capacity and time-zero arrivals")
     remaining_calls = {p["program_id"]: len(p["calls"]) for p in programs}
     calls, parents, dependents, order = {}, {}, {}, {}
     for program in programs:
@@ -132,8 +137,18 @@ def run_workload(engine, programs, request_timeout=600, progress_interval=0, gro
     completed_futures = SimpleQueue()
     deadlines = []
     start = time.monotonic()
-    ready = [(start + arrivals[key[0]] + call.get("think_time", 0), order[key], key)
+    roots = [(start + arrivals[key[0]] + call.get("think_time", 0), order[key], key)
              for key, call in calls.items() if not parents[key]]
+    deferred = deque()
+    ready = roots
+    if max_active_programs is not None:
+        by_program = {pid: [] for pid in arrivals}
+        for entry in roots:
+            by_program[entry[2][0]].append(entry)
+        deferred.extend(by_program.values())
+        ready = []
+        for _ in range(min(max_active_programs, len(deferred))):
+            ready.extend(deferred.popleft())
     heapq.heapify(ready)
     next_progress = start + progress_interval if progress_interval else math.inf
 
@@ -205,6 +220,9 @@ def run_workload(engine, programs, request_timeout=600, progress_interval=0, gro
             if remaining_calls[pid] == 0:
                 program_times[pid] = last_completion[pid] - start - arrivals[pid]
                 engine.end_session(sessions.pop(pid))
+                if deferred:
+                    for entry in deferred.popleft():
+                        heapq.heappush(ready, entry)
         stopped = time.monotonic()
         elapsed = stopped - start
         tokens = sum(output_counts.values())

@@ -196,7 +196,8 @@ def main(argv=None):
                                 scheduler_trace=plan.get("scheduler_trace", True),
                                 queue_levels=case.get("queue_levels"),
                                 group_ready_calls=plan.get("group_ready_calls", False),
-                                last_queue_fifo=case.get("last_queue_fifo", False))
+                                last_queue_fifo=case.get("last_queue_fifo", False),
+                                max_active_programs=case.get("max_active_programs", plan.get("max_active_programs")))
                 except Exception as exc:
                     if not args.keep_going:
                         raise
@@ -207,7 +208,7 @@ def main(argv=None):
                     write_checkpoint(failures_path, failures)
                     traceback.print_exc()
                     print(f"FAILED rate={rate} repeat={repeat} case={case['name']}", flush=True)
-                    pids = subprocess.check_output(["nvidia-smi", "-i", device, "--query-compute-apps=pid",
+                    pids = subprocess.check_output(["nvidia-smi", "-i", device.replace(";", ","), "--query-compute-apps=pid",
                                                     "--format=csv,noheader,nounits"], text=True)
                     if any(pid.strip().isdecimal() for pid in pids.splitlines()):
                         raise RuntimeError(f"GPU {device} is still occupied after failed trial") from exc

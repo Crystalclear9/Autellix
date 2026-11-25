@@ -11,7 +11,7 @@ class PaperPlan:
     def __init__(self, scheduler, controller, capacity, keep_resident_kv=False, refill_idle_slots=False,
                  chunked_prefill=False, resident_reserve_only=False, recompute_on_swap_full=False,
                  resident_decode_headroom=False, prefix_cache=None, deduplicate_prefill=False,
-                 max_inflight_calls=None):
+                 max_inflight_calls=None, kv_aware_admission=False):
         self.scheduler, self.controller = scheduler, controller
         self.window = SchedulingWindow(controller, capacity, refill_idle_slots=refill_idle_slots,
                                        resident_reserve_only=resident_reserve_only)
@@ -22,14 +22,17 @@ class PaperPlan:
         self.prefix_cache = prefix_cache
         self.deduplicate_prefill = deduplicate_prefill and prefix_cache is not None
         self.max_inflight_calls = max_inflight_calls
+        self.kv_aware_admission = kv_aware_admission
         self.prepared = set()
         self.reserved_slots = set()
+        self.continuing_decode = False
 
     def next_step(self):
         from vllm.core.scheduler import SchedulerOutputs, ScheduledSequenceGroup
         from vllm.core.interfaces import AllocStatus
         from vllm.sequence import SequenceStatus
         s, ctl, window = self.scheduler, self.controller, self.window
+        self.continuing_decode = False
         incoming, outgoing, copies, ignored = [], [], [], []
         uncached_counts = {}
 
@@ -65,6 +68,7 @@ class PaperPlan:
                     copies.extend(s.block_manager.append_slots(seq, 0))
                 group.init_multi_step(num_scheduler_steps=1)
                 groups.append(ScheduledSequenceGroup(seq_group=group, token_chunk_size=1))
+            self.continuing_decode = not copies
             ctl.emit("continue_plan", requests=[g.seq_group.request_id for g in groups])
             return output(groups)
 
@@ -94,12 +98,36 @@ class PaperPlan:
         if boundary:
             self.reserved_slots.clear()
         new_admissions = None
-        if self.max_inflight_calls is not None:
+        fit_new = None
+        if self.max_inflight_calls is not None or self.kv_aware_admission:
             # GPU-resident and swapped calls share one admission budget.
             waiting = {group.request_id for group in s.waiting}
-            slots = self.max_inflight_calls - len(running) - len(s.swapped)
+            slots = len(waiting) if self.max_inflight_calls is None else (
+                self.max_inflight_calls - len(running) - len(s.swapped))
             new_admissions = waiting, slots
-        chosen, resident = window.select(by_id, self.prepared & running.keys(), new_admissions=new_admissions)
+        if self.kv_aware_admission and running:
+            # Keep the next decode window's pages available before assigning GPU
+            # pages to another full prompt. Evictable cached prefixes are free.
+            steps = ctl.config.schedule_interval if boundary else window.remaining
+            manager = s.block_manager
+            free = manager.get_num_free_gpu_blocks() - manager.watermark_blocks
+            budget = free - sum(self.prefix_cache.decode_block_growth(g, steps) for g in running.values())
+
+            def fit_new(fresh):
+                remaining = budget
+                fitted = []
+                for rid in fresh:
+                    cost = self.prefix_cache.waiting_block_cost(by_id[rid].get_seqs()[0])
+                    if cost > remaining:
+                        break
+                    fitted.append(rid)
+                    remaining -= cost
+                if len(fitted) < len(fresh):
+                    ctl.emit("defer_prefill", rid=fresh[len(fitted)], available_blocks=remaining)
+                return fitted
+
+        chosen, resident = window.select(by_id, self.prepared & running.keys(),
+                                         new_admissions=new_admissions, fit_new=fit_new)
         self.prepared.intersection_update(by_id)
 
         def evict(group):

@@ -1,4 +1,4 @@
-"""Run the paper evaluation in one physical-GPU queue, with per-case checkpoints."""
+"""Run paper replays and simulations with per-case checkpoints."""
 import argparse
 import json
 import math
@@ -78,6 +78,15 @@ def build_plans(args):
     def program_count(family, option):
         return option or (64 if family == "sharegpt" else WORKLOADS[family][1])
 
+    def arrival_window(figure):
+        if args.online_with_replacement:
+            figure["unique_programs"] = False
+        if args.online_seconds:
+            figure["arrival_seconds"] = args.online_seconds + args.online_warmup
+            if args.online_warmup:
+                figure["steady_state_start_seconds"] = args.online_warmup
+        return figure
+
     def plan(backend, family, name, selected_figures, cases, rates, count, *, offline=False, timing=False):
         args_for_engine = dict(engine_args[backend])
         if backend == "vllm":
@@ -94,6 +103,8 @@ def build_plans(args):
                         options["resident_decode_headroom"] = True
                         if args.deduplicate_prefill:
                             options["deduplicate_prefill"] = True
+                        if args.reuse_decode_inputs:
+                            options["reuse_decode_inputs"] = True
                 paired_cases.append(dict(case, engine_args=options))
                 if case["name"] == "autellix" and set(selected_figures).intersection({12, 13, 16, 17}):
                     if args.autellix_queue_levels:
@@ -110,6 +121,9 @@ def build_plans(args):
                         limit = args.autellix_max_inflight_calls
                         paired_cases.append(dict(case, name=f"autellix-inflight-{limit}",
                                                  engine_args=dict(options, max_inflight_calls=limit)))
+                    if args.autellix_kv_aware_admission:
+                        paired_cases.append(dict(case, name="autellix-kv-aware",
+                                                 engine_args=dict(options, kv_aware_admission=True)))
                     if args.autellix_idle_refill:
                         paired_cases.append(dict(case, name="autellix-idle-refill",
                                                  engine_args=dict(options, refill_idle_slots=True)))
@@ -121,6 +135,8 @@ def build_plans(args):
         if offline or timing:
             args_for_engine["publish_activity" if backend == "vllm" else "autellix_publish_activity"] = False
         replay_options = {"group_ready_calls": True} if args.group_ready_calls else {}
+        if offline and args.offline_active_programs is not None:
+            replay_options["max_active_programs"] = args.offline_active_programs
         return dict(backend=backend, model=str(args.model.resolve()), device=device,
                     experiment="offline" if offline else "online", paper_figures=list(selected_figures),
                     workload=str(workload_path(args, family)), workload_family=family,
@@ -149,15 +165,27 @@ def build_plans(args):
             for family in args.workloads:
                 name = f"fig12-13-{family}-{backend}"
                 count = None if args.online_seconds else program_count(family, args.online_programs)
-                figure = plan(backend, family, name, figures, cases_for(backend, family),
-                              args.rates or END_TO_END_RATES[family], count)
-                if args.online_with_replacement:
-                    figure["unique_programs"] = False
-                if args.online_seconds:
-                    figure["arrival_seconds"] = args.online_seconds + args.online_warmup
-                    if args.online_warmup:
-                        figure["steady_state_start_seconds"] = args.online_warmup
-                yield figure
+                yield arrival_window(plan(backend, family, name, figures, cases_for(backend, family),
+                                          args.rates or END_TO_END_RATES[family], count))
+        if args.replica_gpus and backend == "vllm" and 14 in selected:
+            for family in profiled_workloads:
+                candidate = cases_for(backend, family)[-1]
+                routes = [dict(candidate, name=mode, routing=mode)
+                          for mode in ("program", "least-used", "round-robin")]
+                count = None if args.online_seconds else program_count(family, args.online_programs)
+                name = f"fig14-{family}-vllm-{len(args.replica_gpus)}replicas"
+                figure = plan(backend, family, name, (14,), routes, args.rates or END_TO_END_RATES[family], count)
+                figure.update(device=";".join(map(str, args.replica_gpus)), experiment="routing")
+                yield arrival_window(figure)
+        if args.replica_gpus and backend == "vllm" and 15 in selected and "sharegpt" in args.workloads:
+            family = "sharegpt"
+            candidate = cases_for(backend, family)[-1]
+            count = None if args.online_seconds else program_count(family, args.online_programs)
+            for replicas in range(1, len(args.replica_gpus) + 1):
+                name = f"fig15-sharegpt-vllm-{replicas}replicas"
+                figure = plan(backend, family, name, (15,), [candidate], args.rates or END_TO_END_RATES[family], count)
+                figure.update(device=";".join(map(str, args.replica_gpus[:replicas])), experiment="scaling")
+                yield arrival_window(figure)
         if 16 in selected:
             for count in args.offline_sizes:
                 for case in cases_for(backend, "sharegpt"):
@@ -203,14 +231,14 @@ def simulate(args):
     from autellix.experiments.runner import ExperimentRunner
 
     runner = ExperimentRunner(seed=args.seed, batch_size=args.batch_size)
-    if 7 in args.figures:
+    if 7 in args.cpu_figures:
         from analyze_paper_motivation import prefix_opportunities
         from autellix.runtime.benchmark import load_workloads
 
         rows = {family: prefix_opportunities(load_workloads([workload_path(args, family)]))
                 for family in ("sharegpt", "lats")}
         write_json(args.run_dir / "fig7-prefix-opportunities.json", rows)
-    for figure in sorted(set(args.figures) & {11, 14, 15, 18}):
+    for figure in sorted(set(args.cpu_figures) - {7}):
         families = tuple(WORKLOADS) if figure == 11 else ("sharegpt", "lats") if figure in {14, 18} else ("sharegpt",)
         rows = []
         for family in families:
@@ -262,6 +290,8 @@ def main():
     parser.add_argument("--datasets", required=True, type=Path)
     parser.add_argument("--run-dir", required=True, type=Path)
     parser.add_argument("--gpu", required=True, type=int, help="one physical GPU index")
+    parser.add_argument("--replica-gpus", nargs="+", type=int,
+                        help="physical GPU indices for real Figures 14 and 15, starting with --gpu")
     parser.add_argument("--vllm-python", default=sys.executable)
     parser.add_argument("--sglang-python", default=sys.executable)
     parser.add_argument("--vllm-preload", help="LD_PRELOAD for the pinned vLLM environment")
@@ -274,6 +304,8 @@ def main():
     parser.add_argument("--backends", nargs="+", choices=("vllm", "sglang"), default=("vllm", "sglang"))
     parser.add_argument("--cases", nargs="+", help="select named inference cases from the figure plans")
     parser.add_argument("--offline-sizes", nargs="+", type=int, default=(1000, 2000, 3000, 4000))
+    parser.add_argument("--offline-active-programs", type=int,
+                        help="bound concurrently dispatched programs in all Figure 16 arms")
     online = parser.add_mutually_exclusive_group()
     online.add_argument("--online-programs", type=int, help="programs per arrival trace for Figures 12 and 13")
     online.add_argument("--online-seconds", type=float, help="fixed Poisson arrival window for Figures 12 and 13")
@@ -293,11 +325,15 @@ def main():
                         help="add an Autellix arm that keeps FIFO order in the lowest priority queue")
     parser.add_argument("--autellix-max-inflight-calls", type=int,
                         help="add an Autellix arm with a shared limit on resident and swapped calls")
+    parser.add_argument("--autellix-kv-aware-admission", action="store_true",
+                        help="add an Autellix arm that budgets GPU pages before starting another prefill")
     parser.add_argument("--autellix-idle-refill", action="store_true",
                         help="add an Autellix comparison arm that refills vacancies after its resident reserve")
     parser.add_argument("--qwen3-fused-qk-rope", action="store_true", help="enable Qwen3 fusion in every vLLM arm")
     parser.add_argument("--deduplicate-prefill", action="store_true",
                         help="share identical prefills in the matched vLLM scheduling arms")
+    parser.add_argument("--reuse-decode-inputs", action="store_true",
+                        help="reuse GPU inputs in all matched vLLM policy arms")
     parser.add_argument("--group-ready-calls", action="store_true",
                         help="admit pretokenized siblings with the same release time together")
     parser.add_argument("--seed", type=int, default=2026)
@@ -315,13 +351,22 @@ def main():
     parser.add_argument("--diagnostic-warmup", type=int, default=300, help="Figure 4 arrivals before measuring")
     parser.add_argument("--plan-only", action="store_true")
     args = parser.parse_args()
+    args.cpu_figures = set(args.figures) & {7, 11, 14, 15, 18}
+    if args.replica_gpus:
+        args.cpu_figures -= {14, 15}
     args.workload_files = {name: path.resolve() for name, path in (
         ("sharegpt", args.sharegpt_trace), ("bfcl", args.bfcl_trace), ("lats", args.lats_trace),
         ("mixed", args.mixed_trace)) if path is not None}
     if args.gpu < 0 or args.kv_tokens < 32768 or args.kv_tokens % 16:
         parser.error("use a physical GPU index and a KV capacity divisible by 16 of at least 32768 tokens")
+    if args.replica_gpus and (args.replica_gpus[0] != args.gpu or min(args.replica_gpus) < 0
+                             or len(set(args.replica_gpus)) != len(args.replica_gpus)
+                             or 14 in args.figures and len(args.replica_gpus) < 2):
+        parser.error("replica GPUs must be distinct, start with --gpu, and include two or more for Figure 14")
     if min(args.offline_sizes) < 1 or max(args.offline_sizes) > 4000:
         parser.error("offline sizes must be between 1 and 4000")
+    if args.offline_active_programs is not None and args.offline_active_programs < 1:
+        parser.error("offline active program capacity must be positive")
     if any(count is not None and count < 1
            for count in (args.online_programs, args.profile_programs, args.simulation_programs)):
         parser.error("program counts must be positive")
@@ -360,7 +405,7 @@ def main():
     for plan in plans:
         write_json(out / (plan["workload_kind"] + "-plan.json"), plan)
     manifest["gpu_plans"].update((p["workload_kind"], p["paper_figures"]) for p in plans)
-    manifest["cpu_figures"] = sorted(set(manifest.get("cpu_figures", ())) | (set(args.figures) & {7, 11, 14, 15, 18}))
+    manifest["cpu_figures"] = sorted(set(manifest.get("cpu_figures", ())) | args.cpu_figures)
     write_json(manifest_path, manifest)
     if args.plan_only:
         return 0
@@ -374,14 +419,15 @@ def main():
     statuses_path = out / "exit-codes.json"
     previous_statuses = (json.loads(statuses_path.read_text(encoding="utf-8")) if statuses_path.exists() else {})
 
-    def gpu_run(name, cmd, run_env):
-        pids = subprocess.check_output(["nvidia-smi", "-i", str(args.gpu), "--query-compute-apps=pid",
+    def gpu_run(name, cmd, run_env, physical_devices):
+        pids = subprocess.check_output(["nvidia-smi", "-i", physical_devices, "--query-compute-apps=pid",
                                         "--format=csv,noheader,nounits"], text=True)
         if any(line.strip().isdecimal() for line in pids.splitlines()):
-            raise RuntimeError(f"GPU {args.gpu} is occupied before {name}")
+            raise RuntimeError(f"one of GPUs {physical_devices} is occupied before {name}")
         print(f"START {name}", flush=True)
         with (out / (name + ".log")).open("a", encoding="utf-8") as log:
-            statuses[name] = subprocess.run(cmd, cwd=root, env=run_env, stdout=log, stderr=subprocess.STDOUT).returncode
+            visible = dict(run_env, CUDA_VISIBLE_DEVICES=physical_devices)
+            statuses[name] = subprocess.run(cmd, cwd=root, env=visible, stdout=log, stderr=subprocess.STDOUT).returncode
         write_json(statuses_path, previous_statuses | statuses)
 
     simulate(args)
@@ -391,12 +437,13 @@ def main():
             name = f"fig19-kernel-{blocks}"
             gpu_run(name, [exe, str(root / "cuda/batched_swap_benchmark.py"), "--blocks", str(blocks),
                            "--layers", "32", "--block-bytes", "32768", "--dtype", "bfloat16", "--baseline", "vllm",
-                           "--fused", "--packed-host", "--output", str(out / (name + ".json"))], run_env)
+                           "--fused", "--packed-host", "--output", str(out / (name + ".json"))], run_env, str(args.gpu))
     for plan in plans:
         name, backend = plan["workload_kind"], plan["backend"]
         exe, run_env = interpreters[backend]
         gpu_run(name, [exe, str(root / "scripts/run_sglang_matrix.py"), "--plan", str(out / (name + "-plan.json")),
-                       "--output", str(out / (name + ".json")), "--resume", "--keep-going"], run_env)
+                       "--output", str(out / (name + ".json")), "--resume", "--keep-going"],
+                run_env, plan["device"].replace(";", ","))
         if plan["scheduler_trace"] and (out / (name + ".json")).exists():
             with (out / (name + "-timing.log")).open("w", encoding="utf-8") as log:
                 statuses[f"{name}-timing"] = subprocess.run(

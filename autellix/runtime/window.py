@@ -13,7 +13,7 @@ class SchedulingWindow:
         self.active = set()
         self.reserve = set()
 
-    def select(self, available, resident, *, new_admissions=None):
+    def select(self, available, resident, *, new_admissions=None, fit_new=None):
         ctl = self.controller
         available = set(available)
         if not available:
@@ -27,7 +27,9 @@ class SchedulingWindow:
             if new_admissions is not None:
                 waiting, slots = new_admissions
                 budget = slots - len(waiting.intersection(retained))
-                fresh = nsmallest(budget, candidates & waiting, key=ctl.key)
+                fresh = nsmallest(min(count, budget), candidates & waiting, key=ctl.key)
+                if fit_new is not None:
+                    fresh = fit_new(fresh)
                 candidates = (candidates - waiting).union(fresh)
             return nsmallest(count, candidates, key=ctl.key)
 

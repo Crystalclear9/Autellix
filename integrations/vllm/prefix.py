@@ -89,11 +89,9 @@ class ChunkedPrefixCache:
             if status != AllocStatus.LATER:
                 return status
             seq = group.get_seqs(status=SequenceStatus.WAITING)[0]
-            required = (seq.data.get_len() + self.block_size - 1) // self.block_size
-            shared = sum(allocator._block_tracker[block_id].active for block_id in self._waiting_blocks(seq))
             # Unreferenced cache entries already count as free in the allocator.
             # Reusing an active block consumes no additional physical page.
-            if required - shared + manager.watermark_blocks <= manager.get_num_free_gpu_blocks():
+            if self.waiting_block_cost(seq) + manager.watermark_blocks <= manager.get_num_free_gpu_blocks():
                 return AllocStatus.OK
             return status
 
@@ -140,6 +138,21 @@ class ChunkedPrefixCache:
             required += sum(self.allocator._refcounter.get(block_id) > 1
                             for block_id in ids[first:end])
         return required <= self.manager.get_num_free_gpu_blocks()
+
+    def waiting_block_cost(self, seq):
+        required = (seq.data.get_len() + self.block_size - 1) // self.block_size
+        shared = sum(self.allocator._block_tracker[block_id].active for block_id in self._waiting_blocks(seq))
+        return required - shared
+
+    def decode_block_growth(self, group, window_steps):
+        size = self.block_size
+        total = 0
+        for seq in group.get_seqs():
+            remaining = group.sampling_params.max_tokens - seq.get_output_len()
+            lookahead = max(0, min(window_steps - int(not group.is_prefill()), remaining - 1))
+            needed = (seq.get_len() + lookahead + size - 1) // size
+            total += max(0, needed - len(self.manager.get_block_table(seq)))
+        return total
 
     def release_lookahead(self, group):
         released = 0

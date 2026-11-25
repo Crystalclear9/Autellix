@@ -148,6 +148,34 @@ class RealInferenceTests(unittest.TestCase):
             engine.end_session(pid)
 
     @unittest.skipUnless(BACKEND == "vllm", "requires vllm")
+    def test_reused_decode_inputs_match_across_page_and_graph_boundaries(self):
+        policy = PolicyConfig(policy="fcfs", schedule_interval=8, overprovision=0)
+        args = dict(max_model_len=128, max_num_batched_tokens=192, max_num_seqs=3,
+                    block_size=16, num_gpu_blocks_override=32, gpu_memory_utilization=VLLM_MEMORY,
+                    swap_space=.25, dtype=VLLM_DTYPE, enforce_eager=False, max_seq_len_to_capture=64,
+                    paper_chunked_prefill=True)
+        outputs = []
+        for reuse in (False, True):
+            replicas = [ReplicaConfig("vllm", MODEL, device=DEVICE,
+                                      engine_args=dict(args, reuse_decode_inputs=reuse))]
+            with InferenceEngine(replicas, policy=policy) as engine:
+                sessions = [engine.start_session() for _ in range(3)]
+                with engine.group_pretokenized_submissions():
+                    futures = [
+                        engine.submit(pid, input_ids=[21 + i] * prompt,
+                                      sampling=dict(temperature=0, max_tokens=count, ignore_eos=True))
+                        for i, (pid, prompt, count) in enumerate(zip(sessions, (41, 61, 32), (24, 11, 7)))
+                    ]
+                outputs.append([future.result(180)["token_ids"] for future in futures])
+                self.assertEqual([len(tokens) for tokens in outputs[-1]], [24, 11, 7])
+                for pid in sessions:
+                    engine.end_session(pid)
+                if reuse:
+                    events = map(json.loads, (engine.state_dir / "replica-0.jsonl").read_text().splitlines())
+                    self.assertGreater(sum(e["event"] == "reuse_decode_inputs" for e in events), 4)
+        self.assertEqual(*outputs)
+
+    @unittest.skipUnless(BACKEND == "vllm", "requires vllm")
     def test_preempted_chunked_prefill_restores_initialized_kv(self):
         import torch
         from integrations.vllm.backend import VLLMBackend

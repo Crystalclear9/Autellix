@@ -116,6 +116,7 @@ def metrics(row):
                 paper_figures=row["plan"].get("paper_figures", []),
                 condition=row["condition"], rate=row["rate"], seed=row["seed"],
                 model=row["model"], versions=row["versions"], engine_args=row["effective_engine_args"],
+                max_active_programs=row.get("max_active_programs"),
                 devices=row["device_groups"], trace_sha256=row["trace_sha256"],
                 implementation_sha256=row.get("implementation_sha256"),
                 programs=len(arrivals), calls=len(row["calls"]), output_tokens=row["completion_tokens"],
@@ -195,7 +196,8 @@ def paper_matrix(records, slo_targets=DEFAULT_SLO_TARGETS, *, strict=True):
         arrival_seconds = plan.get("arrival_seconds")
         program_budget = len(row["programs"]) if arrival_seconds is None else None
         config = (figures, plan["workload_family"], program_budget, arrival_seconds,
-                  plan.get("steady_state_start_seconds"), row["model"], tuple(row["device_groups"]), resources)
+                  plan.get("steady_state_start_seconds"), row["model"], tuple(row["device_groups"]), resources,
+                  row.get("max_active_programs"))
         latencies, _ = paper_token_latencies(row)
         window = steady_state_window(row, latencies)
         if window:
@@ -214,6 +216,7 @@ def paper_matrix(records, slo_targets=DEFAULT_SLO_TARGETS, *, strict=True):
                      condition=row["condition"], policy=row.get("arm"), model=row["model"], devices=row["device_groups"],
                      resources=dict(zip(("dtype", "context_tokens", "batch_size", "kv_tokens"), resources)),
                      versions=row["versions"], engine_args=opts,
+                     max_active_programs=row.get("max_active_programs"),
                      implementation_sha256=row.get("implementation_sha256"),
                      programs=len(row["programs"]), rate=row["rate"], seed=row["seed"],
                      planned_repeats=plan.get("repeats", 1),
@@ -280,7 +283,7 @@ def paper_matrix(records, slo_targets=DEFAULT_SLO_TARGETS, *, strict=True):
                 by_config[config][arm][rate].append(point)
     slo = []
     for config, arms in by_config.items():
-        figures, workload, programs, arrival_seconds, warmup, model, devices, _ = config
+        figures, workload, programs, arrival_seconds, warmup, model, devices, _, _ = config
         slo.extend(dict(point, figures=figures, workload=workload, programs=programs, arrival_seconds=arrival_seconds,
                         steady_state_start_seconds=warmup, model=model, devices=devices)
                    for point in slo_points_for_arms(arms, slo_targets))
@@ -290,7 +293,7 @@ def paper_matrix(records, slo_targets=DEFAULT_SLO_TARGETS, *, strict=True):
                    if all(len(rows) == point["planned_repeats"] for pair in rows for point in pair)}
         if not matched:
             continue
-        figures, workload, programs, arrival_seconds, warmup, model, devices, resources = config
+        figures, workload, programs, arrival_seconds, warmup, model, devices, resources, _ = config
         arms = {arm: {rate: [pair[index] for pair in rows] for rate, rows in matched.items()}
                 for index, arm in enumerate((candidate, baseline))}
         paired_slo.extend(dict(point, figures=figures, workload=workload, programs=programs,
@@ -308,7 +311,7 @@ def summarize(records, slo_targets=DEFAULT_SLO_TARGETS):
     for row in records:
         kind = row["plan"].get("workload_kind", "sharegpt")
         key = (kind, row["rate"], row["seed"], tuple(row["device_groups"]), row["model"],
-               tuple(sorted(row["versions"].items())))
+               tuple(sorted(row["versions"].items())), row.get("max_active_programs", 0))
         group = groups.setdefault(key, {})
         if row["condition"] in group:
             raise ValueError(f"duplicate trial: {key}, {row['condition']}")
@@ -346,7 +349,8 @@ def summarize(records, slo_targets=DEFAULT_SLO_TARGETS):
                                      "keep_resident_kv", "recompute_on_swap_full", "paper_chunked_prefill",
                                      "publish_activity_at_window", "refill_idle_slots", "resident_decode_headroom", "packed_host_kv",
                                      "min_decode_steps", "mixed_decode_quantum", "deduplicate_prefill",
-                                     "chunked_prefill_kv", "max_inflight_calls"}}
+                                     "chunked_prefill_kv", "max_inflight_calls", "reuse_decode_inputs",
+                                     "kv_aware_admission"}}
             native_defaults = row["arm"] == "sglang-native" and row["effective_engine_args"].get("autellix_native_defaults", False)
             baseline_defaults = native["effective_engine_args"].get("autellix_native_defaults", False)
             row_options, baseline_options = options(row), options(native)
