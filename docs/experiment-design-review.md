@@ -203,4 +203,4 @@ FCFS/MLFQ/PLAS 等待总和为 18/19/14，图注为 18/18/12。另检查图中�
 服务配置为交互使用，负载曲线使用前述 B=4/32768 配置。
 
 共完成 20 组 GPU 回放。原始归档为 `/mnt/masfiles/autellix/runs/design-review-results.tar.gz`，
-SHA256 为 `90e78c958622eda6f223644a1205fe3cfb473986644f2040e6fe357417254b95`，本地保存于 `outputs/design-review-results.tar.gz`。
+SHA256 为 `90e78c958622eda6f223644a1205fe3cfb473986644f2040e6fe357417254b95`，本地保存于 `outputs/archive/p40/design-review-results.tar.gz`。

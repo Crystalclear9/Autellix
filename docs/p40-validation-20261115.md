@@ -39,7 +39,7 @@ GPU 2、ATLAS、SmolLM2-135M-Instruct，监听 `127.0.0.1:8000`，显存约 845 
 - 服务日志/PID：上述目录中的 `server.log` / `server.pid`
 - 初次部署的 SQLite：`/tmp/autellix-p40`；现有启动脚本使用
   `autellix/tmp/` 统一入口，见[服务器目录](server-layout.md)
-- 本地结果副本：`outputs/server-p40-20261115/`
+- 本地结果副本位于 `outputs/archive/p40/server-p40-20261115/`
 
 Python 3.10.12，SGLang 0.4.9.post6，Torch 2.7.1+cu126，Transformers 4.54.0，
 驱动 550.120。依赖使用项目锁文件、清华 PyPI 镜像安装，额外安装 matplotlib

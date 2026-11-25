@@ -159,12 +159,13 @@ overlap、CUDA Graph 与 chunked prefill 关闭。外层客户端、IPC 与会�
 
 K=1 的单组补测：程序响应 +48.19%，吞吐 -16.24%。上述结果使用旧 attention。
 原始结果保存在服务器 `/mnt/masfiles/autellix/runs/paper-20261115/`，
-本地副本为 `outputs/paper-sglang-20261115/`。
+本地副本为 `outputs/archive/p40/paper-sglang-20261115/`。
 
 ## 本轮结果与后续修改
 
-本轮结果保存在服务器 `/mnt/masfiles/autellix/runs/audit-rerun/`，本地副本为
-`outputs/audit-rerun/`。短回放结果如下，延迟变化为正表示更慢，吞吐变化为正表示更快。
+本轮结果保存在服务器 `/mnt/masfiles/autellix/runs/audit-rerun/`，本地归档为
+`outputs/archive/p40/audit-results.tar.gz`，独有的补充结果位于同级的 `audit-rerun/`。
+短回放结果如下，延迟变化为正表示更慢，吞吐变化为正表示更快。
 
 | 实验 | 配对数 | 平均程序响应变化 | 程序级秒/token 变化 | 吞吐变化 |
 | --- | ---: | ---: | ---: | ---: |

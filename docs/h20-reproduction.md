@@ -6,8 +6,15 @@
 SQLite、进程间通信和编译缓存使用每次运行独立创建的 `/tmp/fjr-autellix-*` 目录。完成后
 核对服务和 GPU 进程已退出，下载需要留存的计划与检查点，校验后清理对应的临时目录。
 
+2026-11-25 核对时，H20 持久部署目录的运行源码指纹对应 Git 提交 `22434db`。
+与本地 `main` 逐文件比较的 148 项中，111 项一致、36 项不同，缺少
+`integrations/vllm/decode.py`。8B BFCL 四组复跑及 70B BFCL 配对使用了较新的
+运行快照，两个检查点记录的 SHA-256 都与本地及 GitHub `main` 的运行源码一致。
+矩阵脚本对 `autellix/`、`integrations/` 下的 Python 源码以及
+`scripts/run_sglang_matrix.py`、`scripts/compare_sglang.py` 统一换行后计算指纹。
+
 本会话的 H20 临时实验资料核验后统一归档到本地
-`outputs/h20-autellix-session-20261125.tar.gz`。归档包含运行计划、检查点和部分只存在于
+`outputs/archive/h20/h20-autellix-session-20261125.tar.gz`。归档包含运行计划、检查点和部分只存在于
 临时目录的输入，`manifest.json` 记录每个归档文件的 SHA-256。8B 在线、离线及 70B BFCL
 小样本的原始检查点位于归档中的 `fjr-autellix-paper-parity-20261125/`。
 使用检查点前可按需将归档解包到 `outputs/` 下的独立目录。

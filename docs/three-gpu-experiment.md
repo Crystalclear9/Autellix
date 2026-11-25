@@ -349,7 +349,7 @@ ssh -p 46644 -L 8000:127.0.0.1:8000 root@cn-north-b.ssh.damodel.com
 
 `/mnt/masfiles/autellix/runs/three-gpu-results-20261116.tar.gz`
 
-归档已下载到本地 `outputs/three-gpu/`，逐文件校验通过；大小和 SHA256 见
+归档已下载到本地 `outputs/archive/p40/three-gpu/`，逐文件校验通过。大小和 SHA256 见
 [归档记录](results/three-gpu-archive.json)。解压后的 `three-gpu/manifest.json`
 列出每个文件的大小与哈希，`traces/` 保存原临时目录中的完整调度记录。
 
