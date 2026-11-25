@@ -28,6 +28,8 @@ class ChunkedPrefixCache:
 
         def contiguous(previous, block_ids, skip_last_block_id=True):
             end = len(block_ids) - int(skip_last_block_id)
+            if len(previous) > end:
+                del previous[end:]
             for i in range(len(previous), end):
                 if not allocator.block_is_computed(block_ids[i]):
                     break
@@ -131,6 +133,19 @@ class ChunkedPrefixCache:
             required += sum(self.allocator._refcounter.get(block_id) > 1
                             for block_id in ids[first:end])
         return required <= self.manager.get_num_free_gpu_blocks()
+
+    def release_lookahead(self, group):
+        released = 0
+        for seq in group.get_seqs(status=SequenceStatus.RUNNING):
+            table = self.manager.block_tables[seq.seq_id]
+            used = (table.num_full_slots + self.block_size - 1) // self.block_size
+            blocks = table.blocks
+            if len(blocks) > used:
+                for block in reversed(blocks[used:]):
+                    self.manager.block_allocator.free(block)
+                released += len(blocks) - used
+                table.update(blocks[:used])
+        return released
 
     def reusable_tokens(self, seq):
         computed = seq.data.get_num_computed_tokens()

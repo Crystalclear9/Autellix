@@ -142,6 +142,9 @@ class RealInferenceTests(unittest.TestCase):
             result = engine.submit(pid, input_ids=[21] * 61,
                                    sampling=dict(temperature=0, max_tokens=3, ignore_eos=True)).result(180)
             self.assertEqual(result["completion_tokens"], 3)
+            result = engine.submit(pid, input_ids=[23] * 63,
+                                   sampling=dict(temperature=0, max_tokens=4, ignore_eos=True)).result(180)
+            self.assertEqual(result["completion_tokens"], 2)
             engine.end_session(pid)
 
     @unittest.skipUnless(BACKEND == "vllm", "requires vllm")

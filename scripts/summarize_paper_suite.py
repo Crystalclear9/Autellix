@@ -26,6 +26,24 @@ def observed_arrival_rate(row):
     return sum(0 < at <= horizon for at in row["arrival_times"].values()) / horizon if horizon else None
 
 
+def steady_state_window(row, latencies):
+    start = row["plan"].get("steady_state_start_seconds")
+    end = row["arrival_horizon_seconds"]
+    if start is None or start >= end:
+        return {}
+    arrivals = row["arrival_times"]
+    completions = row["program_completion_times"]
+    duration = end - start
+    measured = [pid for pid, at in arrivals.items() if start < at <= end]
+    return {"steady_state_window": dict(
+        start_seconds=start, end_seconds=end,
+        observed_offered_programs_per_second=len(measured) / duration,
+        completed_programs_per_second=sum(start < at <= end for at in completions.values()) / duration,
+        backlog_start=sum(at <= start < completions[pid] for pid, at in arrivals.items()),
+        backlog_end=sum(at <= end < completions[pid] for pid, at in arrivals.items()),
+        token_latency=distribution(latencies[pid] for pid in measured))}
+
+
 def paper_token_latencies(row):
     kind = row["plan"].get("workload_kind", "sharegpt")
     parallel = row["plan"].get("workload_family", kind) in {"lats", "mixed"}
@@ -164,8 +182,8 @@ def paper_matrix(records, slo_targets=DEFAULT_SLO_TARGETS, *, strict=True):
             resources = (opts["dtype"], opts["context_length"], opts["max_running_requests"], opts["max_total_tokens"])
         arrival_seconds = plan.get("arrival_seconds")
         program_budget = len(row["programs"]) if arrival_seconds is None else None
-        config = (figures, plan["workload_family"], program_budget, arrival_seconds, row["model"],
-                  tuple(row["device_groups"]), resources)
+        config = (figures, plan["workload_family"], program_budget, arrival_seconds,
+                  plan.get("steady_state_start_seconds"), row["model"], tuple(row["device_groups"]), resources)
         latencies, _ = paper_token_latencies(row)
         make = row["elapsed_seconds"]
         horizon = row["arrival_horizon_seconds"]
@@ -182,7 +200,7 @@ def paper_matrix(records, slo_targets=DEFAULT_SLO_TARGETS, *, strict=True):
                      completed_programs_per_second=len(row["programs"]) / make,
                      arrival_window_completed_programs_per_second=(row["completions_during_arrivals"] / horizon
                                                                    if horizon else None),
-                     **first_call_waits(row["calls"]))
+                     **first_call_waits(row["calls"]), **steady_state_window(row, latencies))
         trials.append(point)
         slot = at_load[config, row["rate"], row["seed"]]
         if arm in slot:
@@ -236,9 +254,9 @@ def paper_matrix(records, slo_targets=DEFAULT_SLO_TARGETS, *, strict=True):
                 by_config[config][arm][rate].append(point)
     slo = []
     for config, arms in by_config.items():
-        figures, workload, programs, arrival_seconds, model, devices, _ = config
+        figures, workload, programs, arrival_seconds, warmup, model, devices, _ = config
         slo.extend(dict(point, figures=figures, workload=workload, programs=programs, arrival_seconds=arrival_seconds,
-                        model=model, devices=devices)
+                        steady_state_start_seconds=warmup, model=model, devices=devices)
                    for point in slo_points_for_arms(arms, slo_targets))
     paired_slo = []
     for (config, candidate, baseline), grouped in paired_rates.items():
@@ -246,11 +264,12 @@ def paper_matrix(records, slo_targets=DEFAULT_SLO_TARGETS, *, strict=True):
                    if all(len(rows) == point["planned_repeats"] for pair in rows for point in pair)}
         if not matched:
             continue
-        figures, workload, programs, arrival_seconds, model, devices, resources = config
+        figures, workload, programs, arrival_seconds, warmup, model, devices, resources = config
         arms = {arm: {rate: [pair[index] for pair in rows] for rate, rows in matched.items()}
                 for index, arm in enumerate((candidate, baseline))}
         paired_slo.extend(dict(point, figures=figures, workload=workload, programs=programs,
-                               arrival_seconds=arrival_seconds, model=model, devices=devices,
+                               arrival_seconds=arrival_seconds, steady_state_start_seconds=warmup,
+                               model=model, devices=devices,
                                resources=dict(zip(("dtype", "context_tokens", "batch_size",
                                                                    "kv_tokens"), resources)),
                                candidate=candidate, baseline=baseline, shared_rates=sorted(matched))

@@ -60,6 +60,15 @@ class PaperSuiteSummary(unittest.TestCase):
         with self.assertRaises(ValueError):
             summary.summarize(rows)
 
+    def test_steady_window_counts_carry_in_completions_without_censoring_latency(self):
+        row = self.records()[0]
+        row["plan"]["steady_state_start_seconds"] = 15
+        window = summary.steady_state_window(row, {"0": 1, "1": 1, "2": 2, "3": 4})["steady_state_window"]
+        self.assertEqual(window["observed_offered_programs_per_second"], 2 / 15)
+        self.assertEqual(window["completed_programs_per_second"], 2 / 15)
+        self.assertEqual((window["backlog_start"], window["backlog_end"]), (1, 1))
+        self.assertEqual(window["token_latency"]["mean"], 3)
+
     def test_first_batch_wait_uses_submission_order(self):
         row = self.records()[1]
         earlier = dict(row["calls"][0], submitted_seconds=0.,

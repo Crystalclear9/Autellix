@@ -95,6 +95,8 @@ class PaperPlan:
         self.prepared.intersection_update(by_id)
 
         def evict(group):
+            if self.prefix_cache is not None:
+                self.prefix_cache.release_lookahead(group)
             if self.recompute_on_swap_full and not s.block_manager.can_swap_out(group):
                 s._preempt_by_recompute(group)
                 s.waiting.appendleft(group)
@@ -112,6 +114,14 @@ class PaperPlan:
             inactive = sorted((g for g in s.running if g.request_id not in cohort),
                               key=lambda g: ctl.key(g.request_id), reverse=True)
             suffix = [by_id[r] for r in reversed(window.cohort[index + 1:]) if r in running]
+            if self.prefix_cache is not None:
+                for group in inactive:
+                    released = self.prefix_cache.release_lookahead(group)
+                    if released:
+                        self.reserved_slots.discard(group.request_id)
+                        ctl.emit("release_lookahead", rid=group.request_id, blocks=released)
+                        if fits():
+                            return False
             # The allocator releases GPU block ownership immediately. Collect
             # all required victim mappings before the single transfer barrier.
             for victim in inactive + suffix:
@@ -220,12 +230,17 @@ class PaperPlan:
                 remaining_outputs = group.sampling_params.max_tokens - seq.get_output_len()
                 lookahead = min(window.remaining - int(not prefill), max(0, remaining_outputs - 1))
             status = allocation_status(group, lookahead)
-            if status != AllocStatus.OK:
+            if status != AllocStatus.OK and lookahead and allocation_status(group, 0) == AllocStatus.OK:
+                window.remaining = 1
+                lookahead, status = 0, AllocStatus.OK
+                ctl.emit("shorten_window", rid=rid, reason="kv_lookahead")
+            if status == AllocStatus.LATER:
                 # Send the current transfer with the admitted prefix and
                 # retry this request once the worker has completed it.
-                if status == AllocStatus.LATER and (incoming or evict_for(
-                        index, lambda: allocation_status(group, lookahead) == AllocStatus.OK)):
+                if incoming or evict_for(index, lambda: allocation_status(group, lookahead) == AllocStatus.OK):
                     return run_admitted()
+                status = allocation_status(group, lookahead)
+            if status != AllocStatus.OK:
                 if status == AllocStatus.NEVER:
                     for seq in group.get_seqs():
                         seq.status = SequenceStatus.FINISHED_IGNORED
@@ -250,9 +265,17 @@ class PaperPlan:
                     self.prepared.add(rid)
             # Reserve future KV capacity once per window. Subsequent append
             # calls commit actual token IDs / prefix-cache bookkeeping only.
-            if not can_append_slots(group, lookahead):
+            has_slots = can_append_slots(group, lookahead)
+            if not has_slots and lookahead and can_append_slots(group, 0):
+                window.remaining = 1
+                lookahead = 0
+                has_slots = True
+                ctl.emit("shorten_window", rid=rid, reason="kv_lookahead")
+            if not has_slots:
                 if incoming or evict_for(index, lambda: can_append_slots(group, lookahead)):
                     return run_admitted()
+                has_slots = can_append_slots(group, lookahead)
+            if not has_slots:
                 if not groups:
                     raise RuntimeError("insufficient KV capacity for one scheduling window; reduce schedule_interval")
                 window.retain_prefix(index)

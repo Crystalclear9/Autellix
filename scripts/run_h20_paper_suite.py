@@ -147,7 +147,9 @@ def build_plans(args):
                 if args.online_with_replacement:
                     figure["unique_programs"] = False
                 if args.online_seconds:
-                    figure["arrival_seconds"] = args.online_seconds
+                    figure["arrival_seconds"] = args.online_seconds + args.online_warmup
+                    if args.online_warmup:
+                        figure["steady_state_start_seconds"] = args.online_warmup
                 yield figure
         if 16 in selected:
             for count in args.offline_sizes:
@@ -268,6 +270,8 @@ def main():
     online = parser.add_mutually_exclusive_group()
     online.add_argument("--online-programs", type=int, help="programs per arrival trace for Figures 12 and 13")
     online.add_argument("--online-seconds", type=float, help="fixed Poisson arrival window for Figures 12 and 13")
+    parser.add_argument("--online-warmup", type=float, default=0,
+                        help="seconds of Poisson arrivals before the measured online window")
     parser.add_argument("--online-with-replacement", action="store_true",
                         help="allow repeated source programs in the Figures 12 and 13 Poisson replays")
     parser.add_argument("--profile-programs", type=int, help="programs per timing trace for Figures 5, 6, 17, and 19")
@@ -314,6 +318,9 @@ def main():
         parser.error("Figure 4 duration must be positive and warmup cannot be negative")
     if args.online_seconds is not None and (not math.isfinite(args.online_seconds) or args.online_seconds <= 0):
         parser.error("online arrival duration must be finite and positive")
+    if (not math.isfinite(args.online_warmup) or args.online_warmup < 0
+            or args.online_warmup and args.online_seconds is None):
+        parser.error("online warmup must be finite and nonnegative and requires --online-seconds")
     if args.autellix_boundary_scale is not None and (
             not math.isfinite(args.autellix_boundary_scale) or args.autellix_boundary_scale <= 0):
         parser.error("Autellix boundary scale must be finite and positive")

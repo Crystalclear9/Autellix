@@ -143,6 +143,35 @@ class PaperPlanTests(unittest.TestCase):
         self.assertIn(inactive, self.s.running)
         self.assertFalse(out.blocks_to_swap_out)
 
+    def test_short_window_runs_when_only_current_decode_fits(self):
+        self.ctl.config = PolicyConfig(schedule_interval=8, overprovision=0)
+        active = Group("active")
+        self.priority["active"] = 0
+        self.s.running.append(active)
+        self.s.block_manager.can_append_slots = lambda group, ahead: ahead == 0
+        plan = PaperPlan(self.s, self.ctl, 1, keep_resident_kv=True)
+        out = plan.next_step()
+        self.assertEqual([g.seq_group for g in out.scheduled_seq_groups], [active])
+        self.assertEqual(plan.window.remaining, 1)
+        self.assertFalse(out.blocks_to_swap_out)
+
+    def test_only_unused_inactive_pages_are_reclaimed_before_swap(self):
+        self.ctl.config = PolicyConfig(overprovision=0)
+        high, inactive = Group("high", True), Group("inactive")
+        self.priority.update(high=0, inactive=1)
+        self.s.waiting.append(high)
+        self.s.running.append(inactive)
+        released = []
+        self.s.block_manager.can_allocate = lambda group: self.status.OK if released else self.status.LATER
+        prefix = NS(can_append_slots=self.s.block_manager.can_append_slots,
+                    release_lookahead=lambda group: released.append(group) or 1)
+        plan = PaperPlan(self.s, self.ctl, 1, keep_resident_kv=True, prefix_cache=prefix)
+        out = plan.next_step()
+        self.assertEqual(released, [inactive])
+        self.assertEqual([g.seq_group for g in out.scheduled_seq_groups], [high])
+        self.assertIn(inactive, self.s.running)
+        self.assertFalse(out.blocks_to_swap_out)
+
     def test_allocation_pressure_evicts_lowest_priority_inactive_kv(self):
         self.ctl.config = PolicyConfig(overprovision=0)
         self.priority.update(high=0, low=1, lowest=2)

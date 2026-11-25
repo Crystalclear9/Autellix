@@ -106,6 +106,21 @@ class PrefixCacheTests(unittest.TestCase):
         self.assertEqual(free_before - self.manager.get_num_free_gpu_blocks(), 1)
         self.assertEqual(prefix.reusable_tokens(second), 64)
 
+    def test_releasing_lookahead_keeps_only_token_backed_pages(self):
+        seq, group = self.make_group(1, size=17)
+        self.allocate(seq, group)
+        self.manager.mark_blocks_as_computed(group, 16)
+        seq.data.update_num_computed_tokens(16)
+        self.manager.append_slots(seq, 32)
+        allocated = self.manager.get_block_table(seq).copy()
+        before = self.manager.get_num_free_gpu_blocks()
+        self.assertEqual(len(allocated), 4)
+        self.assertEqual(self.prefix.release_lookahead(group), 2)
+        self.assertEqual(self.manager.get_block_table(seq), allocated[:2])
+        self.assertEqual(len(self.manager.get_common_computed_block_ids([seq])), 1)
+        self.assertEqual(self.manager.get_num_free_gpu_blocks(), before + 2)
+        self.assertEqual(self.prefix.release_lookahead(group), 0)
+
     def test_decode_can_fill_its_private_page_when_no_free_page_remains(self):
         from vllm.core.block_manager_v2 import BlockSpaceManagerV2
         from integrations.vllm.prefix import ChunkedPrefixCache
