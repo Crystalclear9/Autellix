@@ -195,7 +195,8 @@ def main(argv=None):
                                 routing=case.get("routing", "program"), backend=backend,
                                 scheduler_trace=plan.get("scheduler_trace", True),
                                 queue_levels=case.get("queue_levels"),
-                                group_ready_calls=plan.get("group_ready_calls", False))
+                                group_ready_calls=plan.get("group_ready_calls", False),
+                                last_queue_fifo=case.get("last_queue_fifo", False))
                 except Exception as exc:
                     if not args.keep_going:
                         raise

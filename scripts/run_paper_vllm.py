@@ -35,6 +35,8 @@ def main():
     parser.add_argument("--interval", type=int, default=8)
     parser.add_argument("--quantum-scale", type=float, default=2)
     parser.add_argument("--boundary-scale", type=float, default=128)
+    parser.add_argument("--last-queue-fifo", action="store_true",
+                        help="keep FIFO order in the lowest priority queue until completion or promotion")
     parser.add_argument("--window-activity", action="store_true",
                         help="publish unscheduled calls' waiting time at scheduling windows")
     parser.add_argument("--keep-resident-kv", action="store_true",
@@ -78,6 +80,8 @@ def main():
 
     candidate = dict(name="autellix", policy=policy, interval=args.interval, reserve=1,
                      quantum_scale=args.quantum_scale, boundary_scale=args.boundary_scale)
+    if args.last_queue_fifo:
+        candidate["last_queue_fifo"] = True
     options = {name: True for name in ("keep_resident_kv", "publish_activity_at_window", "refill_idle_slots",
                                        "paper_chunked_prefill", "resident_reserve_only", "fused_swap",
                                        "resident_decode_headroom", "exact_prefix_cache", "recompute_on_swap_full",

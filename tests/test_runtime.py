@@ -128,6 +128,22 @@ class RuntimePolicyTests(unittest.TestCase):
         execute(["a", "b"])
         self.assertEqual(sorted(ctl.calls, key=ctl.key), ["b", "a"])
 
+    def test_last_queue_fifo_keeps_position_until_completion_or_promotion(self):
+        self.run_call("history", 4)
+        config = replace(self.config, last_queue_fifo=True)
+        ctl = RuntimeScheduler(self.table, config, clock=self.clock)
+        for rid in ("a", "b"):
+            ctl.admit(rid, "p")
+        ctl.begin(["a"])
+        self.clock.now += 4
+        ctl.executed(["a"], 4)
+        ctl.refresh()
+        self.assertEqual(sorted(ctl.calls, key=ctl.key), ["a", "b"])
+        self.assertEqual([c.queue for c in ctl.calls.values()], [2, 2])
+        self.clock.now += 65
+        ctl.refresh()
+        self.assertEqual([c.queue for c in ctl.calls.values()], [0, 0])
+
     def test_swap_cost_changes_completion_time(self):
         programs = [ProgramSpec("p", (CallSpec("a", "p", 8),))]
         model = ExecutionModel(fixed_model_time=True)

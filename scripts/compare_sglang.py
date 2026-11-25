@@ -15,7 +15,7 @@ from autellix.runtime.telemetry import GPUMonitor
 
 def trial(model, device, engine_args, trace, arm, reserve=0, interval=8, quantum_scale=1., request_timeout=600,
           boundary_scale=None, beta=8., progress_interval=0, routing="program", backend="sglang",
-          scheduler_trace=True, queue_levels=None, group_ready_calls=False):
+          scheduler_trace=True, queue_levels=None, group_ready_calls=False, last_queue_fifo=False):
     options = dict(engine_args)
     native = arm in {"sglang-native", "vllm", "vllm-opt", "vllm-opt-multistep"}
     if backend == "sglang":
@@ -30,7 +30,8 @@ def trial(model, device, engine_args, trace, arm, reserve=0, interval=8, quantum
     policy = PolicyConfig(policy="fcfs" if native else arm,
                           schedule_interval=interval, overprovision=0 if native else reserve,
                           boundaries=tuple(x * boundary_scale for x in defaults.boundaries),
-                          quanta=tuple(x * quantum_scale for x in defaults.quanta), beta=beta)
+                          quanta=tuple(x * quantum_scale for x in defaults.quanta), beta=beta,
+                          last_queue_fifo=last_queue_fifo)
     groups = device.split(";")
     with InferenceEngine([ReplicaConfig(backend, model, group, options) for group in groups],
                          policy=policy, routing=routing, scheduler_trace=scheduler_trace) as engine:
@@ -65,6 +66,8 @@ def trial(model, device, engine_args, trace, arm, reserve=0, interval=8, quantum
         result["beta"] = beta
         if queue_levels is not None:
             result["queue_levels"] = queue_levels
+        if last_queue_fifo:
+            result["last_queue_fifo"] = True
         # For these sequential programs the paper metric uses entire response
         # time, including initial admission/driver delay, divided by output count.
         counts = {p["program_id"]: 0 for p in trace}

@@ -27,6 +27,7 @@ class PolicyConfig:
     schedule_interval: int = 8
     overprovision: int = 1
     implementation: str = "paper"
+    last_queue_fifo: bool = False
 
     def __post_init__(self):
         if self.implementation not in {"paper", "compat"}:
@@ -320,9 +321,11 @@ class RuntimeScheduler:
         # Programs without completed service or wait already use the zero default.
         totals = self.table.snapshot(include_zero=False) if self.config.policy in {"plas", "atlas"} else {}
         changes = []
+        last_queue = len(self.config.quanta) - 1
         for call in self.calls.values():
             self._wait_until(call, now)
-            expired = call.quantum <= 0 and call.decode_steps >= self.min_decode_steps
+            expired = (call.quantum <= 0 and call.decode_steps >= self.min_decode_steps
+                       and (not self.config.last_queue_fifo or call.queue < last_queue))
             if self.config.policy == "fcfs" or (call.queue == 0 and not expired):
                 continue
             service, wait = totals.get(call.pid, (0., 0.))
@@ -332,7 +335,7 @@ class RuntimeScheduler:
         # Requeue simultaneous demotions/promotions in current queue FIFO order.
         for _, _, call, expired, starved in sorted(changes):
             if expired:
-                call.queue = min(call.queue + 1, len(self.config.quanta) - 1)
+                call.queue = min(call.queue + 1, last_queue)
                 call.quantum = self.config.quanta[call.queue]
                 call.decode_steps = 0
                 self.counter += 1

@@ -314,6 +314,8 @@ FCFS 用于区分执行优化与程序优先级带来的收益。
 可核对延迟变化是否伴随优先级分布变化。加 `--deduplicate-prefill` 时，三个自定义调度对照
 及其扩展队列组使用相同的前缀复用策略。
 `--autellix-boundary-scale 128` 加入独立的分箱边界对照，保持队列数量、时间片和引擎资源一致。
+`--autellix-last-queue-fifo` 加入末级 FIFO 对照。已在末级的调用用完时间片后保留排队位置，
+仍按原有规则接受防饥饿提级。用 `run_paper_vllm.py --last-queue-fifo` 可单独运行该配置。
 `--group-ready-calls` 将同一个程序在同一时刻就绪的预编码分支一起送到副本。
 LATS 的组间依赖与就绪时间沿用原轨迹，所有对照组使用同一种提交方式。
 采集 LATS 时可用 `collect_lats.py --parallel-evaluations` 并行提交同一搜索阶段的候选评分。
