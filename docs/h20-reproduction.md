@@ -63,6 +63,38 @@ H20，70B 在 SGLang 使用流水线并行，在 vLLM 使用四卡张量并行�
 0.6.1、启用分块 prefill 和前缀缓存的 vLLM-opt，以及 MLFQ。
 [Autellix 论文，第 6 节](https://arxiv.org/html/2502.13965v1#S6)
 
+## 8B、14B、70B 后端配对
+
+2026-11-26 在 H20-2 上复用共享的 Llama-3.1-8B、Qwen3-14B 和 Llama-3.1-70B BF16 权重。
+三个模型的 BFCL 配对分别回放 32、16、12 个程序。ShareGPT 补测分别回放 12、8、6 个程序。
+8B 和 14B 使用单卡。70B 的 SGLang 使用双卡 PP，vLLM 使用双卡 TP。每组使用相同的
+输入轨迹、输出长度、物理卡、活动批次上限和 65,536 个 GPU KV token 的预算。
+
+下表比较原生 SGLang 与关闭活动状态发布的 Autellix PLAS。70B 的两组共用相同的流水线执行配置。
+
+| 模型与负载 | 吞吐（token/s） | 吞吐变化 | 平均延迟（毫秒/token） |
+| --- | ---: | ---: | ---: |
+| 8B BFCL | 142.70 → 163.94 | +14.9% | 156.67 → 126.61 |
+| 8B ShareGPT | 387.15 → 362.45 | −6.4% | 8.05 → 8.64 |
+| 14B BFCL | 100.66 → 86.55 | −14.0% | 154.82 → 178.00 |
+| 14B ShareGPT | 189.00 → 183.98 | −2.7% | 12.68 → 13.17 |
+| 70B BFCL | 38.81 → 27.07 | −30.2% | 318.99 → 472.69 |
+| 70B ShareGPT | 39.56 → 37.99 | −4.0% | 57.46 → 60.43 |
+
+开启活动状态发布的 BFCL PLAS 组在 8B、14B、70B 分别为 158.65、86.01、27.38 token/s。
+关闭发布对 70B 配对影响很小。该路径仍在每个流水线阶段同步 GPU 计时，并在部分抢占中经主机交换 KV。
+
+8B 的 vLLM BFCL 对照由 vLLM-opt 的 146.12 token/s 增至 Autellix 的 156.48。
+再启用 `kv_aware_admission` 后达到 198.92 token/s，均值由 149.42 降至 95.10 毫秒/token。
+常规 Autellix 组的 19 次状态采样中有 9 次存在已换出请求，按页接纳组的 15 次采样中均为零。
+14B 的 Autellix 吞吐相对 vLLM-opt 下降 4.2%。70B 提高 6.7%，平均延迟下降 5.0%，
+P95 从 343.45 增至 358.62 毫秒/token。
+
+9 份计划、22 次运行的压缩检查点及两条 14B 输入轨迹保存在本地
+`outputs/fjr-h20-model-pairs-20261126/`。复跑使用
+`python scripts/run_sglang_matrix.py --plan PLAN --output CHECKPOINT`。
+本地副本通过 SHA-256 和逐调用 token 数校验后，已释放三张实验卡并清理 H20 上的本轮临时目录。
+
 ## 单卡 Llama‑3.1‑8B 论文对照
 
 在 `autellix-vllm061` 环境中使用共享的 `Meta-Llama-3.1-8B` BF16 权重。ShareGPT 从
