@@ -8,7 +8,7 @@ from integrations.sglang.overlap import OverlapState, install, resolve_outputs
 
 
 class StableDecodeOverlapTests(unittest.TestCase):
-    def scheduler(self, *, lazy_resolve=False):
+    def scheduler(self, *, lazy_resolve=False, prefill_decode=False):
         class Native:
             def __init__(self):
                 req = NS(rid="resident", finished=Mock(return_value=False), to_abort=False)
@@ -35,8 +35,69 @@ class StableDecodeOverlapTests(unittest.TestCase):
             def get_next_batch_to_run(self):
                 return self.native_next(self.last_batch)
 
-        install(Native, lazy_resolve=lazy_resolve)
+        install(Native, lazy_resolve=lazy_resolve, prefill_decode=prefill_decode)
         return Native()
+
+    def pending_prefill(self, *, resident=True):
+        scheduler = self.scheduler(prefill_decode=True)
+        running = scheduler.running_batch
+        if not resident:
+            running.reqs.clear()
+        running.merge_batch = Mock(side_effect=lambda batch: running.reqs.extend(batch.reqs))
+        req = NS(rid="prefill", finished=Mock(return_value=False), to_abort=False)
+        prefill = NS(reqs=[req], has_grammar=False, is_hybrid=False, chunked_req=None,
+                     decoding_reqs=None, forward_mode=NS(is_decode=lambda: False, is_extend=lambda: True),
+                     prepare_for_decode=Mock())
+        scheduler.last_batch = prefill
+        scheduler._autellix_window.active = {req.rid for req in running.reqs + prefill.reqs}
+        scheduler.token_to_kv_pool_allocator.available_size.return_value = 2
+        return scheduler, running, prefill
+
+    def test_prefill_to_first_decode_reuses_the_already_prepared_window(self):
+        for resident in (False, True):
+            with self.subTest(resident=resident):
+                scheduler, running, prefill = self.pending_prefill(resident=resident)
+                prefill_requests = prefill.reqs.copy()
+                result = scheduler.get_next_batch_to_run()
+                self.assertIs(result, running if resident else prefill)
+                self.assertIs(result, scheduler.running_batch)
+                self.assertEqual(prefill.reqs, prefill_requests)
+                result.prepare_for_decode.assert_called_once_with()
+                if resident:
+                    running.merge_batch.assert_called_once_with(prefill)
+                else:
+                    running.merge_batch.assert_not_called()
+                self.assertIsNone(scheduler._autellix_overlap.drained)
+                scheduler.native_next.assert_not_called()
+                requests = ["resident", "prefill"] if resident else ["prefill"]
+                scheduler.autellix.emit.assert_called_once_with("overlap_prefill_decode", requests=requests,
+                                                                prefill_requests=["prefill"])
+
+    def test_prefill_to_decode_drains_if_a_fresh_plan_or_more_slots_are_needed(self):
+        for reason in ("window", "input", "chunk", "mixed", "pressure", "retire", "refill", "reserve"):
+            with self.subTest(reason=reason):
+                scheduler, running, prefill = self.pending_prefill()
+                if reason == "window":
+                    scheduler._autellix_window.remaining = 0
+                elif reason == "input":
+                    scheduler.process_input_requests(["cancel"])
+                elif reason == "chunk":
+                    prefill.chunked_req = prefill.reqs[0]
+                elif reason == "mixed":
+                    prefill.decoding_reqs = [object()]
+                elif reason == "pressure":
+                    scheduler.token_to_kv_pool_allocator.available_size.return_value = 1
+                elif reason == "retire":
+                    running.reqs[0].finished.return_value = True
+                elif reason == "refill":
+                    scheduler.waiting_queue.append("waiting")
+                else:
+                    scheduler._autellix_window.reserve.add("unprepared")
+                self.assertIsNone(scheduler.get_next_batch_to_run())
+                self.assertIs(scheduler._autellix_overlap.drained, prefill)
+                running.merge_batch.assert_not_called()
+                prefill.prepare_for_decode.assert_not_called()
+                running.prepare_for_decode.assert_not_called()
 
     def test_stable_continuation_then_deferred_control_at_empty_boundary(self):
         scheduler = self.scheduler()

@@ -50,6 +50,11 @@ class NativeBaselineTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "requires autellix_stable_decode_overlap"):
                 SGLangBackend("unused", "unused", autellix_overlap_lazy_resolve=True)
 
+    def test_prefill_decode_handoff_requires_stable_decode_overlap(self):
+        with patch("integrations.sglang.backend.version", return_value="0.4.9.post6"):
+            with self.assertRaisesRegex(ValueError, "requires autellix_stable_decode_overlap"):
+                SGLangBackend("unused", "unused", autellix_overlap_prefill_decode=True)
+
     def test_modern_pipeline_native_target_loads_tied_embedding_compatibility(self):
         module = ModuleType("sglang.srt.managers.scheduler")
         module.Scheduler = type("Scheduler", (), {})

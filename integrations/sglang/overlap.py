@@ -47,6 +47,15 @@ class OverlapState:
             controller.emit("overlap_result", batch_id=bid, requests=rids)
 
 
+def prepared_window(scheduler, running):
+    window = scheduler._autellix_window
+    prepared = scheduler._autellix_reserve
+    if scheduler.waiting_queue:
+        # A queued request alone need not break a full or capacity-limited plan.
+        return window.can_continue_decode(running, prepared)
+    return running == window.active and window.reserve.issubset(prepared)
+
+
 def drain_reason(scheduler, pending, state):
     window = scheduler._autellix_window
     if state.deferred_inputs:
@@ -64,13 +73,40 @@ def drain_reason(scheduler, pending, state):
     if (scheduler.token_to_kv_pool_allocator.available_size()
             < len(pending.reqs) * scheduler.decode_mem_cache_buf_multiplier):
         return "pressure"
-    running = {req.rid for req in pending.reqs}
-    prepared = scheduler._autellix_reserve
-    if scheduler.waiting_queue:
-        # Use the same prepared-window fast path as synchronous decode. A
-        # queued request alone need not break a full or capacity-limited plan.
-        return None if window.can_continue_decode(running, prepared) else "refill"
-    return None if running == window.active and window.reserve.issubset(prepared) else "cohort"
+    if prepared_window(scheduler, {req.rid for req in pending.reqs}):
+        return None
+    return "refill" if scheduler.waiting_queue else "cohort"
+
+
+def prepare_first_decode(scheduler, prefill):
+    """Use the native prefill handoff without making an admission decision."""
+    window, running = scheduler._autellix_window, scheduler.running_batch
+    if (not window.remaining or scheduler.chunked_req is not None or scheduler.grammar_queue
+            or not prefill.forward_mode.is_extend() or prefill.decoding_reqs or prefill.chunked_req is not None
+            or prefill.has_grammar or prefill.is_hybrid or not prefill.reqs or running is prefill
+            or (running.reqs and (running.has_grammar or running.is_hybrid))):
+        return None
+    requests = running.reqs + prefill.reqs
+    rids = {req.rid for req in requests}
+    if (len(rids) != len(requests) or any(req.finished() or req.to_abort for req in requests)
+            or not prepared_window(scheduler, rids)
+            or scheduler.token_to_kv_pool_allocator.available_size()
+            < len(requests) * scheduler.decode_mem_cache_buf_multiplier):
+        return None
+
+    # The native loop already queued a result copy of the prefill. Merge and
+    # append decode positions exactly as native overlap would before readback.
+    # Free space was checked without evicting anything. The worker serializes
+    # KV writes on its forward stream, and the prior batch's lengths stay fixed.
+    if running.reqs:
+        running.merge_batch(prefill)
+    else:
+        running = scheduler.running_batch = prefill
+    running.prepare_for_decode()
+    if scheduler.autellix.trace:
+        scheduler.autellix.emit("overlap_prefill_decode", requests=[req.rid for req in requests],
+                                prefill_requests=[req.rid for req in prefill.reqs])
+    return running
 
 
 def resolve_outputs(scheduler, resident, *, policy):
@@ -82,7 +118,7 @@ def resolve_outputs(scheduler, resident, *, policy):
             scheduler.autellix.emit("overlap_resolve", policy=policy, requests=[req.rid for req in resident.reqs])
 
 
-def install(cls, *, lazy_resolve=False):
+def install(cls, *, lazy_resolve=False, prefill_decode=False):
     native_input, native_next = cls.process_input_requests, cls.get_next_batch_to_run
 
     def process_input(self, requests):
@@ -108,6 +144,10 @@ def install(cls, *, lazy_resolve=False):
                 if self.autellix.trace:
                     self.autellix.emit("overlap_continue_decode", requests=[req.rid for req in pending.reqs])
                 return pending
+            if prefill_decode and reason == "prefill":
+                batch = prepare_first_decode(self, pending)
+                if batch is not None:
+                    return batch
             state.drained = pending
             if self.autellix.trace:
                 self.autellix.emit("overlap_drain", reason=reason)
