@@ -34,7 +34,7 @@ def run_scheduler_process(*args, autellix_options, **kwargs):
         schedule_policy.CLIP_MAX_NEW_TOKENS_ESTIMATION = autellix_options["config"]["schedule_interval"]
     install(module.Scheduler, autellix_options)
     from .pipeline import install as install_pipeline
-    install_pipeline(module.Scheduler)
+    install_pipeline(module.Scheduler, timing_metadata=autellix_options.get("pipeline_timing_metadata", True))
     from .profiling import install as install_profile
     install_profile(module.Scheduler)
     return module.run_scheduler_process(*args, **kwargs)
@@ -250,14 +250,19 @@ def install(cls, options):
         if self._autellix_paper and self._autellix_window is not None and not ready:
             # Decode continuation: no native prefill admission / priority pass.
             return None
+        host = self._autellix_host
+        last_restore = -1
+        if host is not None:
+            last_restore = max((i for i, req in enumerate(ready)
+                                if req.rid in host.saved or req.rid in self._autellix_reserve), default=-1)
         blocked = set()
         for ready_index, req in enumerate(ready):
             if (self._autellix_paper and self._autellix_window is not None
                     and req.rid not in self._autellix_window.cohort):
                 blocked.add(req.rid)
                 continue
-            if self._autellix_host is not None and req.rid in self._autellix_host.saved:
-                restored = self._autellix_host.restore(req.rid)
+            if host is not None and req.rid in host.saved:
+                restored = host.restore(req.rid)
                 if not restored and self._autellix_reserve:
                     if self._autellix_window is not None:
                         order = {rid: i for i, rid in enumerate(self._autellix_window.cohort)}
@@ -267,12 +272,12 @@ def install(cls, options):
                     release_reserves(self, inactive)
                     if self._autellix_window is not None:
                         self._autellix_window.drop_reserve()
-                    restored = self._autellix_host.restore(req.rid)
+                    restored = host.restore(req.rid)
                 if restored:
                     # A later restoration can evict radix entries before native
                     # admission runs. Protect every restored higher-priority
                     # prefix until that admission has taken ownership.
-                    tokens, _ = self._autellix_host.saved[req.rid]
+                    tokens, _ = host.saved[req.rid]
                     matched = self.tree_cache.match_prefix(tokens)
                     if len(matched.device_indices) != len(tokens):
                         raise RuntimeError("restored KV prefix is incomplete before admission")
@@ -288,7 +293,7 @@ def install(cls, options):
                     # restoration. A successfully prepared prefix can still run.
                     blocked.update(r.rid for r in ready[ready_index:])
                     break
-            elif self._autellix_host is not None:
+            elif ready_index < last_restore:
                 # A new call can already have a long cached prefix. Preserve it
                 # while lower-priority host copies are restored below.
                 req.init_next_round_input(self.tree_cache)

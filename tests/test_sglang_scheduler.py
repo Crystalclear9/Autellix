@@ -204,8 +204,8 @@ class CompletedDecodeTests(unittest.TestCase):
                 scheduler.autellix.table.close()
 
     def test_lower_restoration_cannot_block_new_higher_prefill(self):
-        for cached in (0, 3):
-            with self.subTest(cached=cached), tempfile.TemporaryDirectory() as directory:
+        for cached, host_restore in ((0, True), (3, True), (3, False)):
+            with self.subTest(cached=cached, host_restore=host_restore), tempfile.TemporaryDirectory() as directory:
                 locks, resident, attempts = set(), {"higher"}, []
                 lengths = {"higher": cached, "lower": 5}
                 class Native:
@@ -221,9 +221,8 @@ class CompletedDecodeTests(unittest.TestCase):
                     check_memory = Mock()
                     def get_new_batch_prefill(self):
                         attempts.append([r.rid for r in self.waiting_queue])
-                        self.assert_prefix = "higher" in resident and "higher" in locks
-                        if not self.assert_prefix:
-                            raise AssertionError("new higher call lost its cached prefix")
+                        if "higher" not in resident or ("higher" in locks) != host_restore:
+                            raise AssertionError("unexpected temporary lock on the new higher call")
                         available = 10 - sum(lengths[r] for r in locks)
                         if 8 - cached >= available:
                             return None
@@ -241,7 +240,7 @@ class CompletedDecodeTests(unittest.TestCase):
                     scheduler.running_batch = SimpleNamespace(reqs=[], filter_batch=lambda: None)
                     scheduler.waiting_queue = [SimpleNamespace(rid="higher", last_node="higher",
                         init_next_round_input=lambda tree: None), SimpleNamespace(rid="lower")]
-                    saved = {"lower": (["lower"]*5, None)}
+                    saved = {"lower": (["lower"]*5, None)} if host_restore else {}
                     def restore(rid):
                         if "higher" not in locks:
                             resident.discard("higher")
@@ -253,11 +252,12 @@ class CompletedDecodeTests(unittest.TestCase):
                         match_prefix=lambda tokens: SimpleNamespace(device_indices=tokens, last_device_node=tokens[0]),
                         inc_lock_ref=locks.add, dec_lock_ref=locks.remove)
                     result = scheduler.get_new_batch_prefill()
-                    self.assertEqual([r.rid for r in result.reqs], ["higher"])
-                    self.assertEqual(attempts, [["higher", "lower"], ["higher"]])
-                    self.assertEqual([r.rid for r in scheduler.waiting_queue], ["lower"])
-                    self.assertEqual(scheduler._autellix_window.cohort, ["higher"])
-                    self.assertEqual(set(saved), {"lower"})
+                    admitted = ["higher"] if host_restore else ["higher", "lower"]
+                    self.assertEqual([r.rid for r in result.reqs], admitted)
+                    self.assertEqual(attempts, [["higher", "lower"], ["higher"]] if host_restore else [admitted])
+                    self.assertEqual([r.rid for r in scheduler.waiting_queue], ["lower"] if host_restore else [])
+                    self.assertEqual(scheduler._autellix_window.cohort, admitted)
+                    self.assertEqual(set(saved), {"lower"} if host_restore else set())
                     self.assertEqual(locks, set())
                 finally:
                     scheduler.autellix.table.close()

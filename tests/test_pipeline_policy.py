@@ -4,14 +4,54 @@ import unittest
 from dataclasses import asdict
 from pathlib import Path
 from types import ModuleType, SimpleNamespace as NS
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from autellix.runtime import ReplicaConfig
 from autellix.runtime.policy import PolicyConfig, ProgramTable, RuntimeScheduler
-from integrations.sglang.pipeline import PipelineTable, PolicyTape, abort_inflight, configure
+from integrations.sglang.pipeline import PipelineTable, PolicyTape, abort_inflight, configure, install
 
 
 class PipelinePolicyTests(unittest.TestCase):
+    def test_pipeline_timing_follows_activations_and_sampled_tokens(self):
+        for metadata in (True, False):
+            with self.subTest(metadata=metadata):
+                wires = [[], [], []]
+
+                class Stage:
+                    def __init__(self, rank):
+                        self.pp_size, self.device = len(wires), "cuda"
+                        self.pp_group = NS(
+                            is_last_rank=rank == len(wires) - 1,
+                            send_tensor_dict=wires[rank].append,
+                            recv_tensor_dict=lambda: wires[rank - 1].pop(0),
+                        )
+                        self.tp_worker = NS(model_runner=NS(forward=lambda: "model output"))
+
+                def event(**kwargs):
+                    return Mock(elapsed_time=lambda _: 5.)
+
+                cuda_event = Mock(side_effect=event)
+                tensor = Mock(side_effect=lambda value, **kwargs: NS(item=lambda: value))
+                fake_torch = NS(cuda=NS(Event=cuda_event), tensor=tensor, float64="float64")
+                with patch.dict(sys.modules, {"torch": fake_torch}):
+                    install(Stage, timing_metadata=metadata)
+                first, middle, last = (Stage(i) for i in range(len(wires)))
+
+                for _ in range(2):
+                    for source, target, key in ((first, middle, "hidden_states"), (middle, last, "hidden_states"),
+                                                (last, first, "next_token_ids")):
+                        self.assertEqual(source.tp_worker.model_runner.forward(), "model output")
+                        source.pp_group.send_tensor_dict({key: [7]})
+                        received = target.pp_group.recv_tensor_dict()
+                        self.assertEqual(received[key], [7])
+                        self.assertEqual("autellix_gpu_seconds" in received, key == "next_token_ids")
+                    self.assertAlmostEqual(first._autellix_completed_seconds, .015)
+                    first.pp_group.send_tensor_dict(received)
+                    middle.pp_group.recv_tensor_dict()
+                    self.assertAlmostEqual(middle._autellix_completed_seconds, .015)
+                self.assertEqual(cuda_event.call_count, 2 * len(wires))
+                self.assertEqual(tensor.call_count, 0 if metadata else 2 * len(wires))
+
     def test_pipeline_applies_controller_and_window_options(self):
         packages = [ModuleType(name) for name in (
             "sglang", "sglang.srt", "sglang.srt.managers", "sglang.srt.managers.scheduler")]

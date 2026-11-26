@@ -142,7 +142,7 @@ def abort_inflight(scheduler, request):
                     req.to_abort = True
 
 
-def install(cls):
+def install(cls, *, timing_metadata=True):
     """Time all model stages, returning accumulated service with sampled tokens."""
     import torch
     original_init = cls.__init__
@@ -157,12 +157,14 @@ def install(cls):
         original_send = self.pp_group.send_tensor_dict
         runner = self.tp_worker.model_runner
         original_forward = runner.forward
+        start = torch.cuda.Event(enable_timing=True)
+        end = torch.cuda.Event(enable_timing=True)
 
         def recv(*args, **kwargs):
             tensors = original_recv(*args, **kwargs)
             seconds = tensors.pop("autellix_gpu_seconds", None)
             if seconds is not None:
-                value = seconds.item()
+                value = seconds if timing_metadata else seconds.item()
                 if "next_token_ids" in tensors:
                     self._autellix_completed_seconds = value
                     # Non-first stages forward this previous microbatch's outputs.
@@ -172,17 +174,20 @@ def install(cls):
             return tensors
 
         def forward(*args, **kwargs):
-            start, end = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
             start.record()
             output = original_forward(*args, **kwargs)
-            end.record(); end.synchronize()
+            end.record()
+            end.synchronize()
             self._autellix_model_seconds = self._autellix_incoming_seconds + start.elapsed_time(end) / 1000
             return output
 
         def send(tensors, *args, **kwargs):
             if "next_token_ids" not in tensors or self.pp_group.is_last_rank:
-                tensors["autellix_gpu_seconds"] = torch.tensor(
-                    self._autellix_model_seconds, dtype=torch.float64, device=self.device)
+                seconds = self._autellix_model_seconds
+                # SGLang already sends Python scalars with tensor metadata.
+                # The elapsed time is on the host and needs no NCCL payload.
+                tensors["autellix_gpu_seconds"] = (seconds if timing_metadata else
+                                                   torch.tensor(seconds, dtype=torch.float64, device=self.device))
             return original_send(tensors, *args, **kwargs)
 
         self.pp_group.recv_tensor_dict = recv

@@ -37,6 +37,7 @@ class SGLangBackend:
         resident_reserve_only = engine_args.pop("autellix_resident_reserve_only", False)
         mix_prefill_decode = engine_args.pop("autellix_mix_prefill_decode", True)
         defer_model_timing = engine_args.pop("autellix_defer_model_timing", True)
+        pipeline_timing_metadata = engine_args.pop("autellix_pipeline_timing_metadata", True)
         fused_swap = engine_args.pop("autellix_fused_swap", False)
         measure_timing = engine_args.pop("autellix_measure_timing", False)
         if legacy_gpu:
@@ -69,6 +70,7 @@ class SGLangBackend:
                        resident_reserve_only=resident_reserve_only and config.implementation == "paper",
                        mix_prefill_decode=mix_prefill_decode,
                        defer_model_timing=defer_model_timing,
+                       pipeline_timing_metadata=pipeline_timing_metadata,
                        fused_swap=fused_swap,
                        measure_timing=measure_timing,
                        attention_score_elements=score_elements,
