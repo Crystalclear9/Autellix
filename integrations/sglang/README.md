@@ -102,7 +102,9 @@ GPU 回归使用 `AUTELLIX_TEST_LEGACY_GPU=1`；仍需设置后端和模型环�
 `disable_overlap_schedule=true` 测量原生 overlap 的影响。
 单阶段 Autellix 默认在原生输出读回后结算 CUDA event 时间，并在程序完成前写入服务时间。
 `autellix_defer_model_timing=false` 可用于对照，恢复读回前的独立同步。
-流水线继续使用各阶段的前向计时。
+流水线用各阶段的 CUDA event 累计前向时间，并通过原有消息的元数据传递累计值。
+`autellix_pipeline_timing_metadata=false` 可用来对照独立的 GPU 标量传输。
+仅当之后有需要保护的 KV 恢复时，调度器才提前锁住新的高优先级预填充前缀。
 `policy=fcfs` 走 Autellix 的调度窗口和 KV 管理，可与同配置的 PLAS/ATLAS 配对。
 
 配对实验、输入构造限制和结论见 [论文对照审计](../../docs/autellix-paper-audit.md)。
