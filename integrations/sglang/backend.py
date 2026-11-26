@@ -60,6 +60,10 @@ class SGLangBackend:
         fused_decode_metadata = engine_args.pop("autellix_fused_decode_metadata", False)
         if fused_decode_metadata and (self.native or pp != 1 or legacy_gpu or config.implementation != "paper"):
             raise ValueError("autellix_fused_decode_metadata requires modern single-stage paper mode")
+        stable_decode_overlap = engine_args.pop("autellix_stable_decode_overlap", False)
+        if stable_decode_overlap and (self.native or pp != 1 or legacy_gpu or config.implementation != "paper"
+                                      or engine_args.get("disaggregation_mode", "null") != "null"):
+            raise ValueError("autellix_stable_decode_overlap requires modern single-stage paper mode without disaggregation")
         pipeline_timing_metadata = engine_args.pop("autellix_pipeline_timing_metadata", True)
         fused_swap = engine_args.pop("autellix_fused_swap", False)
         measure_timing = engine_args.pop("autellix_measure_timing", False)
@@ -100,6 +104,7 @@ class SGLangBackend:
                        min_decode_steps=min_decode_steps,
                        defer_model_timing=defer_model_timing,
                        fused_decode_metadata=fused_decode_metadata,
+                       stable_decode_overlap=stable_decode_overlap,
                        pipeline_timing_metadata=pipeline_timing_metadata,
                        fused_swap=fused_swap,
                        measure_timing=measure_timing,
@@ -120,7 +125,7 @@ class SGLangBackend:
             args.update(disable_cuda_graph=True, schedule_policy="fcfs", attention_backend="triton")
         args.update(engine_args)
         if not native_defaults:
-            args.update(disable_overlap_schedule=True, page_size=1)
+            args.update(disable_overlap_schedule=not stable_decode_overlap, page_size=1)
             args.setdefault("chunked_prefill_size", -1)
             if (args["chunked_prefill_size"] or 0) > 0 and (pp > 1 or legacy_gpu or config.implementation != "paper"):
                 raise ValueError("Autellix chunked prefill requires a modern single-GPU paper scheduler")

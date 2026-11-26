@@ -58,6 +58,7 @@ def install(cls, options):
     defer_model_timing = options.get("defer_model_timing", True)
     min_decode_steps = options.get("min_decode_steps", 0)
     mix_prefill_max_tokens = options.get("mix_prefill_max_tokens", 0)
+    stable_decode_overlap = options.get("stable_decode_overlap", False)
     prepare_fused_decode = None
     if options.get("fused_decode_metadata"):
         from .decode import prepare_decode as prepare_fused_decode
@@ -76,6 +77,11 @@ def install(cls, options):
                                             publish_activity_at_window=options.get("publish_activity_at_window", False),
                                             publish_activity=options.get("publish_activity", True),
                                             min_decode_steps=min_decode_steps)
+            if stable_decode_overlap:
+                if not self.enable_overlap or not self.is_generation or self.is_hybrid:
+                    raise ValueError("autellix_stable_decode_overlap requires native overlap on a non-hybrid generation model")
+                from .overlap import OverlapState
+                self._autellix_overlap = OverlapState(self.tp_worker.worker, torch)
         self._autellix_steps = 0
         self._autellix_paper = self.autellix.config.implementation == "paper"
         if self._autellix_paper:
@@ -428,7 +434,8 @@ def install(cls, options):
                     ctl.emit("resume_cached", rid=req.rid)
                 if self._autellix_host is not None:
                     self._autellix_host.discard(req.rid)
-            if options.get("decode_cached_resumes") and self._autellix_paper and self.pp_size == 1:
+            if (options.get("decode_cached_resumes") and self._autellix_paper and self.pp_size == 1
+                    and not stable_decode_overlap):
                 use_decode_for_cached_resumes(self, result)
         return result
 
@@ -467,7 +474,10 @@ def install(cls, options):
             self._autellix_inflight.update(rids)
             result = original_run(self, batch)
         else:
-            self.autellix.begin(rids)
+            if stable_decode_overlap:
+                self.autellix.begin(rids, active_rids=self._autellix_overlap.active_requests())
+            else:
+                self.autellix.begin(rids)
             prefill_count = None
             phase = None
             if measure_timing or min_decode_steps:
@@ -479,17 +489,21 @@ def install(cls, options):
                     phase = dict(phase="mixed" if prefill_count and decoding else "prefill" if prefill_count else "decode",
                                  input_tokens=input_tokens, prefill_tokens=sum(prefill),
                                  resumed_prefill_tokens=sum(n for req, n in zip(batch.reqs, prefill) if req.output_ids))
-            start, end = self._autellix_model_events
-            start.record()
-            result = original_run(self, batch)
-            end.record()
-            if defer_model_timing:
-                # The non-overlap loop processes this result before its next
-                # scheduling decision. Native token readback usually completes
-                # the events without a separate blocking wait.
-                self._autellix_pending_timing = (rids, prefill_count if min_decode_steps else None, phase)
+            prefill_count = prefill_count if min_decode_steps else None
+            if stable_decode_overlap:
+                result = original_run(self, batch)
+                self._autellix_overlap.pending[result.bid] = (rids, prefill_count, phase)
             else:
-                account_model_time(self, rids, prefill_count if min_decode_steps else None, phase, synchronize=True)
+                start, end = self._autellix_model_events
+                start.record()
+                result = original_run(self, batch)
+                end.record()
+                if defer_model_timing:
+                    # Native token readback usually completes the events
+                    # without a separate blocking wait.
+                    self._autellix_pending_timing = (rids, prefill_count, phase)
+                else:
+                    account_model_time(self, rids, prefill_count, phase, synchronize=True)
         if self._autellix_window is not None:
             only_prefill = batch.forward_mode.is_extend() and not getattr(batch, "decoding_reqs", None)
             ctl = self.autellix
@@ -520,13 +534,23 @@ def install(cls, options):
         return batch
 
     def process(self, batch, result, *a, **kw):
-        reqs = list(batch.reqs)
+        reqs = list(batch.reqs or ())
         if self.pp_size > 1:
             seconds = self._autellix_tape.value("gpu_seconds", lambda: self._autellix_completed_seconds)
             self.autellix.executed([req.rid for req in reqs], seconds)
             self._autellix_inflight.difference_update(req.rid for req in reqs)
+        if stable_decode_overlap and self._autellix_overlap.drained is not None:
+            self.cur_batch = self._autellix_overlap.drained
         ret = original_result(self, batch, result, *a, **kw)
-        if self.pp_size == 1 and self._autellix_pending_timing is not None:
+        if stable_decode_overlap and result is not None:
+            self._autellix_overlap.finish(result.bid, self.autellix)
+            drained = self._autellix_overlap.drained
+            if drained is not None:
+                # The native future ring can be overwritten by later prefills
+                # before these resident requests run again. Materialize at drain.
+                from sglang.srt.managers.tp_worker_overlap_thread import resolve_future_token_ids
+                resolve_future_token_ids(drained.output_ids, self.tp_worker.future_token_ids_map)
+        elif self.pp_size == 1 and self._autellix_pending_timing is not None:
             rids, prefill_count, phase = self._autellix_pending_timing
             self._autellix_pending_timing = None
             account_model_time(self, rids, prefill_count, phase, synchronize=False)
@@ -580,6 +604,9 @@ def install(cls, options):
     cls.process_batch_result = process
     cls.abort_request = abort
     cls.check_memory = check_memory
+    if stable_decode_overlap:
+        from .overlap import install as install_overlap
+        install_overlap(cls)
     if measure_timing:
         original_next = cls.get_next_batch_to_run
 

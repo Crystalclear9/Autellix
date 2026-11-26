@@ -17,7 +17,7 @@ def install(cls):
         self._cpu_profile.enable()
 
     def process(self, batch, result, *args, **kwargs):
-        requests = list(batch.reqs)
+        requests = list(batch.reqs or ())
         value = original_process(self, batch, result, *args, **kwargs)
         if any(req.finished() for req in requests):
             self._cpu_profile.dump_stats(str(Path(directory) / f"scheduler-{os.getpid()}.prof"))
