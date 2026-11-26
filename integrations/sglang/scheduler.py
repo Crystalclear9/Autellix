@@ -150,7 +150,8 @@ def install(cls, options):
             return
         running.filter_batch()
         prefill_tokens = batch.extend_num_tokens
-        if (not running.reqs or prefill_tokens + len(running.reqs) > self.chunked_prefill_size
+        input_budget = min(self.chunked_prefill_size, self.max_prefill_tokens)
+        if (not running.reqs or prefill_tokens + len(running.reqs) > input_budget
                 or not running.check_decode_mem(self.decode_mem_cache_buf_multiplier)):
             return
         running.prepare_for_decode()

@@ -42,17 +42,19 @@ class CompletedDecodeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, patch.dict("sys.modules", {"torch": Mock()}):
             install(Native, {"table_path": str(Path(directory, "state.sqlite")), "config": {},
                              "mix_prefill_max_tokens": 8})
-            for tokens, chunk, enough_kv, return_logprob, mixes in (
-                    (8, 9, True, False, True),
-                    (9, 16, True, False, False),
-                    (8, 8, True, False, False),
-                    (8, 9, False, False, False),
-                    (8, 9, True, True, False)):
-                with self.subTest(tokens=tokens, chunk=chunk, kv=enough_kv, logprob=return_logprob):
+            for tokens, chunk, limit, enough_kv, return_logprob, mixes in (
+                    (8, 9, 16, True, False, True),
+                    (9, 16, 16, True, False, False),
+                    (8, 8, 16, True, False, False),
+                    (8, 9, 8, True, False, False),
+                    (8, 9, 16, False, False, False),
+                    (8, 9, 16, True, True, False)):
+                with self.subTest(tokens=tokens, chunk=chunk, limit=limit, kv=enough_kv, logprob=return_logprob):
                     scheduler = Native()
                     running = scheduler.running_batch
                     running.check_decode_mem.return_value = enough_kv
                     scheduler.chunked_prefill_size = chunk
+                    scheduler.max_prefill_tokens = limit
                     scheduler.prefill = SimpleNamespace(forward_mode=SimpleNamespace(is_extend=lambda: True),
                                                         extend_num_tokens=tokens, return_logprob=return_logprob,
                                                         decoding_reqs=None, mix_with_running=Mock())
