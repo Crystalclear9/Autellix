@@ -9,6 +9,7 @@ class OverlapState:
         self.worker_events = {}
         self.deferred_inputs = []
         self.drained = None
+        self.window_step = None
         self.free_events = deque((torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True))
                                  for _ in range(2))
         original_forward = worker.forward_batch_generation
@@ -45,6 +46,20 @@ class OverlapState:
             controller.emit("model_phase_time", seconds=seconds, requests=rids, **phase)
         if controller.trace:
             controller.emit("overlap_result", batch_id=bid, requests=rids)
+
+    def finish_window_step(self, bid, window, controller):
+        previous_bid, issued = self.window_step
+        if bid != previous_bid:
+            return
+        self.window_step = None
+        # The preceding result can retire requests. Native overlap discards
+        # their delayed token, so only survivors join the newly ranked plan.
+        rids = [rid for rid in issued if rid in controller.calls]
+        window.select(rids, rids)
+        if rids:
+            controller.emit("plan_step", requests=rids, decode=True,
+                            remaining=window.remaining, input_tokens=len(issued))
+            window.executed()
 
 
 def prepared_window(scheduler, running):
@@ -141,6 +156,33 @@ def prepare_survivor_decode(scheduler, batch, natural_finish):
     return batch
 
 
+def prepare_window_decode(scheduler, batch, state):
+    """Stage one decode while readback closes a window with no contenders."""
+    window = scheduler._autellix_window
+    controller = scheduler.autellix
+    if (batch is not scheduler.running_batch or not batch.reqs or batch.is_hybrid
+            or batch.has_grammar or scheduler.grammar_queue or scheduler.waiting_queue
+            or window.reserve or scheduler._autellix_reserve
+            or (controller.publish_activity and not controller.publish_activity_at_window)
+            or any(req.finished() or req.to_abort for req in batch.reqs)
+            or scheduler.token_to_kv_pool_allocator.available_size()
+            < len(batch.reqs) * scheduler.decode_mem_cache_buf_multiplier):
+        return None
+    rids = [req.rid for req in batch.reqs]
+    resident = set(rids)
+    if resident != window.active or resident != controller.calls.keys():
+        return None
+
+    # With every contender already resident, the next ranking can reorder
+    # the plan for future admission but cannot change which survivors run.
+    previous_bid = next(iter(state.pending))
+    batch.prepare_for_decode()
+    state.window_step = (previous_bid, rids)
+    if controller.trace:
+        controller.emit("overlap_window_decode", requests=rids, after_batch_id=previous_bid)
+    return batch
+
+
 def resolve_outputs(scheduler, resident, *, policy):
     """Replace negative future IDs after the worker's native readback fence."""
     if resident.reqs and resident.output_ids is not None:
@@ -150,7 +192,7 @@ def resolve_outputs(scheduler, resident, *, policy):
             scheduler.autellix.emit("overlap_resolve", policy=policy, requests=[req.rid for req in resident.reqs])
 
 
-def install(cls, *, lazy_resolve=False, prefill_decode=False, retire_decode=False):
+def install(cls, *, lazy_resolve=False, prefill_decode=False, retire_decode=False, window_decode=False):
     native_input, native_next = cls.process_input_requests, cls.get_next_batch_to_run
     if retire_decode:
         from sglang.srt.managers.schedule_batch import FINISH_LENGTH, FINISH_MATCHED_TOKEN
@@ -185,6 +227,10 @@ def install(cls, *, lazy_resolve=False, prefill_decode=False, retire_decode=Fals
                     return batch
             if retire_decode and reason == "retire":
                 batch = prepare_survivor_decode(self, pending, natural_finish)
+                if batch is not None:
+                    return batch
+            if window_decode and reason == "window":
+                batch = prepare_window_decode(self, pending, state)
                 if batch is not None:
                     return batch
             state.drained = pending

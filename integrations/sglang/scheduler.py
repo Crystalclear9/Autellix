@@ -62,6 +62,7 @@ def install(cls, options):
     overlap_lazy_resolve = options.get("overlap_lazy_resolve", False)
     overlap_prefill_decode = options.get("overlap_prefill_decode", False)
     overlap_retire_decode = options.get("overlap_retire_decode", False)
+    overlap_window_decode = options.get("overlap_window_decode", False)
     prepare_fused_decode = None
     if options.get("fused_decode_metadata"):
         from .decode import prepare_decode as prepare_fused_decode
@@ -507,7 +508,10 @@ def install(cls, options):
                     self._autellix_pending_timing = (rids, prefill_count, phase)
                 else:
                     account_model_time(self, rids, prefill_count, phase, synchronize=True)
-        if self._autellix_window is not None:
+        # A staged boundary step is charged once its preceding result closes
+        # the old window and refreshes the policy for the surviving requests.
+        if self._autellix_window is not None and not (
+                overlap_window_decode and self._autellix_overlap.window_step is not None):
             only_prefill = batch.forward_mode.is_extend() and not getattr(batch, "decoding_reqs", None)
             ctl = self.autellix
             if self._autellix_paper:
@@ -563,6 +567,8 @@ def install(cls, options):
                 metrics = self.autellix.finish(req.rid, reason)
                 rid = self._autellix_rids.pop(req.rid)
                 self.autellix.table.save_metrics(rid, metrics)
+        if overlap_window_decode and result is not None and self._autellix_overlap.window_step is not None:
+            self._autellix_overlap.finish_window_step(result.bid, self._autellix_window, self.autellix)
         return ret
 
     def abort(self, request):
@@ -610,7 +616,7 @@ def install(cls, options):
     if stable_decode_overlap:
         from .overlap import install as install_overlap
         install_overlap(cls, lazy_resolve=overlap_lazy_resolve, prefill_decode=overlap_prefill_decode,
-                        retire_decode=overlap_retire_decode)
+                        retire_decode=overlap_retire_decode, window_decode=overlap_window_decode)
     if measure_timing:
         original_next = cls.get_next_batch_to_run
 

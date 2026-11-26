@@ -17,7 +17,7 @@ class TokenFinish:
 
 
 class StableDecodeOverlapTests(unittest.TestCase):
-    def scheduler(self, *, lazy_resolve=False, prefill_decode=False, retire_decode=False):
+    def scheduler(self, *, lazy_resolve=False, prefill_decode=False, retire_decode=False, window_decode=False):
         class Native:
             def __init__(self):
                 req = NS(rid="resident", finished=Mock(return_value=False), to_abort=False)
@@ -28,13 +28,14 @@ class StableDecodeOverlapTests(unittest.TestCase):
                 self.cur_batch = None
                 self._autellix_window = NS(remaining=4, active={"resident"}, reserve=set(),
                                            can_continue_decode=Mock(return_value=False))
-                self._autellix_overlap = NS(deferred_inputs=[], drained=None)
+                self._autellix_overlap = NS(deferred_inputs=[], drained=None, pending={31: None}, window_step=None)
                 self._autellix_reserve = {}
                 self.waiting_queue, self.grammar_queue = [], []
                 self.chunked_req = None
                 self.token_to_kv_pool_allocator = NS(available_size=Mock(return_value=1))
                 self.decode_mem_cache_buf_multiplier = 1
-                self.autellix = NS(trace=True, emit=Mock())
+                self.autellix = NS(trace=True, emit=Mock(), calls={"resident": None},
+                                  publish_activity=False, publish_activity_at_window=False)
                 self.native_input = Mock()
                 self.native_next = Mock(return_value=NS(forward_mode=NS(is_extend=lambda: False)))
 
@@ -47,8 +48,41 @@ class StableDecodeOverlapTests(unittest.TestCase):
         module = ModuleType("sglang.srt.managers.schedule_batch")
         module.FINISH_LENGTH, module.FINISH_MATCHED_TOKEN = LengthFinish, TokenFinish
         with patch.dict("sys.modules", {module.__name__: module}):
-            install(Native, lazy_resolve=lazy_resolve, prefill_decode=prefill_decode, retire_decode=retire_decode)
+            install(Native, lazy_resolve=lazy_resolve, prefill_decode=prefill_decode,
+                    retire_decode=retire_decode, window_decode=window_decode)
         return Native()
+
+    def test_boundary_handoff_drains_when_the_next_cohort_is_not_fixed(self):
+        for reason in ("input", "waiting", "reserve", "pressure", "retire", "cohort", "absent", "grammar",
+                       "publication", "chunk"):
+            with self.subTest(reason=reason):
+                scheduler = self.scheduler(window_decode=True)
+                batch, window = scheduler.last_batch, scheduler._autellix_window
+                window.remaining = 0
+                if reason == "input":
+                    scheduler.process_input_requests(["control"])
+                elif reason == "waiting":
+                    scheduler.waiting_queue.append("waiting")
+                elif reason == "reserve":
+                    window.reserve.add("other")
+                elif reason == "pressure":
+                    scheduler.token_to_kv_pool_allocator.available_size.return_value = 0
+                elif reason == "retire":
+                    batch.reqs[0].finished.return_value = True
+                elif reason == "cohort":
+                    window.active.add("other")
+                elif reason == "absent":
+                    scheduler.autellix.calls["other"] = None
+                elif reason == "grammar":
+                    scheduler.grammar_queue.append("grammar")
+                elif reason == "publication":
+                    scheduler.autellix.publish_activity = True
+                else:
+                    scheduler.chunked_req = object()
+                self.assertIsNone(scheduler.get_next_batch_to_run())
+                self.assertIs(scheduler._autellix_overlap.drained, batch)
+                self.assertIsNone(scheduler._autellix_overlap.window_step)
+                batch.prepare_for_decode.assert_not_called()
 
     def pending_retirement(self):
         scheduler = self.scheduler(retire_decode=True)

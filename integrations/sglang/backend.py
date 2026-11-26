@@ -73,6 +73,9 @@ class SGLangBackend:
         overlap_retire_decode = engine_args.pop("autellix_overlap_retire_decode", False)
         if overlap_retire_decode and not stable_decode_overlap:
             raise ValueError("autellix_overlap_retire_decode requires autellix_stable_decode_overlap")
+        overlap_window_decode = engine_args.pop("autellix_overlap_window_decode", False)
+        if overlap_window_decode and not stable_decode_overlap:
+            raise ValueError("autellix_overlap_window_decode requires autellix_stable_decode_overlap")
         pipeline_timing_metadata = engine_args.pop("autellix_pipeline_timing_metadata", True)
         fused_swap = engine_args.pop("autellix_fused_swap", False)
         measure_timing = engine_args.pop("autellix_measure_timing", False)
@@ -117,6 +120,7 @@ class SGLangBackend:
                        overlap_lazy_resolve=overlap_lazy_resolve,
                        overlap_prefill_decode=overlap_prefill_decode,
                        overlap_retire_decode=overlap_retire_decode,
+                       overlap_window_decode=overlap_window_decode,
                        pipeline_timing_metadata=pipeline_timing_metadata,
                        fused_swap=fused_swap,
                        measure_timing=measure_timing,
