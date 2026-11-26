@@ -2,8 +2,9 @@
 
 后续的完整对话恢复、BOS 修正、调度时间尺度消融和负载曲线见
 [完整对话与负载实验](experiment-design-review.md)。本页保留上一轮协议与结果。
-最新工作负载、修复和目录见[原始工作负载复现](paper-workload-experiment.md)与
-[服务器目录](server-layout.md)；下文服务进程及实现清单是该轮验收时的记录。
+后续工作负载、修复和目录见[原始工作负载复现](paper-workload-experiment.md)与
+[服务器目录](server-layout.md)。目前的 SGLang 和 vLLM 配对见 [H20 复现记录](h20-reproduction.md)。
+下文的服务进程、实现清单和差距对应 P40 验收时的版本。
 
 复现目标：[Autellix arXiv:2502.13965v1](https://arxiv.org/html/2502.13965v1)。
 本项目实现论文的程序调度方法，推理后端为 vLLM 0.6.1 和 SGLang 0.4.9.post6。

@@ -20,31 +20,11 @@
 
 后端专项说明：[vLLM](integrations/vllm/README.md)、[SGLang](integrations/sglang/README.md)；传输微基准：[KV benchmark](cuda/README.md)。
 
-2026-11-15 的 [P40 部署与验收记录](docs/p40-validation-20261115.md)记录了
-SmolLM2-135M 的真实生成、抢占恢复和 HTTP 验证，以及后续修改清单。
-P40 使用 PyTorch 原生算子路径，默认 FP32，也可显式选择 FP16。
-论文机制、原模型/数据集差距和直接 SGLang 对照协议见
-[论文核对与 SGLang 对照](docs/autellix-paper-audit.md)。对照使用 `sglang-native` 原生调度路径。
-单卡的[完整对话与负载实验](docs/experiment-design-review.md)修复了 ShareGPT 分片、
-重复 BOS 和合成统计问题，并完成三个到达率、策略及独立参数消融。
-Llama-3.1-8B 高负载下，扩大服务历史区间后，程序响应/输出 token 下降 11.21%，
-平均程序响应增加 5.37%，吞吐下降 0.52%。核心机制已接入真实 GPU。
+## 实验入口
 
-[P40 原始工作负载复现](docs/paper-workload-experiment.md)使用论文 8B 模型系列、
-完整 ShareGPT、固定版本 BFCL 工具循环和 LATS 搜索，加入 Mixed 与三卡共享模型
-对照。ShareGPT 的 16 次运行（14 次单卡、2 次 PP=3）已完成：中/高负载平均程序响应下降 20.32%/9.60%，
-吞吐提高 1.05%/1.21%；低负载和短程序消融仍有小幅负收益。
-三卡大 KV 配对吞吐提高 8.96%、平均程序响应下降 3.02%。BFCL 两个完整配对分别
-降低平均程序响应 35.39% 和 79.66%，LATS 的平均响应增加 1.98%，Mixed 增加 0.05%。
-[H20 复现记录](docs/h20-reproduction.md)包含 8B 和 70B 的实测对照、共享模型路径及本地实验归档位置。
-
-[三卡大模型实验](docs/three-gpu-experiment.md)增加了 SGLang PP=3：Qwen3-32B
-的性能回放按 20/22/22 层分布在全部三张 P40 上，程序调度、GPU 计时和 KV 交换在各阶段同步。
-在 8 个完整 ShareGPT 程序的配对回放中，相对原生 SGLang 吞吐提高 8.84%，
-平均程序响应下降 1.54%，程序响应/输出 token 下降 18.76%，显存峰值为 68.94 GiB。
-同轮 Llama-3.1-8B 三副本实验中，program 路由的两个长对话集中到同一卡，
-平均程序响应增加 23.79%、吞吐下降 25.31%，归一化程序延迟下降 5.84%。
-报告保留不同配置下的全部结果和逐卡运行图。P40 的运行入口和目录见[服务器目录](docs/server-layout.md)。
+- H20 的原生 SGLang、vLLM-opt 和 Autellix 配对，以及共享权重、原始检查点位置。 [H20 复现记录](docs/h20-reproduction.md)
+- 完整 ShareGPT、BFCL、LATS、Mixed 的输入制作、负载曲线和论文机制核对。 [工作负载复现](docs/paper-workload-experiment.md) · [论文核对](docs/autellix-paper-audit.md)
+- P40 的功能验证、32B 三卡流水线和三副本路由。 [P40 验收](docs/p40-validation-20261115.md) · [三卡实验](docs/three-gpu-experiment.md) · [服务器目录](docs/server-layout.md)
 
 ## 快速开始
 

@@ -94,6 +94,10 @@ SGLang 适配设置 `disable_overlap_schedule=True`、`page_size=1`，`chunked_p
 两个后端的回放脚本都使用 `--fused-swap` 选择 Triton 跨层打包。离线图 16 使用同一份
 完成统计，关闭用于副本路由的瞬时活动视图发布。
 `autellix_mix_prefill_decode=false` 把 prefill 和 decode 分开执行，可用于对照同一接纳策略下的模型执行成本。
+`autellix_fill_chunk_tail=true` 允许当前窗口的普通等待请求使用最后一个 prefill 分块的余量。
+默认值为 `false`。开启后，原生接纳继续检查 token 预算和 KV 容量。
+`autellix_decode_cached_resumes=true` 启用单卡缓存恢复的 decode 路径，默认值为 `false`。
+原生接纳完成后，完全命中已计算 KV、只需执行一个 token 的贪心恢复请求可与同批解码一起执行。
 两个回放脚本均支持 `--resident-reserve-only`。该模式保持前 B 个活动请求的优先级顺序，
 K 个候补从余下请求中按同样的优先级选取，候补需已有驻留 KV。
 

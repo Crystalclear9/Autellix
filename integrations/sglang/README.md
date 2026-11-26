@@ -107,6 +107,9 @@ GPU 回归使用 `AUTELLIX_TEST_LEGACY_GPU=1`；仍需设置后端和模型环�
 仅当之后有需要保护的 KV 恢复时，调度器才提前锁住新的高优先级预填充前缀。
 单阶段在接纳普通等待请求时，只用排在选中运行请求前面的预填充判断是否需要抢占。
 后面的候选继续由原生接纳检查 KV 容量。涉及 host KV 恢复和候补槽时，容量检查覆盖整组选中请求。
+`autellix_fill_chunk_tail=true` 可让最后一个 prefill 分块接纳当前窗口内排在前面的普通等待请求，
+默认值为 `false`。
+`autellix_decode_cached_resumes=true` 试验单卡完全缓存前缀的一 token 解码恢复。
 `policy=fcfs` 走 Autellix 的调度窗口和 KV 管理，可与同配置的 PLAS/ATLAS 配对。
 
 配对实验、输入构造限制和结论见 [论文对照审计](../../docs/autellix-paper-audit.md)。

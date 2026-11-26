@@ -61,6 +61,8 @@ vLLM 0.6.1 的分块 prefill 与原生多步执行使用两个独立配置，分
 使用 `scripts/run_paper_vllm.py` 和预处理好的 ShareGPT、BFCL、LATS、Mixed 轨迹。
 每次测量完成后，运行目录保存计划和原子写入的 JSON 检查点。以同一组模型、参数和轨迹
 再次运行即可从中断处继续。不同实验、模型尺寸和离线批量使用独立的 `--run-dir`。
+H20 的 vLLM-opt 与 Autellix 回归使用相同模型、到达轨迹、设备、KV 预算及逐调用 token 数。
+实际配对数据和源码指纹见 [H20 复现记录](../../docs/h20-reproduction.md)。
 
 | 入口 | 对应的论文实验 |
 | --- | --- |
