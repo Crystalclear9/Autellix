@@ -4,11 +4,20 @@ import unittest
 from types import ModuleType, SimpleNamespace as NS
 from unittest.mock import Mock, patch
 
+from autellix.runtime.window import SchedulingWindow
 from integrations.sglang.overlap import OverlapState, install, resolve_outputs
 
 
+class LengthFinish:
+    pass
+
+
+class TokenFinish:
+    pass
+
+
 class StableDecodeOverlapTests(unittest.TestCase):
-    def scheduler(self, *, lazy_resolve=False, prefill_decode=False):
+    def scheduler(self, *, lazy_resolve=False, prefill_decode=False, retire_decode=False):
         class Native:
             def __init__(self):
                 req = NS(rid="resident", finished=Mock(return_value=False), to_abort=False)
@@ -35,8 +44,77 @@ class StableDecodeOverlapTests(unittest.TestCase):
             def get_next_batch_to_run(self):
                 return self.native_next(self.last_batch)
 
-        install(Native, lazy_resolve=lazy_resolve, prefill_decode=prefill_decode)
+        module = ModuleType("sglang.srt.managers.schedule_batch")
+        module.FINISH_LENGTH, module.FINISH_MATCHED_TOKEN = LengthFinish, TokenFinish
+        with patch.dict("sys.modules", {module.__name__: module}):
+            install(Native, lazy_resolve=lazy_resolve, prefill_decode=prefill_decode, retire_decode=retire_decode)
         return Native()
+
+    def pending_retirement(self):
+        scheduler = self.scheduler(retire_decode=True)
+        batch = scheduler.last_batch
+        batch.reqs = [NS(rid="short", finished=Mock(return_value=True), to_abort=False, finished_reason=LengthFinish()),
+                      batch.reqs[0],
+                      NS(rid="eos", finished=Mock(return_value=True), to_abort=False, finished_reason=TokenFinish())]
+        batch.out_cache_loc = object()
+        batch.batch_is_full = True
+        window = SchedulingWindow(NS(key=Mock(), emit=Mock()), capacity=3, refill_idle_slots=True)
+        window.remaining = 4
+        window.cohort = [req.rid for req in batch.reqs]
+        window.active = set(window.cohort)
+        scheduler._autellix_window = window
+
+        def filter_current(*, keep_indices):
+            batch.reqs = [batch.reqs[index] for index in keep_indices]
+            batch.out_cache_loc = None
+
+        batch.filter_batch = Mock(side_effect=filter_current)
+        return scheduler, batch
+
+    def test_natural_retirement_preserves_the_queued_result_and_window(self):
+        scheduler, batch = self.pending_retirement()
+        queued = NS(reqs=batch.reqs, out_cache_loc=batch.out_cache_loc)
+        self.assertIs(scheduler.get_next_batch_to_run(), batch)
+        batch.filter_batch.assert_called_once_with(keep_indices=[1])
+        batch.prepare_for_decode.assert_called_once_with()
+        self.assertEqual([req.rid for req in batch.reqs], ["resident"])
+        self.assertEqual([req.rid for req in queued.reqs], ["short", "resident", "eos"])
+        self.assertIsNotNone(queued.out_cache_loc)
+        self.assertFalse(batch.batch_is_full)
+        self.assertEqual(scheduler._autellix_window.cohort, ["resident"])
+        self.assertEqual(scheduler._autellix_window.remaining, 4)
+        self.assertIsNone(scheduler._autellix_overlap.drained)
+        scheduler.autellix.emit.assert_called_once_with("overlap_retire_decode", requests=["resident"],
+                                                        retired=["short", "eos"])
+
+    def test_retirement_drains_before_control_pressure_or_nonordinary_finish(self):
+        for reason in ("input", "waiting", "reserve", "pressure", "abort", "unknown", "empty", "window", "cohort"):
+            with self.subTest(reason=reason):
+                scheduler, batch = self.pending_retirement()
+                window = scheduler._autellix_window
+                if reason == "input":
+                    scheduler.process_input_requests(["control"])
+                elif reason == "waiting":
+                    scheduler.waiting_queue.append("waiting")
+                elif reason == "reserve":
+                    scheduler._autellix_reserve["other"] = "pin"
+                elif reason == "pressure":
+                    scheduler.token_to_kv_pool_allocator.available_size.return_value = 0
+                elif reason == "abort":
+                    batch.reqs[0].to_abort = True
+                elif reason == "unknown":
+                    batch.reqs[0].finished_reason = object()
+                elif reason == "empty":
+                    batch.reqs[1].finished.return_value = True
+                    batch.reqs[1].finished_reason = LengthFinish()
+                elif reason == "window":
+                    window.remaining = 0
+                else:
+                    window.active.remove("resident")
+                self.assertIsNone(scheduler.get_next_batch_to_run())
+                self.assertIs(scheduler._autellix_overlap.drained, batch)
+                batch.filter_batch.assert_not_called()
+                batch.prepare_for_decode.assert_not_called()
 
     def pending_prefill(self, *, resident=True):
         scheduler = self.scheduler(prefill_decode=True)

@@ -109,6 +109,38 @@ def prepare_first_decode(scheduler, prefill):
     return running
 
 
+def prepare_survivor_decode(scheduler, batch, natural_finish):
+    """Shrink a decode window after normal terminal results arrive."""
+    window = scheduler._autellix_window
+    if (scheduler.waiting_queue or window.reserve or scheduler._autellix_reserve
+            or {req.rid for req in batch.reqs} != window.active):
+        return None
+    survivors, retired = [], []
+    for index, req in enumerate(batch.reqs):
+        if req.to_abort:
+            return None
+        if req.finished():
+            if not isinstance(req.finished_reason, natural_finish):
+                return None
+            retired.append(req.rid)
+        else:
+            survivors.append(index)
+    if (not survivors or not retired or scheduler.token_to_kv_pool_allocator.available_size()
+            < len(survivors) * scheduler.decode_mem_cache_buf_multiplier):
+        return None
+
+    # Native filter replaces the live arrays. The queued result copy still
+    # owns the original request list and out_cache_loc for delayed frees.
+    batch.filter_batch(keep_indices=survivors)
+    batch.batch_is_full = False
+    rids = {req.rid for req in batch.reqs}
+    window.select(rids, rids)
+    batch.prepare_for_decode()
+    if scheduler.autellix.trace:
+        scheduler.autellix.emit("overlap_retire_decode", requests=[req.rid for req in batch.reqs], retired=retired)
+    return batch
+
+
 def resolve_outputs(scheduler, resident, *, policy):
     """Replace negative future IDs after the worker's native readback fence."""
     if resident.reqs and resident.output_ids is not None:
@@ -118,8 +150,11 @@ def resolve_outputs(scheduler, resident, *, policy):
             scheduler.autellix.emit("overlap_resolve", policy=policy, requests=[req.rid for req in resident.reqs])
 
 
-def install(cls, *, lazy_resolve=False, prefill_decode=False):
+def install(cls, *, lazy_resolve=False, prefill_decode=False, retire_decode=False):
     native_input, native_next = cls.process_input_requests, cls.get_next_batch_to_run
+    if retire_decode:
+        from sglang.srt.managers.schedule_batch import FINISH_LENGTH, FINISH_MATCHED_TOKEN
+        natural_finish = (FINISH_LENGTH, FINISH_MATCHED_TOKEN)
 
     def process_input(self, requests):
         state = self._autellix_overlap
@@ -146,6 +181,10 @@ def install(cls, *, lazy_resolve=False, prefill_decode=False):
                 return pending
             if prefill_decode and reason == "prefill":
                 batch = prepare_first_decode(self, pending)
+                if batch is not None:
+                    return batch
+            if retire_decode and reason == "retire":
+                batch = prepare_survivor_decode(self, pending, natural_finish)
                 if batch is not None:
                     return batch
             state.drained = pending

@@ -61,6 +61,7 @@ def install(cls, options):
     stable_decode_overlap = options.get("stable_decode_overlap", False)
     overlap_lazy_resolve = options.get("overlap_lazy_resolve", False)
     overlap_prefill_decode = options.get("overlap_prefill_decode", False)
+    overlap_retire_decode = options.get("overlap_retire_decode", False)
     prepare_fused_decode = None
     if options.get("fused_decode_metadata"):
         from .decode import prepare_decode as prepare_fused_decode
@@ -608,7 +609,8 @@ def install(cls, options):
     cls.check_memory = check_memory
     if stable_decode_overlap:
         from .overlap import install as install_overlap
-        install_overlap(cls, lazy_resolve=overlap_lazy_resolve, prefill_decode=overlap_prefill_decode)
+        install_overlap(cls, lazy_resolve=overlap_lazy_resolve, prefill_decode=overlap_prefill_decode,
+                        retire_decode=overlap_retire_decode)
     if measure_timing:
         original_next = cls.get_next_batch_to_run
 
