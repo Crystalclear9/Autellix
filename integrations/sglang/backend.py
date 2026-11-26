@@ -36,7 +36,7 @@ class SGLangBackend:
         refill_idle_slots = engine_args.pop("autellix_refill_idle_slots", False)
         resident_reserve_only = engine_args.pop("autellix_resident_reserve_only", False)
         mix_prefill_decode = engine_args.pop("autellix_mix_prefill_decode", True)
-        fill_chunk_tail = engine_args.pop("autellix_fill_chunk_tail", True)
+        fill_chunk_tail = engine_args.pop("autellix_fill_chunk_tail", False)
         decode_cached_resumes = engine_args.pop("autellix_decode_cached_resumes", False)
         defer_model_timing = engine_args.pop("autellix_defer_model_timing", True)
         pipeline_timing_metadata = engine_args.pop("autellix_pipeline_timing_metadata", True)
