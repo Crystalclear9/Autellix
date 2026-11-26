@@ -22,6 +22,7 @@ def replica_traces(state):
 def _summarize_events(stream, request_ids, workload_window):
     counts, queues, admissions, batch_sizes = Counter(), Counter(), Counter(), Counter()
     timing, transfer_blocks, transfer_copies = Counter(), Counter(), Counter()
+    model_tokens = Counter()
     model_seconds, occupied_seconds, swapped_tokens = 0., 0., 0
     logical_prefill_tokens = cached_prefill_tokens = 0
     for line in stream:
@@ -53,6 +54,9 @@ def _summarize_events(stream, request_ids, workload_window):
             cached_prefill_tokens += event.get("cached_prefill_tokens", 0)
         elif event["event"] == "model_phase_time":
             timing[event["phase"]] += event["seconds"]
+            for key in ("input_tokens", "prefill_tokens", "resumed_prefill_tokens"):
+                if key in event:
+                    model_tokens[key] += event[key]
         elif event["event"] == "kv_transfer":
             timing["swap_" + event["direction"]] += event["seconds"]
             transfer_blocks[event["direction"]] += event["blocks"]
@@ -64,7 +68,7 @@ def _summarize_events(stream, request_ids, workload_window):
                 batches_by_size=dict(batch_sizes), model_seconds=model_seconds,
                 service_weighted_batch_size=occupied_seconds/model_seconds if model_seconds else None,
                 swapped_out_tokens=swapped_tokens, timing_seconds=dict(timing),
-                prefill_tokens=prefill,
+                prefill_tokens=prefill, model_tokens=dict(model_tokens),
                 kv_transfer_blocks=dict(transfer_blocks), kv_transfer_copies=dict(transfer_copies))
 
 

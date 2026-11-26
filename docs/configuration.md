@@ -98,6 +98,9 @@ SGLang 适配设置 `disable_overlap_schedule=True`、`page_size=1`，`chunked_p
 默认值为 `false`。开启后，原生接纳继续检查 token 预算和 KV 容量。
 `autellix_decode_cached_resumes=true` 启用单卡缓存恢复的 decode 路径，默认值为 `false`。
 原生接纳完成后，完全命中已计算 KV、只需执行一个 token 的贪心恢复请求可与同批解码一起执行。
+`autellix_min_decode_steps` 设置单阶段 SGLang `paper` 模式中，GPU 时间片耗尽后降级所需的最少解码步数。
+默认 `0`。预填充和解码都按完整 GPU 时间结算。混合批次只有解码部分计步。
+打开 `scheduler_trace` 和 `autellix_measure_timing` 可另外记录真实预填充与恢复预填充的 token 数。
 两个回放脚本均支持 `--resident-reserve-only`。该模式保持前 B 个活动请求的优先级顺序，
 K 个候补从余下请求中按同样的优先级选取，候补需已有驻留 KV。
 

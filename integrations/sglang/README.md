@@ -110,6 +110,9 @@ GPU 回归使用 `AUTELLIX_TEST_LEGACY_GPU=1`；仍需设置后端和模型环�
 `autellix_fill_chunk_tail=true` 可让最后一个 prefill 分块接纳当前窗口内排在前面的普通等待请求，
 默认值为 `false`。
 `autellix_decode_cached_resumes=true` 试验单卡完全缓存前缀的一 token 解码恢复。
+单阶段 `paper` 调度支持 `autellix_min_decode_steps`，默认 `0`。指定正整数后，
+时间片耗尽的请求要执行至少这么多次解码才会降级。预填充仍计入 GPU 服务时间。
+通过 `autellix_measure_timing=true` 和调度 trace 可检查该策略对抢占与重新预填充的影响。
 `policy=fcfs` 走 Autellix 的调度窗口和 KV 管理，可与同配置的 PLAS/ATLAS 配对。
 
 配对实验、输入构造限制和结论见 [论文对照审计](../../docs/autellix-paper-audit.md)。

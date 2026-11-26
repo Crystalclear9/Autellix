@@ -79,6 +79,7 @@ P40 需为 GPU unittest 另外设置 `AUTELLIX_TEST_LEGACY_GPU=1`，并在 HTTP/
 | 客户端/HTTP | `test_client_lifecycle.py`、`test_client_stream.py`、`test_http.py`、`scripts/http_smoke.py` |
 | KV 或 SGLang 锁/抢占 | host swap、reserve、decode pressure、SGLang scheduler 测试，加真实 GPU 恢复一致性测试 |
 | SGLang 分块续跑和恢复批次 | 检查当前窗口的接纳顺序、KV 所有权、分块余量与生成一致性，配对校验逐调用 token 数 |
+| SGLang 解码步数 | `test_sglang_scheduler.py` 检查混合批次计数和降级，真实 GPU 核对首次降级前的解码步数与生成文本 |
 | IPC、取消、副本协调 | `test_transport.py`，加 `AUTELLIX_TEST_REPLICAS=1` 真实双进程测试 |
 | TP 适配 | 两张及以上 GPU 的 `AUTELLIX_TEST_TP=1`，没有设备时明确保留未验证状态 |
 

@@ -92,6 +92,9 @@ python -m autellix.cli paper-preset --preset workload-analysis --dataset tests/f
 
 在窗口边界刷新状态：时间片耗尽则降至下一队列，最低队列中的调用移到该队列尾部；当前不在最高队列的调用若满足 `(program_wait + call_wait_window) / (program_service + call_run_window) >= beta`，则提升到最高队列并重置局部窗口。实现使用很小的正数保护零分母。完整执行和等待统计不因提升而清零。
 
+单阶段 SGLang 可延迟时间片耗尽后的降级，直到本轮累计到指定的解码步数。预填充部分
+只扣 GPU 时间，混合批次中的解码请求同时计时和计步。降级或提升重新开始计步。
+
 窗口从当前可用请求按队列/FIFO 顺序取最多 B+K 个；前 B 个活动，其余为预备请求。预备请求准备 KV 后保持驻留，活动调用提前结束时补位。整个集合耗尽可以提前开启新窗口，不必让 GPU 空等到原定边界。内存或 token 预算限制可以截断接纳，不能跳过放不下的高优先级请求去接纳其后的低优先级请求。
 
 多步冻结的是请求选择，不是全部 CPU 工作：IPC、输出、token/block 元数据和部分内存检查仍会执行。vLLM 预留未来 KV 槽位；SGLang 依赖 radix 锁和按优先级释放内存，二者不是逐行相同的实现。
