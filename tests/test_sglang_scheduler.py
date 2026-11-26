@@ -10,6 +10,47 @@ from integrations.sglang.scheduler import encode_request, install
 
 
 class CompletedDecodeTests(unittest.TestCase):
+    def test_single_stage_accounts_deferred_gpu_time_before_finish(self):
+        for event_ready in (True, False):
+            with self.subTest(event_ready=event_ready), tempfile.TemporaryDirectory() as directory:
+                start = Mock()
+                start.elapsed_time.return_value = 25.
+                end = Mock()
+                end.query.return_value = event_ready
+
+                class Native:
+                    def __init__(self):
+                        self.policy = SimpleNamespace()
+
+                    def process_batch_result(self, batch, result):
+                        end.synchronize.assert_not_called()
+                        batch.reqs[0].done = True
+                        return result
+
+                    _add_request_to_queue = Mock()
+                    _extend_requests_to_queue = Mock()
+                    get_new_batch_prefill = Mock()
+                    run_batch = Mock()
+                    abort_request = Mock()
+                    check_memory = Mock()
+
+                torch = SimpleNamespace(cuda=SimpleNamespace(Event=Mock(side_effect=[start, end])))
+                with patch.dict("sys.modules", {"torch": torch}):
+                    install(Native, {"table_path": str(Path(directory, "state.sqlite")), "config": {}})
+                scheduler = Native()
+                with closing(scheduler.autellix.table) as table:
+                    table.open("program")
+                    request = SimpleNamespace(rid="internal", done=False)
+                    request.finished = lambda: request.done
+                    scheduler.autellix.admit(request.rid, "program")
+                    scheduler._autellix_rids[request.rid] = "external"
+                    batch = SimpleNamespace(reqs=[request], input_ids=Mock())
+                    result = scheduler.run_batch(batch)
+                    self.assertEqual(scheduler.autellix.calls[request.rid].executed, 0.)
+                    self.assertIs(scheduler.process_batch_result(batch, result), result)
+                    self.assertEqual(end.synchronize.call_count, 0 if event_ready else 1)
+                    self.assertEqual(table.take_metrics("external")["executed"], .025)
+
     def test_per_step_prefill_budget_preserves_the_decode_cohort(self):
         for admission_limit in ("partial", "chunk_budget", "kv_capacity"):
             with self.subTest(admission_limit=admission_limit):

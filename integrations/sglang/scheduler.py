@@ -55,6 +55,7 @@ def install(cls, options):
     original_check_memory = cls.check_memory
     original_update_running = getattr(cls, "update_running_batch", None)
     measure_timing = options.get("measure_timing", False)
+    defer_model_timing = options.get("defer_model_timing", True)
 
     def init(self, *a, **kw):
         original_init(self, *a, **kw)
@@ -64,6 +65,7 @@ def install(cls, options):
             configure(self, options)
         else:
             self._autellix_model_events = (torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True))
+            self._autellix_pending_timing = None
             self.autellix = RuntimeScheduler(ProgramTable(options["table_path"]),
                                             PolicyConfig(**options["config"]), options.get("trace"),
                                             publish_activity_at_window=options.get("publish_activity_at_window", False),
@@ -370,6 +372,15 @@ def install(cls, options):
                     self._autellix_host.discard(req.rid)
         return result
 
+    def account_model_time(self, rids, phase, *, synchronize):
+        start, end = self._autellix_model_events
+        if synchronize or not end.query():
+            end.synchronize()
+        seconds = start.elapsed_time(end) / 1000.
+        self.autellix.executed(rids, seconds)
+        if phase is not None:
+            self.autellix.emit("model_phase_time", phase=phase, seconds=seconds, requests=rids)
+
     def run(self, batch):
         rids = [req.rid for req in batch.reqs]
         input_tokens = batch.input_ids.numel()
@@ -384,14 +395,18 @@ def install(cls, options):
             start.record()
             result = original_run(self, batch)
             end.record()
-            end.synchronize()
-            seconds = start.elapsed_time(end) / 1000.
-            self.autellix.executed(rids, seconds)
+            phase = None
             if measure_timing:
                 phase = "decode"
                 if batch.forward_mode.is_extend():
                     phase = "mixed" if getattr(batch, "decoding_reqs", None) else "prefill"
-                self.autellix.emit("model_phase_time", phase=phase, seconds=seconds, requests=rids)
+            if defer_model_timing:
+                # The non-overlap loop processes this result before its next
+                # scheduling decision. Native token readback usually completes
+                # the events without a separate blocking wait.
+                self._autellix_pending_timing = (rids, phase)
+            else:
+                account_model_time(self, rids, phase, synchronize=True)
         if self._autellix_window is not None:
             only_prefill = batch.forward_mode.is_extend() and not getattr(batch, "decoding_reqs", None)
             ctl = self.autellix
@@ -424,6 +439,10 @@ def install(cls, options):
             self.autellix.executed([req.rid for req in reqs], seconds)
             self._autellix_inflight.difference_update(req.rid for req in reqs)
         ret = original_result(self, batch, result, *a, **kw)
+        if self.pp_size == 1 and self._autellix_pending_timing is not None:
+            rids, phase = self._autellix_pending_timing
+            self._autellix_pending_timing = None
+            account_model_time(self, rids, phase, synchronize=False)
         for req in reqs:
             if req.finished() and req.rid in self.autellix.calls:
                 reason = "cancelled" if getattr(req, "to_abort", False) else "finished"
