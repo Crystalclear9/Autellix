@@ -84,7 +84,9 @@ def configure(scheduler, options):
     tape = scheduler._autellix_tape = PolicyTape(leader)
     table = ProgramTable(options["table_path"]) if leader else None
     controller = RuntimeScheduler(PipelineTable(tape, table), PolicyConfig(**options["config"]),
-                                  options.get("trace") if leader else None, clock=tape.clock)
+                                  options.get("trace") if leader else None, clock=tape.clock,
+                                  publish_activity_at_window=options.get("publish_activity_at_window", False),
+                                  publish_activity=options.get("publish_activity", True))
     if not leader and options.get("trace"):
         def emit(event, **fields):
             timestamp = tape.clock()
@@ -94,8 +96,12 @@ def configure(scheduler, options):
         controller.emit = emit
     scheduler.autellix = controller
     capacity = options["capacity"] // scheduler.pp_size
-    scheduler._autellix_windows = [SchedulingWindow(controller, capacity)
-                                  for _ in range(scheduler.pp_size)]
+    scheduler._autellix_windows = [
+        SchedulingWindow(controller, capacity,
+                         refill_idle_slots=options.get("refill_idle_slots", False),
+                         resident_reserve_only=options.get("resident_reserve_only", False))
+        for _ in range(scheduler.pp_size)
+    ]
     scheduler._autellix_reserves = [{} for _ in range(scheduler.pp_size)]
     scheduler._autellix_microbatch = -1
     scheduler._autellix_inflight = set()

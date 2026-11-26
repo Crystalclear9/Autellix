@@ -59,11 +59,11 @@ def install(cls, options):
     def init(self, *a, **kw):
         original_init(self, *a, **kw)
         self.pp_size = getattr(self, "pp_size", 1)
-        self._autellix_model_events = (torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True))
         if self.pp_size > 1:
             from .pipeline import configure
             configure(self, options)
         else:
+            self._autellix_model_events = (torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True))
             self.autellix = RuntimeScheduler(ProgramTable(options["table_path"]),
                                             PolicyConfig(**options["config"]), options.get("trace"),
                                             publish_activity_at_window=options.get("publish_activity_at_window", False),
@@ -377,14 +377,14 @@ def install(cls, options):
             self._autellix_batches[self._autellix_microbatch] = batch
             self.autellix.begin(rids, active_rids=self._autellix_inflight)
             self._autellix_inflight.update(rids)
+            result = original_run(self, batch)
         else:
             self.autellix.begin(rids)
-        start, end = self._autellix_model_events
-        start.record()
-        result = original_run(self, batch)
-        end.record()
-        end.synchronize()
-        if self.pp_size == 1:
+            start, end = self._autellix_model_events
+            start.record()
+            result = original_run(self, batch)
+            end.record()
+            end.synchronize()
             seconds = start.elapsed_time(end) / 1000.
             self.autellix.executed(rids, seconds)
             if measure_timing:

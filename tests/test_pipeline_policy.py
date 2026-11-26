@@ -1,15 +1,36 @@
+import sys
 import tempfile
 import unittest
 from dataclasses import asdict
 from pathlib import Path
-from types import SimpleNamespace as NS
+from types import ModuleType, SimpleNamespace as NS
+from unittest.mock import patch
 
 from autellix.runtime import ReplicaConfig
 from autellix.runtime.policy import PolicyConfig, ProgramTable, RuntimeScheduler
-from integrations.sglang.pipeline import PipelineTable, PolicyTape, abort_inflight
+from integrations.sglang.pipeline import PipelineTable, PolicyTape, abort_inflight, configure
 
 
 class PipelinePolicyTests(unittest.TestCase):
+    def test_pipeline_applies_controller_and_window_options(self):
+        packages = [ModuleType(name) for name in (
+            "sglang", "sglang.srt", "sglang.srt.managers", "sglang.srt.managers.scheduler")]
+        for parent, child in zip(packages, packages[1:]):
+            setattr(parent, child.__name__.rsplit(".", 1)[-1], child)
+        packages[-1].point_to_point_pyobj = lambda *args: None
+        stage = NS(pp_rank=1, pp_size=2, recv_requests=lambda: None)
+        with patch.dict(sys.modules, {module.__name__: module for module in packages}):
+            configure(stage, dict(config=asdict(PolicyConfig()), capacity=8, publish_activity=False,
+                                  publish_activity_at_window=True, refill_idle_slots=True,
+                                  resident_reserve_only=True))
+        self.assertFalse(stage.autellix.publish_activity)
+        self.assertTrue(stage.autellix.publish_activity_at_window)
+        self.assertEqual(len(stage._autellix_windows), 2)
+        for window in stage._autellix_windows:
+            self.assertEqual(window.capacity, 4)
+            self.assertTrue(window.refill_idle_slots)
+            self.assertTrue(window.resident_reserve_only)
+
     def test_all_stages_replay_policy_with_one_database_owner(self):
         with tempfile.TemporaryDirectory() as directory:
             table = ProgramTable(str(Path(directory, "programs.sqlite")))
