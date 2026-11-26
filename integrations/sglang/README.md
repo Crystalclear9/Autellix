@@ -103,6 +103,9 @@ GPU 回归使用 `AUTELLIX_TEST_LEGACY_GPU=1`；仍需设置后端和模型环�
 单阶段 Autellix 默认在原生输出读回后结算 CUDA event 时间，并在程序完成前写入服务时间。
 `autellix_fused_decode_metadata=true` 可把稳定解码的序列长度和 KV 槽位更新合并为一次
 Triton 调用。调度 trace 用 `fused_decode_metadata` 记录实际执行的合并批次。
+`autellix_stable_decode_overlap=true` 用原生 overlap worker 执行稳定窗口内的解码。调度 trace
+记录 `overlap_continue_decode`、`overlap_drain` 和带批次编号的 `overlap_result`。
+配对结果和检查点见 [H20 稳定解码 overlap 复测](../../docs/h20-reproduction.md#sglang-稳定解码-overlap-复测)。
 `autellix_defer_model_timing=false` 可用于对照，恢复读回前的独立同步。
 流水线用各阶段的 CUDA event 累计前向时间，并通过原有消息的元数据传递累计值。
 `autellix_pipeline_timing_metadata=false` 可用来对照独立的 GPU 标量传输。

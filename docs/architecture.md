@@ -102,6 +102,10 @@ python -m autellix.cli paper-preset --preset workload-analysis --dataset tests/f
 SGLang 的可选解码元数据融合沿用原生的容量检查和 KV 槽位分配。常规单 token 解码用旧序列长度
 确定写入位置，在同一次 GPU 调用内推进长度并写入请求的槽位表。
 
+SGLang 的可选稳定解码 overlap 让原生 worker 前向与上一批输出读回并行。PLAS 窗口内已就绪
+的批次可以提前提交一步。新到达、取消、窗口刷新和 KV 空间不足时，先读回在途结果再执行
+调度。GPU 时间按原生批次 ID 配对，服务时间在下一次优先级计算前计入程序。
+
 SGLang 恢复前先保护高优先级请求已有的缓存前缀。若低优先级恢复项占用了新请求
 所需的 prefill 空间，调度器从低优先级端释放临时锁并重试接纳，保留被延后请求的
 主机备份。KV 换入和换出按层、按 token 分块，GPU 临时张量上限为 16 MiB；
