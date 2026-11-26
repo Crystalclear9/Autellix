@@ -1,14 +1,14 @@
 """Verify the boundary and accounting contract with SGLang's native overlap loop."""
 
 import unittest
-from types import SimpleNamespace as NS
-from unittest.mock import Mock
+from types import ModuleType, SimpleNamespace as NS
+from unittest.mock import Mock, patch
 
-from integrations.sglang.overlap import OverlapState, install
+from integrations.sglang.overlap import OverlapState, install, resolve_outputs
 
 
 class StableDecodeOverlapTests(unittest.TestCase):
-    def scheduler(self):
+    def scheduler(self, *, lazy_resolve=False):
         class Native:
             def __init__(self):
                 req = NS(rid="resident", finished=Mock(return_value=False), to_abort=False)
@@ -35,7 +35,7 @@ class StableDecodeOverlapTests(unittest.TestCase):
             def get_next_batch_to_run(self):
                 return self.native_next(self.last_batch)
 
-        install(Native)
+        install(Native, lazy_resolve=lazy_resolve)
         return Native()
 
     def test_stable_continuation_then_deferred_control_at_empty_boundary(self):
@@ -49,6 +49,7 @@ class StableDecodeOverlapTests(unittest.TestCase):
         self.assertIsNone(scheduler.get_next_batch_to_run())
         scheduler.native_input.assert_not_called()
         self.assertIs(scheduler._autellix_overlap.drained, batch)
+        scheduler.autellix.emit.assert_any_call("overlap_drain", reason="input")
         # The native loop consumes the old result, then clears last_batch.
         scheduler.last_batch = None
         scheduler.process_input_requests(["new-arrival"])
@@ -64,6 +65,7 @@ class StableDecodeOverlapTests(unittest.TestCase):
         self.assertIsNone(scheduler.get_next_batch_to_run())
         window = scheduler._autellix_window
         window.can_continue_decode.assert_called_once_with({"resident"}, {})
+        scheduler.autellix.emit.assert_called_once_with("overlap_drain", reason="refill")
 
         scheduler._autellix_overlap.drained = None
         window.can_continue_decode.return_value = True
@@ -86,6 +88,49 @@ class StableDecodeOverlapTests(unittest.TestCase):
                 self.assertIs(scheduler._autellix_overlap.drained, batch)
                 batch.prepare_for_decode.assert_not_called()
                 scheduler.native_next.assert_not_called()
+                scheduler.autellix.emit.assert_called_once_with("overlap_drain", reason=reason)
+
+    def test_lazy_resolution_uses_post_plan_residents_only_when_split_prefill_runs(self):
+        for mode in ("prefill", "mixed", "decode", "idle"):
+            with self.subTest(mode=mode):
+                scheduler = self.scheduler(lazy_resolve=True)
+                drained = scheduler.last_batch
+                scheduler._autellix_overlap.drained = drained
+                scheduler.last_batch = None
+                resident = NS(reqs=[NS(rid="kept")], output_ids=object())
+                batch = None if mode == "idle" else NS(
+                    forward_mode=NS(is_extend=lambda: mode in ("prefill", "mixed")),
+                    decoding_reqs=resident.reqs if mode == "mixed" else None,
+                )
+
+                def select(previous):
+                    self.assertIs(previous, drained)
+                    scheduler.running_batch = resident  # Native merge/retirement replaces the old view.
+                    return batch
+
+                scheduler.native_next.side_effect = select
+                with patch("integrations.sglang.overlap.resolve_outputs") as resolve:
+                    self.assertIs(scheduler.get_next_batch_to_run(), batch)
+                    if mode == "prefill":
+                        resolve.assert_called_once_with(scheduler, resident, policy="paused_prefill")
+                    else:
+                        resolve.assert_not_called()
+                self.assertIsNone(scheduler.last_batch)
+                self.assertIsNone(scheduler._autellix_overlap.drained)
+
+    def test_resolver_preserves_the_resident_output_tensor_identity(self):
+        worker = ModuleType("sglang.srt.managers.tp_worker_overlap_thread")
+        worker.resolve_future_token_ids = Mock()
+        scheduler = self.scheduler()
+        scheduler.tp_worker = NS(future_token_ids_map=object())
+        resident = NS(reqs=[NS(rid="resident")], output_ids=object())
+        ids = resident.output_ids
+        with patch.dict("sys.modules", {worker.__name__: worker}):
+            resolve_outputs(scheduler, resident, policy="paused_prefill")
+            resolve_outputs(scheduler, NS(reqs=[], output_ids=object()), policy="paused_prefill")
+        worker.resolve_future_token_ids.assert_called_once_with(ids, scheduler.tp_worker.future_token_ids_map)
+        self.assertIs(resident.output_ids, ids)
+        scheduler.autellix.emit.assert_called_once_with("overlap_resolve", policy="paused_prefill", requests=["resident"])
 
     def test_result_timing_is_keyed_by_bid_and_ignores_a_retired_delayed_token(self):
         worker = NS(forward_batch_generation=Mock(return_value="native"))

@@ -64,6 +64,9 @@ class SGLangBackend:
         if stable_decode_overlap and (self.native or pp != 1 or legacy_gpu or config.implementation != "paper"
                                       or engine_args.get("disaggregation_mode", "null") != "null"):
             raise ValueError("autellix_stable_decode_overlap requires modern single-stage paper mode without disaggregation")
+        overlap_lazy_resolve = engine_args.pop("autellix_overlap_lazy_resolve", False)
+        if overlap_lazy_resolve and not stable_decode_overlap:
+            raise ValueError("autellix_overlap_lazy_resolve requires autellix_stable_decode_overlap")
         pipeline_timing_metadata = engine_args.pop("autellix_pipeline_timing_metadata", True)
         fused_swap = engine_args.pop("autellix_fused_swap", False)
         measure_timing = engine_args.pop("autellix_measure_timing", False)
@@ -105,6 +108,7 @@ class SGLangBackend:
                        defer_model_timing=defer_model_timing,
                        fused_decode_metadata=fused_decode_metadata,
                        stable_decode_overlap=stable_decode_overlap,
+                       overlap_lazy_resolve=overlap_lazy_resolve,
                        pipeline_timing_metadata=pipeline_timing_metadata,
                        fused_swap=fused_swap,
                        measure_timing=measure_timing,

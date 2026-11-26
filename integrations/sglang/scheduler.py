@@ -59,6 +59,7 @@ def install(cls, options):
     min_decode_steps = options.get("min_decode_steps", 0)
     mix_prefill_max_tokens = options.get("mix_prefill_max_tokens", 0)
     stable_decode_overlap = options.get("stable_decode_overlap", False)
+    overlap_lazy_resolve = options.get("overlap_lazy_resolve", False)
     prepare_fused_decode = None
     if options.get("fused_decode_metadata"):
         from .decode import prepare_decode as prepare_fused_decode
@@ -545,11 +546,11 @@ def install(cls, options):
         if stable_decode_overlap and result is not None:
             self._autellix_overlap.finish(result.bid, self.autellix)
             drained = self._autellix_overlap.drained
-            if drained is not None:
+            if drained is not None and not overlap_lazy_resolve:
                 # The native future ring can be overwritten by later prefills
                 # before these resident requests run again. Materialize at drain.
-                from sglang.srt.managers.tp_worker_overlap_thread import resolve_future_token_ids
-                resolve_future_token_ids(drained.output_ids, self.tp_worker.future_token_ids_map)
+                from .overlap import resolve_outputs
+                resolve_outputs(self, drained, policy="eager")
         elif self.pp_size == 1 and self._autellix_pending_timing is not None:
             rids, prefill_count, phase = self._autellix_pending_timing
             self._autellix_pending_timing = None
@@ -606,7 +607,7 @@ def install(cls, options):
     cls.check_memory = check_memory
     if stable_decode_overlap:
         from .overlap import install as install_overlap
-        install_overlap(cls)
+        install_overlap(cls, lazy_resolve=overlap_lazy_resolve)
     if measure_timing:
         original_next = cls.get_next_batch_to_run
 
