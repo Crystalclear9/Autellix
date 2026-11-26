@@ -105,6 +105,8 @@ GPU 回归使用 `AUTELLIX_TEST_LEGACY_GPU=1`；仍需设置后端和模型环�
 流水线用各阶段的 CUDA event 累计前向时间，并通过原有消息的元数据传递累计值。
 `autellix_pipeline_timing_metadata=false` 可用来对照独立的 GPU 标量传输。
 仅当之后有需要保护的 KV 恢复时，调度器才提前锁住新的高优先级预填充前缀。
+单阶段在接纳普通等待请求时，只用排在选中运行请求前面的预填充判断是否需要抢占。
+后面的候选继续由原生接纳检查 KV 容量。涉及 host KV 恢复和候补槽时，容量检查覆盖整组选中请求。
 `policy=fcfs` 走 Autellix 的调度窗口和 KV 管理，可与同配置的 PLAS/ATLAS 配对。
 
 配对实验、输入构造限制和结论见 [论文对照审计](../../docs/autellix-paper-audit.md)。
