@@ -101,6 +101,8 @@ GPU 回归使用 `AUTELLIX_TEST_LEGACY_GPU=1`；仍需设置后端和模型环�
 再开启 `autellix_native_defaults=true` 时使用上游默认值，可单独设置
 `disable_overlap_schedule=true` 测量原生 overlap 的影响。
 单阶段 Autellix 默认在原生输出读回后结算 CUDA event 时间，并在程序完成前写入服务时间。
+`autellix_fused_decode_metadata=true` 可把稳定解码的序列长度和 KV 槽位更新合并为一次
+Triton 调用。调度 trace 用 `fused_decode_metadata` 记录实际执行的合并批次。
 `autellix_defer_model_timing=false` 可用于对照，恢复读回前的独立同步。
 流水线用各阶段的 CUDA event 累计前向时间，并通过原有消息的元数据传递累计值。
 `autellix_pipeline_timing_metadata=false` 可用来对照独立的 GPU 标量传输。

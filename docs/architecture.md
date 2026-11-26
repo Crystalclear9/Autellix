@@ -99,6 +99,9 @@ python -m autellix.cli paper-preset --preset workload-analysis --dataset tests/f
 
 多步冻结的是请求选择，不是全部 CPU 工作：IPC、输出、token/block 元数据和部分内存检查仍会执行。vLLM 预留未来 KV 槽位；SGLang 依赖 radix 锁和按优先级释放内存，二者不是逐行相同的实现。
 
+SGLang 的可选解码元数据融合沿用原生的容量检查和 KV 槽位分配。常规单 token 解码用旧序列长度
+确定写入位置，在同一次 GPU 调用内推进长度并写入请求的槽位表。
+
 SGLang 恢复前先保护高优先级请求已有的缓存前缀。若低优先级恢复项占用了新请求
 所需的 prefill 空间，调度器从低优先级端释放临时锁并重试接纳，保留被延后请求的
 主机备份。KV 换入和换出按层、按 token 分块，GPU 临时张量上限为 16 MiB；

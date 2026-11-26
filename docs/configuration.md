@@ -94,6 +94,9 @@ SGLang 适配设置 `disable_overlap_schedule=True`、`page_size=1`，`chunked_p
 两个后端的回放脚本都使用 `--fused-swap` 选择 Triton 跨层打包。离线图 16 使用同一份
 完成统计，关闭用于副本路由的瞬时活动视图发布。
 `autellix_mix_prefill_decode=false` 把 prefill 和 decode 分开执行，可用于对照同一接纳策略下的模型执行成本。
+`autellix_fused_decode_metadata=true` 为现代单阶段 SGLang 的 `paper` 模式开启解码元数据融合。
+常规单 token CUDA 解码用一次 Triton 调用更新序列长度和 KV 槽位映射，首次从预填充转到解码、
+带采样惩罚等分支沿用原生准备。默认关闭。
 单阶段现代 GPU 的 `paper` 模式可设置 `autellix_mix_prefill_max_tokens`。正整数开启分段预填充
 上的自适应合批，按实际接纳的未缓存 token 数选择是否混合执行，并检查当前分块和解码 KV 余量。
 默认 `0`，使用 `autellix_mix_prefill_decode` 指定的固定方式。

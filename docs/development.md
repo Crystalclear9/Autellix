@@ -82,6 +82,7 @@ P40 需为 GPU unittest 另外设置 `AUTELLIX_TEST_LEGACY_GPU=1`，并在 HTTP/
 | SGLang 解码步数 | `test_sglang_scheduler.py` 检查混合批次计数和降级，真实 GPU 核对首次降级前的解码步数与生成文本 |
 | SGLang 部分解码保留 | `test_sglang_admission.py` 检查按优先级截断和 radix 锁配对，定向 GPU 验证抢占数量和生成文本 |
 | SGLang 当前预填充预算 | `test_sglang_admission.py` 检查分块后的候选前缀和队首完整 KV 需求，定向 GPU 比较运行解码保留及生成文本 |
+| SGLang 解码元数据融合 | `test_sglang_decode.py` 核对常规解码的长度、槽位与原生准备的回退，定向 GPU 验证补位、取消和前缀复用 |
 | SGLang 自适应合批 | `test_sglang_scheduler.py` 检查未缓存 token 阈值、分块预算、解码 KV 余量和 logprob 请求，定向 GPU 比较真实缓存命中及生成文本 |
 | IPC、取消、副本协调 | `test_transport.py`，加 `AUTELLIX_TEST_REPLICAS=1` 真实双进程测试 |
 | TP 适配 | 两张及以上 GPU 的 `AUTELLIX_TEST_TP=1`，没有设备时明确保留未验证状态 |
