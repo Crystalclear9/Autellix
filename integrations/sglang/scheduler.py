@@ -186,18 +186,17 @@ def install(cls, options):
                     r.rid for r in sorted(batch.reqs + self.waiting_queue, key=lambda r: ctl.key(r.rid))[:limit]}
                 if self._autellix_paper and self._autellix_window is not None:
                     order = {rid: i for i, rid in enumerate(self._autellix_window.cohort)}
-                    pending = [order[r.rid] for r in self.waiting_queue if r.rid in keep]
-                    if pending:
+                    pending_reqs = [r for r in self.waiting_queue if r.rid in keep]
+                    if pending_reqs:
                         # Native admission accounts running requests before new
                         # prefills. Release the lower-priority running suffix so
                         # it cannot consume the space needed by a higher arrival.
                         # Re-admit that suffix in the same global FIFO order.
-                        cutoff = min(pending)
+                        cutoff = min(order[r.rid] for r in pending_reqs)
                         lower_running = [r.rid for r in batch.reqs if r.rid in keep and order[r.rid] >= cutoff]
                         from .admission import can_keep_running
-                        pending_reqs = [r for r in self.waiting_queue if r.rid in keep]
                         if (lower_running and options.get("retain_running", True)
-                                and can_keep_running(self, pending_reqs, keep)):
+                                and can_keep_running(self, pending_reqs, keep, order=order)):
                             ctl.emit("retain_running", requests=lower_running,
                                      pending=[r.rid for r in pending_reqs])
                         else:

@@ -1,8 +1,17 @@
-"""Keep selected decodes resident when the whole selected prefill fits."""
+"""Keep selected decodes resident when higher-priority prefills fit."""
 
 
-def can_keep_running(scheduler, pending, selected):
+def can_keep_running(scheduler, pending, selected, *, order=None):
     running = [r for r in scheduler.running_batch.reqs if r.rid in selected]
+    if running and order is not None and scheduler.pp_size == 1:
+        host = scheduler._autellix_host
+        prepared = any(r.rid in scheduler._autellix_reserve or (host is not None and r.rid in host.saved)
+                       for r in pending)
+        if not prepared:
+            # Fresh requests behind every retained decode can wait for KV.
+            # Native admission considers them after the higher-priority prefix.
+            last_running = max(order[r.rid] for r in running)
+            pending = [r for r in pending if order[r.rid] < last_running]
     if len(running) + len(pending) > scheduler.server_args.max_running_requests:
         return False
     cache = scheduler.tree_cache

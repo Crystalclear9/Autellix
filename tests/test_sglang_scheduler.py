@@ -263,13 +263,19 @@ class CompletedDecodeTests(unittest.TestCase):
                     scheduler.autellix.table.close()
 
     def test_selected_decode_stays_resident_when_higher_prefill_fits(self):
+        for lower_waiter in (False, True):
+            with self.subTest(lower_waiter=lower_waiter):
+                self._check_selected_decode_stays_resident(lower_waiter)
+
+    def _check_selected_decode_stays_resident(self, lower_waiter):
         with tempfile.TemporaryDirectory() as directory:
+            capacity = 3 if lower_waiter else 2
             class Native:
                 def __init__(self):
                     self.policy = SimpleNamespace()
-                    self.server_args = SimpleNamespace(max_running_requests=2)
+                    self.server_args = SimpleNamespace(max_running_requests=capacity)
                     self.max_prefill_tokens = 8
-                    self.token_to_kv_pool_allocator = SimpleNamespace(available_size=lambda: 2048)
+                    self.token_to_kv_pool_allocator = SimpleNamespace(available_size=lambda: 20)
                     self.tree_cache = SimpleNamespace(evictable_size=lambda: 0, inc_lock_ref=Mock(), dec_lock_ref=Mock())
                     self.waiting_queue = []
                 _add_request_to_queue = Mock()
@@ -279,26 +285,32 @@ class CompletedDecodeTests(unittest.TestCase):
                 abort_request = Mock()
                 check_memory = Mock()
                 def get_new_batch_prefill(self):
-                    result = SimpleNamespace(reqs=self.waiting_queue + self.running_batch.reqs)
-                    self.waiting_queue = []
-                    return result
+                    self.policy.calc_priority(self.waiting_queue)
+                    request = self.waiting_queue.pop(0)
+                    self.running_batch.batch_is_full = bool(self.waiting_queue)
+                    return SimpleNamespace(reqs=[request, *self.running_batch.reqs])
             with patch.dict("sys.modules", {"torch": Mock()}):
                 install(Native, {"table_path": str(Path(directory, "state.sqlite")),
-                                 "config": {"overprovision": 0}, "capacity": 2})
+                                 "config": {"overprovision": 0}, "capacity": capacity})
             scheduler = Native()
             try:
                 scheduler.autellix.table.open("p")
-                for rid in ("higher", "running"):
+                for rid in ("higher", "running", "lower"):
                     scheduler.autellix.admit(rid, "p")
                 req = lambda rid: SimpleNamespace(rid=rid, origin_input_ids=[1]*10, output_ids=[2],
                                                  sampling_params=SimpleNamespace(max_new_tokens=8),
                                                  extend_input_len=2, init_next_round_input=lambda _: None, last_node=None)
                 scheduler.waiting_queue = [req("higher")]
+                if lower_waiter:
+                    lower = req("lower")
+                    lower.extend_input_len = 30
+                    scheduler.waiting_queue.insert(0, lower)
                 scheduler.running_batch = SimpleNamespace(reqs=[req("running")], filter_batch=lambda: None,
                     seq_lens=SimpleNamespace(cpu=lambda: SimpleNamespace(tolist=lambda: [10])))
                 result = scheduler.get_new_batch_prefill()
                 self.assertEqual([r.rid for r in result.reqs], ["higher", "running"])
                 self.assertEqual([r.rid for r in scheduler.running_batch.reqs], ["running"])
+                self.assertEqual([r.rid for r in scheduler.waiting_queue], ["lower"] if lower_waiter else [])
             finally:
                 scheduler.autellix.table.close()
 

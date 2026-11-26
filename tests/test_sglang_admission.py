@@ -5,6 +5,36 @@ from integrations.sglang.admission import can_keep_running
 
 
 class KeepRunningTests(unittest.TestCase):
+    def test_only_waiters_ahead_of_running_affect_single_stage_retention(self):
+        sampling = NS(max_new_tokens=8)
+        running = NS(rid="running", sampling_params=sampling, output_ids=[1])
+        higher = NS(rid="higher", extend_input_len=2, sampling_params=sampling,
+                    init_next_round_input=lambda _: None, last_node="high")
+        lower = NS(rid="lower", extend_input_len=30, sampling_params=sampling,
+                   init_next_round_input=lambda _: None, last_node="low")
+        locks = []
+        host = NS(saved={})
+        scheduler = NS(running_batch=NS(reqs=[running]), server_args=NS(max_running_requests=3),
+                       pp_size=1, is_mixed_chunk=True, max_prefill_tokens=100,
+                       token_to_kv_pool_allocator=NS(available_size=lambda: 20),
+                       tree_cache=NS(evictable_size=lambda: 0, inc_lock_ref=locks.append, dec_lock_ref=locks.remove),
+                       autellix=NS(config=NS(implementation="paper", schedule_interval=8)),
+                       _autellix_host=host, _autellix_reserve={})
+        pending, selected = [lower, higher], {"running", "higher", "lower"}
+        order = {"higher": 0, "running": 1, "lower": 2}
+        self.assertFalse(can_keep_running(scheduler, pending, selected))
+        self.assertTrue(can_keep_running(scheduler, pending, selected, order=order))
+        self.assertEqual(locks, [])
+        higher.extend_input_len = 4
+        self.assertFalse(can_keep_running(scheduler, pending, selected, order=order))
+        higher.extend_input_len = 2
+        for prepared in (scheduler._autellix_reserve, host.saved):
+            prepared[lower.rid] = object()
+            self.assertFalse(can_keep_running(scheduler, pending, selected, order=order))
+            prepared.clear()
+        scheduler.pp_size = 2
+        self.assertFalse(can_keep_running(scheduler, pending, selected, order=order))
+
     def test_preserve_when_current_decode_window_fits(self):
         req = lambda prompt, output, maximum: NS(rid="running", origin_input_ids=[1]*prompt, output_ids=[2]*output,
                                                 sampling_params=NS(max_new_tokens=maximum),
