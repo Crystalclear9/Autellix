@@ -109,6 +109,8 @@ GPU 回归使用 `AUTELLIX_TEST_LEGACY_GPU=1`；仍需设置后端和模型环�
 后面的候选继续由原生接纳检查 KV 容量。涉及 host KV 恢复和候补槽时，容量检查覆盖整组选中请求。
 `autellix_partial_retention=true` 允许从放不下的低优先级运行批次中保留最长可共存前缀。
 调度 trace 用 `retain_decode_prefix` 记录保留的请求。
+`autellix_prefill_frontier=true` 可把保留判断限制到当前预填充可达的优先级前缀。
+适用于现代单阶段的分离分块和自适应合批，默认关闭。
 `autellix_mix_prefill_max_tokens` 为正数时按已接纳的未缓存预填充 token 数动态决定合批。
 启用分段预填充后，短预填充可与现有解码同批，长预填充单独运行。实际合批记录为
 `mix_short_prefill`，阈值 `0` 沿用 `autellix_mix_prefill_decode`。
