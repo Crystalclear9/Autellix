@@ -10,6 +10,69 @@ from integrations.sglang.scheduler import encode_request, install
 
 
 class CompletedDecodeTests(unittest.TestCase):
+    def test_short_prefill_mixes_only_with_chunk_and_kv_headroom(self):
+        class Running:
+            def __init__(self, reqs, batch_is_full):
+                self.reqs = reqs
+                self.batch_is_full = batch_is_full
+                self.return_logprob = False
+                self.filter_batch = Mock()
+                self.check_decode_mem = Mock()
+                self.prepare_for_decode = Mock()
+
+        class Native:
+            def __init__(self):
+                self.policy = SimpleNamespace()
+                self.waiting_queue = []
+                self.chunked_req = SimpleNamespace(rid="prefill")
+                self.decode_mem_cache_buf_multiplier = 1
+                self.running_batch = Running([SimpleNamespace(rid="decode")], batch_is_full=True)
+
+            def get_new_batch_prefill(self):
+                self.mixed_at_admission = self.is_mixed_chunk
+                return self.prefill
+
+            _add_request_to_queue = Mock()
+            _extend_requests_to_queue = Mock()
+            run_batch = Mock()
+            process_batch_result = Mock()
+            abort_request = Mock()
+            check_memory = Mock()
+
+        with tempfile.TemporaryDirectory() as directory, patch.dict("sys.modules", {"torch": Mock()}):
+            install(Native, {"table_path": str(Path(directory, "state.sqlite")), "config": {},
+                             "mix_prefill_max_tokens": 8})
+            for tokens, chunk, enough_kv, return_logprob, mixes in (
+                    (8, 9, True, False, True),
+                    (9, 16, True, False, False),
+                    (8, 8, True, False, False),
+                    (8, 9, False, False, False),
+                    (8, 9, True, True, False)):
+                with self.subTest(tokens=tokens, chunk=chunk, kv=enough_kv, logprob=return_logprob):
+                    scheduler = Native()
+                    running = scheduler.running_batch
+                    running.check_decode_mem.return_value = enough_kv
+                    scheduler.chunked_prefill_size = chunk
+                    scheduler.prefill = SimpleNamespace(forward_mode=SimpleNamespace(is_extend=lambda: True),
+                                                        extend_num_tokens=tokens, return_logprob=return_logprob,
+                                                        decoding_reqs=None, mix_with_running=Mock())
+                    with closing(scheduler.autellix.table), patch.object(scheduler.autellix, "emit") as emit:
+                        batch = scheduler.get_new_batch_prefill()
+                        self.assertIs(batch, scheduler.prefill)
+                        self.assertFalse(scheduler.mixed_at_admission)
+                        if mixes:
+                            running.prepare_for_decode.assert_called_once_with()
+                            batch.mix_with_running.assert_called_once_with(running)
+                            self.assertIs(batch.decoding_reqs, running.reqs)
+                            self.assertEqual(scheduler.running_batch.reqs, [])
+                            self.assertTrue(scheduler.running_batch.batch_is_full)
+                            emit.assert_any_call("mix_short_prefill", prefill_tokens=tokens, requests=["decode"])
+                        else:
+                            running.prepare_for_decode.assert_not_called()
+                            batch.mix_with_running.assert_not_called()
+                            self.assertIsNone(batch.decoding_reqs)
+                            self.assertIs(scheduler.running_batch, running)
+
     def test_last_prefill_chunk_admits_only_the_ready_cohort_prefix(self):
         with tempfile.TemporaryDirectory() as directory:
             class Native:

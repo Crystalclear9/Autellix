@@ -39,6 +39,12 @@ class SGLangBackend:
         refill_idle_slots = engine_args.pop("autellix_refill_idle_slots", False)
         resident_reserve_only = engine_args.pop("autellix_resident_reserve_only", False)
         mix_prefill_decode = engine_args.pop("autellix_mix_prefill_decode", True)
+        mix_prefill_max_tokens = engine_args.pop("autellix_mix_prefill_max_tokens", 0)
+        if type(mix_prefill_max_tokens) is not int or mix_prefill_max_tokens < 0:
+            raise ValueError("autellix_mix_prefill_max_tokens must be a nonnegative integer")
+        if mix_prefill_max_tokens and (self.native or pp != 1 or legacy_gpu or config.implementation != "paper"
+                                      or (engine_args.get("chunked_prefill_size") or 0) <= 0):
+            raise ValueError("autellix_mix_prefill_max_tokens requires modern single-stage paper mode with chunked prefill")
         fill_chunk_tail = engine_args.pop("autellix_fill_chunk_tail", False)
         decode_cached_resumes = engine_args.pop("autellix_decode_cached_resumes", False)
         min_decode_steps = engine_args.pop("autellix_min_decode_steps", 0)
@@ -79,6 +85,7 @@ class SGLangBackend:
                        refill_idle_slots=refill_idle_slots and config.implementation == "paper",
                        resident_reserve_only=resident_reserve_only and config.implementation == "paper",
                        mix_prefill_decode=mix_prefill_decode,
+                       mix_prefill_max_tokens=mix_prefill_max_tokens,
                        fill_chunk_tail=fill_chunk_tail,
                        decode_cached_resumes=decode_cached_resumes and not legacy_gpu,
                        min_decode_steps=min_decode_steps,

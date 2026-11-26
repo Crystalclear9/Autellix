@@ -57,6 +57,7 @@ def install(cls, options):
     measure_timing = options.get("measure_timing", False)
     defer_model_timing = options.get("defer_model_timing", True)
     min_decode_steps = options.get("min_decode_steps", 0)
+    mix_prefill_max_tokens = options.get("mix_prefill_max_tokens", 0)
 
     def init(self, *a, **kw):
         original_init(self, *a, **kw)
@@ -77,7 +78,7 @@ def install(cls, options):
         if self._autellix_paper:
             # Mixed execution prevents native prefill preference from excluding
             # higher-priority decodes already admitted by the global plan.
-            self.is_mixed_chunk = options.get("mix_prefill_decode", True)
+            self.is_mixed_chunk = not mix_prefill_max_tokens and options.get("mix_prefill_decode", True)
             self.new_token_ratio = self.init_new_token_ratio = 1.0
         self._autellix_rids = {}
         self._autellix_reserve = {}
@@ -131,13 +132,33 @@ def install(cls, options):
             held = [req for req in self.waiting_queue if req.rid in other_reserves]
             self.waiting_queue = [req for req in self.waiting_queue if req.rid not in other_reserves]
         try:
-            return prefill_plan(self, restored_nodes)
+            batch = prefill_plan(self, restored_nodes)
+            if mix_prefill_max_tokens and batch is not None:
+                mix_short_prefill(self, batch)
+            return batch
         finally:
             self.waiting_queue.extend(held)
             # Native admission has acquired its own locks for accepted requests.
             # Others retain their host backup and must remain evictable on retry.
             for _, node in reversed(restored_nodes):
                 self.tree_cache.dec_lock_ref(node)
+
+    def mix_short_prefill(self, batch):
+        running = self.running_batch
+        if (not running.reqs or not batch.forward_mode.is_extend() or batch.return_logprob
+                or running.return_logprob or batch.extend_num_tokens > mix_prefill_max_tokens):
+            return
+        running.filter_batch()
+        prefill_tokens = batch.extend_num_tokens
+        if (not running.reqs or prefill_tokens + len(running.reqs) > self.chunked_prefill_size
+                or not running.check_decode_mem(self.decode_mem_cache_buf_multiplier)):
+            return
+        running.prepare_for_decode()
+        batch.mix_with_running(running)
+        batch.decoding_reqs = running.reqs
+        self.running_batch = type(running)(reqs=[], batch_is_full=running.batch_is_full)
+        self.autellix.emit("mix_short_prefill", prefill_tokens=prefill_tokens,
+                          requests=[req.rid for req in batch.decoding_reqs])
 
     def prefill_plan(self, restored_nodes):
         ctl = self.autellix
