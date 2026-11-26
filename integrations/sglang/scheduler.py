@@ -240,11 +240,13 @@ def install(cls, options):
                         if lower_running:
                             from .admission import can_keep_running, fitting_decode_prefix
                             retain = options.get("retain_running", True)
-                            if retain and can_keep_running(self, pending_reqs, keep, order=order):
+                            frontier = options.get("prefill_frontier", False)
+                            if retain and can_keep_running(self, pending_reqs, keep, order=order, prefill_frontier=frontier):
                                 ctl.emit("retain_running", requests=lower_running,
                                          pending=[r.rid for r in pending_reqs])
                             elif retain and options.get("partial_retention") and self.pp_size == 1:
-                                keep = fitting_decode_prefix(self, pending_reqs, keep, lower_running, order)
+                                keep = fitting_decode_prefix(self, pending_reqs, keep, lower_running, order,
+                                                             prefill_frontier=frontier)
                                 retained = [rid for rid in lower_running if rid in keep]
                                 if retained:
                                     ctl.emit("retain_decode_prefix", requests=retained)

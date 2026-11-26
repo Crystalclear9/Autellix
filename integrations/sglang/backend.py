@@ -30,6 +30,7 @@ class SGLangBackend:
         score_elements = engine_args.pop("autellix_attention_score_elements", 2**26)
         mlp_chunk_size = engine_args.pop("autellix_mlp_chunk_size", 0)
         retain_running = engine_args.pop("autellix_retain_running", True)
+        prefill_frontier = engine_args.pop("autellix_prefill_frontier", False)
         partial_retention = engine_args.pop("autellix_partial_retention", False)
         if partial_retention and (pp != 1 or config.implementation != "paper" or not retain_running):
             raise ValueError("autellix_partial_retention requires single-stage paper mode with decode retention")
@@ -40,6 +41,10 @@ class SGLangBackend:
         resident_reserve_only = engine_args.pop("autellix_resident_reserve_only", False)
         mix_prefill_decode = engine_args.pop("autellix_mix_prefill_decode", True)
         mix_prefill_max_tokens = engine_args.pop("autellix_mix_prefill_max_tokens", 0)
+        if prefill_frontier and (self.native or pp != 1 or legacy_gpu or config.implementation != "paper"
+                                 or not retain_running or (mix_prefill_decode and not mix_prefill_max_tokens)
+                                 or (engine_args.get("chunked_prefill_size") or 0) <= 0):
+            raise ValueError("autellix_prefill_frontier requires single-stage paper mode with split chunked admission")
         if type(mix_prefill_max_tokens) is not int or mix_prefill_max_tokens < 0:
             raise ValueError("autellix_mix_prefill_max_tokens must be a nonnegative integer")
         if mix_prefill_max_tokens and (self.native or pp != 1 or legacy_gpu or config.implementation != "paper"
@@ -79,6 +84,7 @@ class SGLangBackend:
                        host_bytes=host_bytes, host_kv_recompute=host_kv_recompute,
                        legacy_gpu=legacy_gpu, pipeline=pp > 1, prefix_attention=prefix_attention,
                        retain_running=retain_running, partial_retention=partial_retention,
+                       prefill_frontier=prefill_frontier,
                        cache_paused_kv=cache_paused_kv and pp == 1,
                        publish_activity_at_window=publish_activity_at_window and config.implementation == "paper",
                        publish_activity=publish_activity,
