@@ -62,7 +62,7 @@ vLLM 0.6.1 的分块 prefill 与原生多步执行使用两个独立配置，分
 每次测量完成后，运行目录保存计划和原子写入的 JSON 检查点。以同一组模型、参数和轨迹
 再次运行即可从中断处继续。不同实验、模型尺寸和离线批量使用独立的 `--run-dir`。
 H20 的 vLLM-opt 与 Autellix 回归使用相同模型、到达轨迹、设备、KV 预算及逐调用 token 数。
-最近的 8B、14B 配对见 [H20 稳定解码 overlap 复测](../../docs/h20-reproduction.md#sglang-稳定解码-overlap-复测)，
+最近的 8B、14B 配对见 [H20 overlap 读回复测](../../docs/h20-reproduction.md#sglang-overlap-读回与-token-解析复测)，
 其他模型的计划和检查点见 [H20 复现记录](../../docs/h20-reproduction.md)。
 
 | 入口 | 对应的论文实验 |

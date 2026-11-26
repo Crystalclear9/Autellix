@@ -100,6 +100,8 @@ SGLang 适配设置 `disable_overlap_schedule=True`、`page_size=1`，`chunked_p
 `autellix_stable_decode_overlap=true` 为现代单阶段 SGLang 生成模型开启稳定解码 overlap。
 提前提交只发生在已确定的解码队列中，调度或 KV 状态需要变化时先读回在途结果。开启后使用
 原生 overlap worker 的解码准备，缓存恢复用 extend。默认关闭。
+`autellix_overlap_lazy_resolve=true` 配合稳定解码 overlap。连续解码和混合批次使用 worker
+的原生解析，独立预填充开始前保存暂时等待的解码 token。默认关闭。
 单阶段现代 GPU 的 `paper` 模式可设置 `autellix_mix_prefill_max_tokens`。正整数开启分段预填充
 上的自适应合批，按实际接纳的未缓存 token 数选择是否混合执行，并检查当前分块和解码 KV 余量。
 默认 `0`，使用 `autellix_mix_prefill_decode` 指定的固定方式。

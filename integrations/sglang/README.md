@@ -105,7 +105,9 @@ GPU 回归使用 `AUTELLIX_TEST_LEGACY_GPU=1`；仍需设置后端和模型环�
 Triton 调用。调度 trace 用 `fused_decode_metadata` 记录实际执行的合并批次。
 `autellix_stable_decode_overlap=true` 用原生 overlap worker 执行稳定窗口内的解码。调度 trace
 记录 `overlap_continue_decode`、`overlap_drain` 和带批次编号的 `overlap_result`。
-配对结果和检查点见 [H20 稳定解码 overlap 复测](../../docs/h20-reproduction.md#sglang-稳定解码-overlap-复测)。
+`autellix_overlap_lazy_resolve=true` 把提前解析限制在独立预填充导致驻留解码等待的分支。
+`overlap_drain` 记录等待在途结果的首个原因，`overlap_resolve` 记录提前解析的策略。
+配对结果和检查点见 [H20 overlap 读回复测](../../docs/h20-reproduction.md#sglang-overlap-读回与-token-解析复测)。
 `autellix_defer_model_timing=false` 可用于对照，恢复读回前的独立同步。
 流水线用各阶段的 CUDA event 累计前向时间，并通过原有消息的元数据传递累计值。
 `autellix_pipeline_timing_metadata=false` 可用来对照独立的 GPU 标量传输。
