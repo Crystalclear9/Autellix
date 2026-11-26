@@ -95,6 +95,37 @@ P95 从 343.45 增至 358.62 毫秒/token。
 `python scripts/run_sglang_matrix.py --plan PLAN --output CHECKPOINT`。
 本地副本通过 SHA-256 和逐调用 token 数校验后，已释放三张实验卡并清理 H20 上的本轮临时目录。
 
+## 流水线策略与 KV 接纳复测
+
+在 `8a81b0a` 上，SGLang 流水线阶段采用传入的活动发布、窗口补位和驻留候补选项。
+GPU 执行时间继续由各阶段的前向计时累计，外层批次调用移除了重复的同步。
+8B BFCL 改用种子 2028 和 24 个程序。14B、70B 的 BFCL 以及三个 ShareGPT 配对复用上轮输入。
+每个格子使用相同物理卡和逐调用相同的输入、输出 token 数。
+
+| 模型 | BFCL 对原生 SGLang | ShareGPT 对原生 SGLang | BFCL 对 vLLM-opt | ShareGPT 对 vLLM-opt |
+| --- | ---: | ---: | ---: | ---: |
+| 8B | −2.2% | −6.0% | +5.4% | +2.5% |
+| 14B | +0.8% | −3.7% | +5.1% | +2.0% |
+| 70B | −18.4% | −2.2% | +8.1% | +1.7% |
+
+表中为整批输出吞吐的相对变化。vLLM 接入组统一启用 `kv_aware_admission`。
+14B 的 SGLang BFCL 采用 16 步窗口和零候补，吞吐从上轮接入版的 86.55 提到 97.56 token/s，
+本轮相对原生组的平均程序延迟降低 5.0%。70B 的 BFCL 接入版由 27.07 提到 31.67 token/s，
+同轨迹逐调用的平均排队时间由 3.97 降至 2.98 秒。
+
+8B 补测覆盖 2 个 LATS 程序、3 个 Mixed 程序和 16 个同时提交的 ShareGPT 程序。
+
+| 补测 | 对照 → Autellix（token/s） | 吞吐变化 |
+| --- | ---: | ---: |
+| LATS，vLLM | 296.70 → 298.38 | +0.6% |
+| Mixed，SGLang | 218.50 → 203.19 | −7.0% |
+| 离线 ShareGPT，SGLang | 328.62 → 311.97 | −5.1% |
+| 离线 ShareGPT，vLLM | 266.79 → 275.71 | +3.3% |
+
+16 组配对的 32 次运行、对应计划和选中的 LATS、Mixed 输入保存在
+`outputs/fjr-h20-backend-tuning-20261126/`。所有已完成配对均已逐调用核对长度，并校验
+轨迹与源码指纹。70B 聚合 KV 换出的额外对照因未取得两张空闲 GPU，跳过执行。
+
 ## 单卡 Llama‑3.1‑8B 论文对照
 
 在 `autellix-vllm061` 环境中使用共享的 `Meta-Llama-3.1-8B` BF16 权重。ShareGPT 从
