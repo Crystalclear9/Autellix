@@ -151,6 +151,9 @@ def install(cls, options):
                 mixed_decode = len(self.running_batch.reqs) if self.is_mixed_chunk else 0
                 if remaining < self.chunked_prefill_size - mixed_decode:
                     queued = {req.rid: req for req in waiting}
+                    if window.refill_idle_slots and window.remaining > 0 and req.rid in window.active:
+                        running = {r.rid for r in self.running_batch.reqs} | {req.rid}
+                        window.select(running.union(queued), running.union(self._autellix_reserve))
                     host = self._autellix_host
                     for rid in window.cohort:
                         if rid not in window.active or rid not in queued:
