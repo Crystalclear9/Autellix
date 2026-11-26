@@ -119,12 +119,19 @@ def install(cls, *, lazy_resolve=False):
             # Merge an already-processed prefill into the running batch, using
             # the same native path that handles chunk ownership and retirement.
             batch = native_next(self)
-            if (lazy_resolve and batch is not None and batch.forward_mode.is_extend()
-                    and not batch.decoding_reqs):
-                # An immediate decode or mixed batch consumes its future IDs
-                # in the worker. A separate prefill can leave the current
-                # decode batch parked until the future ring has wrapped.
-                resolve_outputs(self, self.running_batch, policy="paused_prefill")
+            if batch is not None and batch.forward_mode.is_extend():
+                if batch.decoding_reqs:
+                    # Native overlap uses a zero delta for the decode tail's
+                    # CPU token list because the previous result is pending.
+                    # We only select mixed batches after processing that result.
+                    first_decode = len(batch.prefix_lens) - len(batch.decoding_reqs)
+                    for index in range(first_decode, len(batch.prefix_lens)):
+                        batch.prefix_lens[index] -= 1
+                elif lazy_resolve:
+                    # An immediate decode or mixed batch consumes its future
+                    # IDs in the worker. Separate prefill can park a decode
+                    # batch until the future ring has wrapped.
+                    resolve_outputs(self, self.running_batch, policy="paused_prefill")
             return batch
         finally:
             # The native event loop must bootstrap sampling for the next launch.

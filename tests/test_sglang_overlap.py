@@ -27,7 +27,7 @@ class StableDecodeOverlapTests(unittest.TestCase):
                 self.decode_mem_cache_buf_multiplier = 1
                 self.autellix = NS(trace=True, emit=Mock())
                 self.native_input = Mock()
-                self.native_next = Mock(return_value="regular")
+                self.native_next = Mock(return_value=NS(forward_mode=NS(is_extend=lambda: False)))
 
             def process_input_requests(self, requests):
                 self.native_input(requests, self.cur_batch)
@@ -54,7 +54,7 @@ class StableDecodeOverlapTests(unittest.TestCase):
         scheduler.last_batch = None
         scheduler.process_input_requests(["new-arrival"])
         scheduler.native_input.assert_called_once_with(["cancel", "arrival", "new-arrival"], batch)
-        self.assertEqual(scheduler.get_next_batch_to_run(), "regular")
+        self.assertIs(scheduler.get_next_batch_to_run(), scheduler.native_next.return_value)
         scheduler.native_next.assert_called_once_with(batch)
         self.assertIsNone(scheduler.last_batch)
         self.assertIsNone(scheduler._autellix_overlap.drained)
@@ -101,6 +101,7 @@ class StableDecodeOverlapTests(unittest.TestCase):
                 batch = None if mode == "idle" else NS(
                     forward_mode=NS(is_extend=lambda: mode in ("prefill", "mixed")),
                     decoding_reqs=resident.reqs if mode == "mixed" else None,
+                    prefix_lens=[8, 17],
                 )
 
                 def select(previous):
@@ -117,6 +118,18 @@ class StableDecodeOverlapTests(unittest.TestCase):
                         resolve.assert_not_called()
                 self.assertIsNone(scheduler.last_batch)
                 self.assertIsNone(scheduler._autellix_overlap.drained)
+
+    def test_drained_mixed_prefix_corrects_only_the_decode_tail(self):
+        for lazy_resolve in (False, True):
+            with self.subTest(lazy_resolve=lazy_resolve):
+                scheduler = self.scheduler(lazy_resolve=lazy_resolve)
+                scheduler._autellix_overlap.drained = scheduler.last_batch
+                scheduler.last_batch = None
+                batch = NS(forward_mode=NS(is_extend=lambda: True),
+                           decoding_reqs=[object(), object()], prefix_lens=[4, 0, 12, 23])
+                scheduler.native_next.return_value = batch
+                self.assertIs(scheduler.get_next_batch_to_run(), batch)
+                self.assertEqual(batch.prefix_lens, [4, 0, 11, 22])
 
     def test_resolver_preserves_the_resident_output_tensor_identity(self):
         worker = ModuleType("sglang.srt.managers.tp_worker_overlap_thread")
