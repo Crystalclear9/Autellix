@@ -22,7 +22,7 @@
 
 ## 实验入口
 
-- H20 的原生 SGLang、vLLM-opt 和 Autellix 配对，以及共享权重和原始检查点位置。[H20 复现记录](docs/h20-reproduction.md) · [首步解码接续复测](docs/h20-reproduction.md#sglang-首步解码接续复测)
+- H20 的原生 SGLang、vLLM-opt 和 Autellix 配对，以及共享权重和原始检查点位置。[H20 复现记录](docs/h20-reproduction.md) · [窗口边界续跑复测](docs/h20-reproduction.md#sglang-窗口边界续跑复测)
 - 完整 ShareGPT、BFCL、LATS、Mixed 的输入制作、负载曲线和论文机制核对。 [工作负载复现](docs/paper-workload-experiment.md) · [论文核对](docs/autellix-paper-audit.md)
 - P40 的功能验证、32B 三卡流水线和三副本路由。 [P40 验收](docs/p40-validation-20261115.md) · [三卡实验](docs/three-gpu-experiment.md) · [服务器目录](docs/server-layout.md)
 

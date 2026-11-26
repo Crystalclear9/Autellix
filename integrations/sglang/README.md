@@ -111,7 +111,9 @@ Triton 调用。调度 trace 用 `fused_decode_metadata` 记录实际执行的�
 调度 trace 用 `overlap_prefill_decode` 记录实际接续批次。
 `autellix_overlap_retire_decode=true` 在原窗口中的请求自然结束后继续解码其余请求。
 `overlap_retire_decode` 记录继续和退出的请求 ID。
-配对结果和检查点见 [H20 首步解码接续复测](../../docs/h20-reproduction.md#sglang-首步解码接续复测)。
+`autellix_overlap_window_decode=true` 在全部请求都已驻留、没有候选请求需要接纳时，让
+首个新窗口解码提前提交，并在旧批次结算后刷新 PLAS。trace 用 `overlap_window_decode` 记录。
+配对结果和检查点见 [H20 窗口边界续跑复测](../../docs/h20-reproduction.md#sglang-窗口边界续跑复测)。
 `autellix_defer_model_timing=false` 可用于对照，恢复读回前的独立同步。
 流水线用各阶段的 CUDA event 累计前向时间，并通过原有消息的元数据传递累计值。
 `autellix_pipeline_timing_metadata=false` 可用来对照独立的 GPU 标量传输。

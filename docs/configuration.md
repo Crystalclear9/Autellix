@@ -106,6 +106,9 @@ SGLang 适配设置 `disable_overlap_schedule=True`、`page_size=1`，`chunked_p
 当前窗口的请求集合保持原顺序，首步使用空闲 KV 槽位。默认关闭。
 `autellix_overlap_retire_decode=true` 配合稳定解码 overlap。正常 EOS 或达到长度上限后，
 没有待接纳请求或 KV 保留项时，原窗口内剩余请求可接着解码。默认关闭。
+`autellix_overlap_window_decode=true` 配合稳定解码 overlap。在没有新调度决策的窗口边界
+提前提交一步，按旧结果结算后更新的 PLAS 顺序计入新窗口。可配合 `autellix_window_activity=true`
+按窗口发布活动，或设 `autellix_publish_activity=false` 关闭发布。默认关闭。
 单阶段现代 GPU 的 `paper` 模式可设置 `autellix_mix_prefill_max_tokens`。正整数开启分段预填充
 上的自适应合批，按实际接纳的未缓存 token 数选择是否混合执行，并检查当前分块和解码 KV 余量。
 默认 `0`，使用 `autellix_mix_prefill_decode` 指定的固定方式。
