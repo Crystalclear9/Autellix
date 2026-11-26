@@ -38,6 +38,10 @@ class SGLangBackend:
         mix_prefill_decode = engine_args.pop("autellix_mix_prefill_decode", True)
         fill_chunk_tail = engine_args.pop("autellix_fill_chunk_tail", False)
         decode_cached_resumes = engine_args.pop("autellix_decode_cached_resumes", False)
+        min_decode_steps = engine_args.pop("autellix_min_decode_steps", 0)
+        if (type(min_decode_steps) is not int or min_decode_steps < 0
+                or (min_decode_steps and (pp != 1 or config.implementation != "paper"))):
+            raise ValueError("autellix_min_decode_steps requires single-stage paper mode and a nonnegative integer")
         defer_model_timing = engine_args.pop("autellix_defer_model_timing", True)
         pipeline_timing_metadata = engine_args.pop("autellix_pipeline_timing_metadata", True)
         fused_swap = engine_args.pop("autellix_fused_swap", False)
@@ -73,6 +77,7 @@ class SGLangBackend:
                        mix_prefill_decode=mix_prefill_decode,
                        fill_chunk_tail=fill_chunk_tail,
                        decode_cached_resumes=decode_cached_resumes and not legacy_gpu,
+                       min_decode_steps=min_decode_steps,
                        defer_model_timing=defer_model_timing,
                        pipeline_timing_metadata=pipeline_timing_metadata,
                        fused_swap=fused_swap,

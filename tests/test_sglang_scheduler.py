@@ -90,6 +90,54 @@ class CompletedDecodeTests(unittest.TestCase):
                     self.assertEqual(end.synchronize.call_count, 0 if event_ready else 1)
                     self.assertEqual(table.take_metrics("external")["executed"], .025)
 
+    def test_min_decode_steps_counts_only_decode_in_a_mixed_batch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            class Native:
+                def __init__(self):
+                    self.policy = SimpleNamespace()
+
+                _add_request_to_queue = Mock()
+                _extend_requests_to_queue = Mock()
+                get_new_batch_prefill = Mock()
+                get_next_batch_to_run = Mock()
+                run_batch = Mock()
+                process_batch_result = Mock()
+                abort_request = Mock()
+                check_memory = Mock()
+
+            start, end = Mock(), Mock()
+            start.elapsed_time.return_value = 25.
+            torch = SimpleNamespace(cuda=SimpleNamespace(Event=Mock(side_effect=[start, end])))
+            with patch.dict("sys.modules", {"torch": torch}):
+                install(Native, {"table_path": str(Path(directory, "state.sqlite")),
+                                 "config": {"quanta": (.01, .02), "boundaries": (0., .02, float("inf"))},
+                                 "min_decode_steps": 2, "measure_timing": True})
+            scheduler = Native()
+            controller = scheduler.autellix
+            with closing(controller.table):
+                controller.table.open("program")
+                prefill = SimpleNamespace(rid="prefill", output_ids=[7], finished=lambda: False)
+                decode = SimpleNamespace(rid="decode", output_ids=[8], finished=lambda: False)
+                for req in (prefill, decode):
+                    controller.admit(req.rid, "program")
+                batch = SimpleNamespace(reqs=[prefill, decode], decoding_reqs=[decode],
+                                        forward_mode=SimpleNamespace(is_extend=lambda: True),
+                                        extend_lens=[8, 1], input_ids=SimpleNamespace(numel=lambda: 9))
+                with patch.object(controller, "emit", wraps=controller.emit) as emit:
+                    scheduler.process_batch_result(batch, scheduler.run_batch(batch))
+                    emit.assert_any_call("model_phase_time", seconds=.025, requests=["prefill", "decode"],
+                                         phase="mixed", input_tokens=9, prefill_tokens=8, resumed_prefill_tokens=8)
+                controller.refresh()
+                self.assertEqual([c.decode_steps for c in controller.calls.values()], [0, 1])
+                self.assertEqual([c.queue for c in controller.calls.values()], [0, 0])
+                self.assertEqual([c.executed for c in controller.calls.values()], [.025, .025])
+
+                batch.forward_mode.is_extend = lambda: False
+                batch.extend_lens = None
+                scheduler.process_batch_result(batch, scheduler.run_batch(batch))
+                controller.refresh()
+                self.assertEqual([c.queue for c in controller.calls.values()], [0, 1])
+
     def test_per_step_prefill_budget_preserves_the_decode_cohort(self):
         for admission_limit in ("partial", "chunk_budget", "kv_capacity"):
             with self.subTest(admission_limit=admission_limit):

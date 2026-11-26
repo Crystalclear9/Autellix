@@ -56,6 +56,7 @@ def install(cls, options):
     original_update_running = getattr(cls, "update_running_batch", None)
     measure_timing = options.get("measure_timing", False)
     defer_model_timing = options.get("defer_model_timing", True)
+    min_decode_steps = options.get("min_decode_steps", 0)
 
     def init(self, *a, **kw):
         original_init(self, *a, **kw)
@@ -69,7 +70,8 @@ def install(cls, options):
             self.autellix = RuntimeScheduler(ProgramTable(options["table_path"]),
                                             PolicyConfig(**options["config"]), options.get("trace"),
                                             publish_activity_at_window=options.get("publish_activity_at_window", False),
-                                            publish_activity=options.get("publish_activity", True))
+                                            publish_activity=options.get("publish_activity", True),
+                                            min_decode_steps=min_decode_steps)
         self._autellix_steps = 0
         self._autellix_paper = self.autellix.config.implementation == "paper"
         if self._autellix_paper:
@@ -414,14 +416,14 @@ def install(cls, options):
         self.running_batch = batch
         self.autellix.emit("decode_cached_resumes", requests=[req.rid for req in resumed])
 
-    def account_model_time(self, rids, phase, *, synchronize):
+    def account_model_time(self, rids, prefill_count, phase, *, synchronize):
         start, end = self._autellix_model_events
         if synchronize or not end.query():
             end.synchronize()
         seconds = start.elapsed_time(end) / 1000.
-        self.autellix.executed(rids, seconds)
+        self.autellix.executed(rids, seconds, prefill_count=prefill_count)
         if phase is not None:
-            self.autellix.emit("model_phase_time", phase=phase, seconds=seconds, requests=rids)
+            self.autellix.emit("model_phase_time", seconds=seconds, requests=rids, **phase)
 
     def run(self, batch):
         rids = [req.rid for req in batch.reqs]
@@ -433,22 +435,28 @@ def install(cls, options):
             result = original_run(self, batch)
         else:
             self.autellix.begin(rids)
+            prefill_count = None
+            phase = None
+            if measure_timing or min_decode_steps:
+                decoding = (len(getattr(batch, "decoding_reqs", None) or ())
+                            if batch.forward_mode.is_extend() else len(rids))
+                prefill_count = len(rids) - decoding
+                if measure_timing:
+                    prefill = (batch.extend_lens or ())[:prefill_count]
+                    phase = dict(phase="mixed" if prefill_count and decoding else "prefill" if prefill_count else "decode",
+                                 input_tokens=input_tokens, prefill_tokens=sum(prefill),
+                                 resumed_prefill_tokens=sum(n for req, n in zip(batch.reqs, prefill) if req.output_ids))
             start, end = self._autellix_model_events
             start.record()
             result = original_run(self, batch)
             end.record()
-            phase = None
-            if measure_timing:
-                phase = "decode"
-                if batch.forward_mode.is_extend():
-                    phase = "mixed" if getattr(batch, "decoding_reqs", None) else "prefill"
             if defer_model_timing:
                 # The non-overlap loop processes this result before its next
                 # scheduling decision. Native token readback usually completes
                 # the events without a separate blocking wait.
-                self._autellix_pending_timing = (rids, phase)
+                self._autellix_pending_timing = (rids, prefill_count if min_decode_steps else None, phase)
             else:
-                account_model_time(self, rids, phase, synchronize=True)
+                account_model_time(self, rids, prefill_count if min_decode_steps else None, phase, synchronize=True)
         if self._autellix_window is not None:
             only_prefill = batch.forward_mode.is_extend() and not getattr(batch, "decoding_reqs", None)
             ctl = self.autellix
@@ -482,9 +490,9 @@ def install(cls, options):
             self._autellix_inflight.difference_update(req.rid for req in reqs)
         ret = original_result(self, batch, result, *a, **kw)
         if self.pp_size == 1 and self._autellix_pending_timing is not None:
-            rids, phase = self._autellix_pending_timing
+            rids, prefill_count, phase = self._autellix_pending_timing
             self._autellix_pending_timing = None
-            account_model_time(self, rids, phase, synchronize=False)
+            account_model_time(self, rids, prefill_count, phase, synchronize=False)
         for req in reqs:
             if req.finished() and req.rid in self.autellix.calls:
                 reason = "cancelled" if getattr(req, "to_abort", False) else "finished"
