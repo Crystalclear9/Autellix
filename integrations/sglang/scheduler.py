@@ -58,6 +58,9 @@ def install(cls, options):
     defer_model_timing = options.get("defer_model_timing", True)
     min_decode_steps = options.get("min_decode_steps", 0)
     mix_prefill_max_tokens = options.get("mix_prefill_max_tokens", 0)
+    prepare_fused_decode = None
+    if options.get("fused_decode_metadata"):
+        from .decode import prepare_decode as prepare_fused_decode
 
     def init(self, *a, **kw):
         original_init(self, *a, **kw)
@@ -508,6 +511,10 @@ def install(cls, options):
         from .pressure import make_decode_room
         make_decode_room(self, batch)
         if batch.is_empty():
+            return batch
+        if prepare_fused_decode is not None and prepare_fused_decode(batch):
+            if self.autellix.trace:
+                self.autellix.emit("fused_decode_metadata", requests=[req.rid for req in batch.reqs])
             return batch
         batch.prepare_for_decode()
         return batch
