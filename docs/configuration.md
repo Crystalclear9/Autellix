@@ -101,6 +101,10 @@ SGLang 适配设置 `disable_overlap_schedule=True`、`page_size=1`，`chunked_p
 `autellix_min_decode_steps` 设置单阶段 SGLang `paper` 模式中，GPU 时间片耗尽后降级所需的最少解码步数。
 默认 `0`。预填充和解码都按完整 GPU 时间结算。混合批次只有解码部分计步。
 打开 `scheduler_trace` 和 `autellix_measure_timing` 可另外记录真实预填充与恢复预填充的 token 数。
+单阶段 `paper` 模式可开启 `autellix_partial_retention`，默认关闭。整组低优先级解码与
+高优先级预填充无法同时驻留时，按窗口顺序保留可安全共存的最长解码前缀。
+矩阵计划的单个用例可设 `last_queue_fifo=true`。最低队列的时间片用尽时保留原入队顺序，
+调用仍可因达到防饥饿阈值而提升。
 两个回放脚本均支持 `--resident-reserve-only`。该模式保持前 B 个活动请求的优先级顺序，
 K 个候补从余下请求中按同样的优先级选取，候补需已有驻留 KV。
 
