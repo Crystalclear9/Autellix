@@ -100,6 +100,9 @@ GPU 回归使用 `AUTELLIX_TEST_LEGACY_GPU=1`；仍需设置后端和模型环�
 单独开启 `autellix_native_baseline` 时沿用适配器的同步调度及分块设置。
 再开启 `autellix_native_defaults=true` 时使用上游默认值，可单独设置
 `disable_overlap_schedule=true` 测量原生 overlap 的影响。
+单阶段 Autellix 默认在原生输出读回后结算 CUDA event 时间，并在程序完成前写入服务时间。
+`autellix_defer_model_timing=false` 可用于对照，恢复读回前的独立同步。
+流水线继续使用各阶段的前向计时。
 `policy=fcfs` 走 Autellix 的调度窗口和 KV 管理，可与同配置的 PLAS/ATLAS 配对。
 
 配对实验、输入构造限制和结论见 [论文对照审计](../../docs/autellix-paper-audit.md)。
