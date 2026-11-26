@@ -139,16 +139,33 @@ def install(cls, options):
 
     def prefill_plan(self, restored_nodes):
         ctl = self.autellix
+        window = self._autellix_window
         # SGLang owns a partial prefill outside the waiting and running queues.
-        # Finish its native continuation before selecting another prefill set.
+        # Keep its frozen cohort until native admission finishes the chunk.
         if getattr(self, "chunked_req", None) is not None:
             waiting = self.waiting_queue
-            self.waiting_queue = []
+            eligible = []
+            if options.get("fill_chunk_tail") and self._autellix_paper and window is not None:
+                req = self.chunked_req
+                remaining = len(req.origin_input_ids) + len(req.output_ids) - len(req.prefix_indices)
+                mixed_decode = len(self.running_batch.reqs) if self.is_mixed_chunk else 0
+                if remaining < self.chunked_prefill_size - mixed_decode:
+                    queued = {req.rid: req for req in waiting}
+                    host = self._autellix_host
+                    for rid in window.cohort:
+                        if rid not in window.active or rid not in queued:
+                            continue
+                        if rid in self._autellix_reserve or (host is not None and rid in host.saved):
+                            break
+                        eligible.append(queued[rid])
+            considered = {req.rid for req in eligible}
+            self.waiting_queue = eligible
             try:
                 ctl.emit("continue_prefill", rid=self.chunked_req.rid)
                 return original_prefill(self)
             finally:
-                self.waiting_queue = waiting
+                admitted = considered.difference(req.rid for req in self.waiting_queue)
+                self.waiting_queue = [req for req in waiting if req.rid not in admitted] if admitted else waiting
         # Decode results retire requests before native update_running_batch
         # filters its tensors. We inspect this batch earlier, so apply the
         # native filter first, including on iterations without a priority refresh.
@@ -159,7 +176,6 @@ def install(cls, options):
             batch.batch_is_full = False
         self._autellix_steps += 1
         selected = None
-        window = self._autellix_window
         if window is not None:
             running = {r.rid for r in batch.reqs}
             if self._autellix_paper and window.can_continue_decode(running, self._autellix_reserve):
@@ -374,7 +390,26 @@ def install(cls, options):
                     ctl.emit("resume_cached", rid=req.rid)
                 if self._autellix_host is not None:
                     self._autellix_host.discard(req.rid)
+            if options.get("decode_cached_resumes") and self._autellix_paper and self.pp_size == 1:
+                use_decode_for_cached_resumes(self, result)
         return result
+
+    def use_decode_for_cached_resumes(self, batch):
+        # Native admission has already allocated one KV slot per query and
+        # populated the request-to-token table. A single uncached token per
+        # resumed call uses the same positions and KV writes as a decode step.
+        if (getattr(self, "chunked_req", None) is not None or self.running_batch.reqs
+                or batch.return_logprob or batch.has_grammar or batch.return_hidden_states
+                or batch.model_config.is_encoder_decoder or batch.input_embeds is not None
+                or not batch.sampling_info.is_all_greedy or any(length != 1 for length in batch.extend_lens)):
+            return
+        continuing = len(batch.decoding_reqs or ())
+        resumed = batch.reqs[:len(batch.reqs) - continuing]
+        if not resumed or any(not req.output_ids or req.multimodal_inputs is not None for req in resumed):
+            return
+        batch.forward_mode = type(batch.forward_mode).DECODE
+        self.running_batch = batch
+        self.autellix.emit("decode_cached_resumes", requests=[req.rid for req in resumed])
 
     def account_model_time(self, rids, phase, *, synchronize):
         start, end = self._autellix_model_events

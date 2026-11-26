@@ -10,6 +10,45 @@ from integrations.sglang.scheduler import encode_request, install
 
 
 class CompletedDecodeTests(unittest.TestCase):
+    def test_last_prefill_chunk_admits_only_the_ready_cohort_prefix(self):
+        with tempfile.TemporaryDirectory() as directory:
+            class Native:
+                def __init__(self):
+                    self.policy = SimpleNamespace()
+                    self.waiting_queue = []
+                    self.running_batch = SimpleNamespace(reqs=[])
+                    self.chunked_prefill_size = 4
+
+                def get_new_batch_prefill(self):
+                    self.policy.calc_priority(self.waiting_queue)
+                    admitted = self.waiting_queue.pop(0) if self.waiting_queue else None
+                    return SimpleNamespace(reqs=[self.chunked_req] + ([admitted] if admitted else []))
+
+                _add_request_to_queue = Mock()
+                _extend_requests_to_queue = Mock()
+                run_batch = Mock()
+                process_batch_result = Mock()
+                abort_request = Mock()
+                check_memory = Mock()
+
+            with patch.dict("sys.modules", {"torch": Mock()}):
+                install(Native, {"table_path": str(Path(directory, "state.sqlite")),
+                                 "config": {"overprovision": 0}, "capacity": 4, "fill_chunk_tail": True})
+            scheduler = Native()
+            with closing(scheduler.autellix.table):
+                chunk = SimpleNamespace(rid="chunk", origin_input_ids=[1] * 8, output_ids=[], prefix_indices=[0] * 4)
+                scheduler.chunked_req = chunk
+                first, saved, lower, outside = (SimpleNamespace(rid=rid) for rid in ("first", "saved", "lower", "outside"))
+                scheduler.waiting_queue = [outside, lower, saved, first]
+                scheduler._autellix_window.cohort = ["chunk", "first", "saved", "lower"]
+                scheduler._autellix_window.active = set(scheduler._autellix_window.cohort)
+                scheduler._autellix_host = SimpleNamespace(saved={"saved": object()})
+
+                self.assertEqual(scheduler.get_new_batch_prefill().reqs, [chunk])
+                chunk.prefix_indices.append(0)
+                self.assertEqual(scheduler.get_new_batch_prefill().reqs, [chunk, first])
+                self.assertEqual(scheduler.waiting_queue, [outside, lower, saved])
+
     def test_single_stage_accounts_deferred_gpu_time_before_finish(self):
         for event_ready in (True, False):
             with self.subTest(event_ready=event_ready), tempfile.TemporaryDirectory() as directory:

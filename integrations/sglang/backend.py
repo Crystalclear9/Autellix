@@ -36,6 +36,8 @@ class SGLangBackend:
         refill_idle_slots = engine_args.pop("autellix_refill_idle_slots", False)
         resident_reserve_only = engine_args.pop("autellix_resident_reserve_only", False)
         mix_prefill_decode = engine_args.pop("autellix_mix_prefill_decode", True)
+        fill_chunk_tail = engine_args.pop("autellix_fill_chunk_tail", True)
+        decode_cached_resumes = engine_args.pop("autellix_decode_cached_resumes", False)
         defer_model_timing = engine_args.pop("autellix_defer_model_timing", True)
         pipeline_timing_metadata = engine_args.pop("autellix_pipeline_timing_metadata", True)
         fused_swap = engine_args.pop("autellix_fused_swap", False)
@@ -69,6 +71,8 @@ class SGLangBackend:
                        refill_idle_slots=refill_idle_slots and config.implementation == "paper",
                        resident_reserve_only=resident_reserve_only and config.implementation == "paper",
                        mix_prefill_decode=mix_prefill_decode,
+                       fill_chunk_tail=fill_chunk_tail,
+                       decode_cached_resumes=decode_cached_resumes and not legacy_gpu,
                        defer_model_timing=defer_model_timing,
                        pipeline_timing_metadata=pipeline_timing_metadata,
                        fused_swap=fused_swap,
