@@ -40,3 +40,20 @@ def can_keep_running(scheduler, pending, selected, *, order=None):
     finally:
         for request in reversed(pending):
             cache.dec_lock_ref(request.last_node)
+
+
+def fitting_decode_prefix(scheduler, pending, selected, lower_running, order):
+    """Keep the longest lower-priority decode prefix that fits behind prefills."""
+    lower_running = sorted(lower_running, key=order.__getitem__)
+    fixed = selected.difference(lower_running)
+    # The full set has already failed the budget check. Extending the prefix
+    # only adds decode headroom and can bring forward more pending prefills.
+    fits, fails = 0, len(lower_running)
+    while fails - fits > 1:
+        size = (fits + fails) // 2
+        trial = fixed.union(lower_running[:size])
+        if can_keep_running(scheduler, pending, trial, order=order):
+            fits = size
+        else:
+            fails = size
+    return fixed.union(lower_running[:fits])

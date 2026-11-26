@@ -1,10 +1,32 @@
 import unittest
 from importlib.util import find_spec
 from types import SimpleNamespace as NS
-from integrations.sglang.admission import can_keep_running
+from integrations.sglang.admission import can_keep_running, fitting_decode_prefix
 
 
 class KeepRunningTests(unittest.TestCase):
+    def test_trim_only_the_decode_suffix_after_the_first_nonfitting_prefill(self):
+        locks = []
+        p = NS(max_new_tokens=8)
+        def req(rid, tokens=0):
+            return NS(rid=rid, output_ids=[], extend_input_len=tokens, sampling_params=p,
+                      init_next_round_input=lambda _: None, last_node=rid)
+        top, first, middle, second, bottom = (req("top"), req("first", 2), req("middle"),
+                                              req("second", 15), req("bottom"))
+        scheduler = NS(running_batch=NS(reqs=[bottom, top, middle]), pp_size=1, is_mixed_chunk=False,
+                       server_args=NS(max_running_requests=5), _autellix_host=None, _autellix_reserve={},
+                       tree_cache=NS(evictable_size=lambda: 0, inc_lock_ref=locks.append, dec_lock_ref=locks.remove),
+                       token_to_kv_pool_allocator=NS(available_size=lambda: 30),
+                       autellix=NS(config=NS(implementation="paper", schedule_interval=8)))
+        order = {r.rid: i for i, r in enumerate((top, first, middle, second, bottom))}
+        selected = set(order)
+        pending = [second, first]
+        self.assertFalse(can_keep_running(scheduler, pending, selected, order=order))
+        self.assertEqual(fitting_decode_prefix(scheduler, pending, selected, ["bottom", "middle"], order),
+                         selected - {"bottom"})
+        self.assertEqual(selected, set(order))
+        self.assertEqual(locks, [])
+
     def test_only_waiters_ahead_of_running_affect_single_stage_retention(self):
         sampling = NS(max_new_tokens=8)
         running = NS(rid="running", sampling_params=sampling, output_ids=[1])

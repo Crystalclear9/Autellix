@@ -30,6 +30,9 @@ class SGLangBackend:
         score_elements = engine_args.pop("autellix_attention_score_elements", 2**26)
         mlp_chunk_size = engine_args.pop("autellix_mlp_chunk_size", 0)
         retain_running = engine_args.pop("autellix_retain_running", True)
+        partial_retention = engine_args.pop("autellix_partial_retention", False)
+        if partial_retention and (pp != 1 or config.implementation != "paper" or not retain_running):
+            raise ValueError("autellix_partial_retention requires single-stage paper mode with decode retention")
         cache_paused_kv = engine_args.pop("autellix_cache_paused_kv", False)
         publish_activity_at_window = engine_args.pop("autellix_window_activity", False)
         publish_activity = engine_args.pop("autellix_publish_activity", True)
@@ -69,7 +72,8 @@ class SGLangBackend:
         options = dict(table_path=table_path, config=asdict(config), trace=trace,
                        host_bytes=host_bytes, host_kv_recompute=host_kv_recompute,
                        legacy_gpu=legacy_gpu, pipeline=pp > 1, prefix_attention=prefix_attention,
-                       retain_running=retain_running, cache_paused_kv=cache_paused_kv and pp == 1,
+                       retain_running=retain_running, partial_retention=partial_retention,
+                       cache_paused_kv=cache_paused_kv and pp == 1,
                        publish_activity_at_window=publish_activity_at_window and config.implementation == "paper",
                        publish_activity=publish_activity,
                        refill_idle_slots=refill_idle_slots and config.implementation == "paper",

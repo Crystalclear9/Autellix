@@ -215,13 +215,19 @@ def install(cls, options):
                         # Re-admit that suffix in the same global FIFO order.
                         cutoff = min(order[r.rid] for r in pending_reqs)
                         lower_running = [r.rid for r in batch.reqs if r.rid in keep and order[r.rid] >= cutoff]
-                        from .admission import can_keep_running
-                        if (lower_running and options.get("retain_running", True)
-                                and can_keep_running(self, pending_reqs, keep, order=order)):
-                            ctl.emit("retain_running", requests=lower_running,
-                                     pending=[r.rid for r in pending_reqs])
-                        else:
-                            keep = {rid for rid in keep if order[rid] < cutoff}
+                        if lower_running:
+                            from .admission import can_keep_running, fitting_decode_prefix
+                            retain = options.get("retain_running", True)
+                            if retain and can_keep_running(self, pending_reqs, keep, order=order):
+                                ctl.emit("retain_running", requests=lower_running,
+                                         pending=[r.rid for r in pending_reqs])
+                            elif retain and options.get("partial_retention") and self.pp_size == 1:
+                                keep = fitting_decode_prefix(self, pending_reqs, keep, lower_running, order)
+                                retained = [rid for rid in lower_running if rid in keep]
+                                if retained:
+                                    ctl.emit("retain_decode_prefix", requests=retained)
+                            else:
+                                keep = keep.difference(lower_running)
                 victims = [i for i, r in enumerate(batch.reqs) if r.rid not in keep]
                 # Use the pinned engine's native retraction ownership rules.
                 # Generated output_ids are preserved by reset_for_retract().
