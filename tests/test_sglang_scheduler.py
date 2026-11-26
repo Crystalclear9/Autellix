@@ -10,6 +10,86 @@ from integrations.sglang.scheduler import encode_request, install
 
 
 class CompletedDecodeTests(unittest.TestCase):
+    def test_overlap_boundary_refreshes_after_accounting_and_debits_one_step(self):
+        class Native:
+            def __init__(self):
+                self.policy = SimpleNamespace()
+                self.enable_overlap, self.is_generation, self.is_hybrid = True, True, False
+                self.waiting_queue, self.grammar_queue, self.chunked_req = [], [], None
+                self.token_to_kv_pool_allocator = SimpleNamespace(available_size=lambda: 32)
+                self.decode_mem_cache_buf_multiplier = 1
+                self.tp_worker = SimpleNamespace(worker=SimpleNamespace(forward_batch_generation=Mock()))
+                self.bid = 0
+
+            def run_batch(self, batch):
+                self.bid += 1
+                result = SimpleNamespace(bid=self.bid)
+                self.tp_worker.worker.forward_batch_generation(result)
+                return result
+
+            def process_batch_result(self, batch, result):
+                if result.bid == 1:
+                    batch.reqs[0].done = True
+
+            process_input_requests = Mock()
+            get_next_batch_to_run = Mock()
+            _add_request_to_queue = Mock()
+            _extend_requests_to_queue = Mock()
+            get_new_batch_prefill = Mock()
+            abort_request = Mock()
+            check_memory = Mock()
+
+        def event(**kwargs):
+            return Mock(elapsed_time=Mock(return_value=25.))
+
+        torch = SimpleNamespace(cuda=SimpleNamespace(Event=event))
+        with tempfile.TemporaryDirectory() as directory, patch.dict("sys.modules", {"torch": torch}):
+            install(Native, {"table_path": str(Path(directory, "state.sqlite")), "capacity": 2,
+                             "config": {"schedule_interval": 4, "overprovision": 0, "policy": "plas"},
+                             "stable_decode_overlap": True, "overlap_window_decode": True,
+                             "publish_activity": False})
+            scheduler = Native()
+            controller = scheduler.autellix
+            with closing(controller.table) as table:
+                table.open("program")
+                reqs = [SimpleNamespace(rid=rid, done=False, to_abort=False) for rid in ("early", "resident")]
+                for req in reqs:
+                    req.finished = lambda req=req: req.done
+                    controller.admit(req.rid, "program")
+                    scheduler._autellix_rids[req.rid] = req.rid
+                batch = SimpleNamespace(reqs=reqs, is_hybrid=False, has_grammar=False,
+                                        forward_mode=SimpleNamespace(is_decode=lambda: True, is_extend=lambda: False),
+                                        input_ids=SimpleNamespace(numel=lambda: len(reqs)), prepare_for_decode=Mock())
+                scheduler.running_batch = scheduler.last_batch = batch
+                window = scheduler._autellix_window
+                window.select(controller.calls, controller.calls)
+                window.remaining = 1
+
+                with patch.object(controller, "emit") as emit:
+                    controller.trace = True
+                    old = scheduler.run_batch(batch)
+                    self.assertEqual(window.remaining, 0)
+                    next_batch = scheduler.get_next_batch_to_run()
+                    self.assertIs(next_batch, batch)
+                    batch.prepare_for_decode.assert_called_once_with()
+                    new = scheduler.run_batch(next_batch)
+                    self.assertEqual(window.remaining, 0)
+                    self.assertEqual(controller.calls["resident"].queue, 0)
+
+                    scheduler.process_batch_result(batch, old)
+                    expected = ["execute", "overlap_result", "finished", "demote", "schedule_window", "plan_step"]
+                    self.assertEqual([args[0] for args, _ in emit.call_args_list][-len(expected):], expected)
+                    emit.assert_any_call("overlap_window_decode", requests=["early", "resident"], after_batch_id=old.bid)
+                    emit.assert_called_with("plan_step", requests=["resident"], decode=True, remaining=4, input_tokens=2)
+                    self.assertEqual(window.cohort, ["resident"])
+                    self.assertEqual(window.remaining, 3)
+                    self.assertEqual(controller.calls["resident"].queue, 1)
+                    self.assertEqual(table.take_metrics("early")["executed"], .025)
+
+                    scheduler.process_batch_result(batch, new)
+                    self.assertEqual(window.remaining, 3)
+                    self.assertEqual(controller.calls["resident"].executed, .05)
+
     def test_short_prefill_mixes_only_with_chunk_and_kv_headroom(self):
         class Running:
             def __init__(self, reqs, batch_is_full):
