@@ -85,6 +85,8 @@ P40 需为 GPU unittest 另外设置 `AUTELLIX_TEST_LEGACY_GPU=1`，并在 HTTP/
 | SGLang 解码元数据融合 | `test_sglang_decode.py` 核对常规解码的长度、槽位与原生准备的回退，定向 GPU 验证补位、取消和前缀复用 |
 | SGLang 稳定解码 overlap | `test_sglang_overlap.py` 覆盖窗口边界、延迟结果结算和事件复用，定向 GPU 检查生成、流式输出和取消 |
 | SGLang overlap token 解析 | `test_sglang_overlap.py` 覆盖读回原因、独立预填充、混合批次与空闲分支，定向 GPU 检查驻留解码在 future token 环绕后的续跑 |
+| SGLang 首步解码接续 | `test_sglang_overlap.py` 核对可接续的同一窗口、原生合并及回退条件，定向 GPU 核对提前提交、结束和 KV 释放 |
+| SGLang 自然结束接续 | `test_sglang_overlap.py` 核对窗口内存活请求及退出条件，定向 GPU 核对旧批次按原槽位完成延迟回收 |
 | SGLang 自适应合批 | `test_sglang_scheduler.py` 检查未缓存 token 阈值、分块预算、解码 KV 余量和 logprob 请求，定向 GPU 比较真实缓存命中及生成文本 |
 | IPC、取消、副本协调 | `test_transport.py`，加 `AUTELLIX_TEST_REPLICAS=1` 真实双进程测试 |
 | TP 适配 | 两张及以上 GPU 的 `AUTELLIX_TEST_TP=1`，没有设备时明确保留未验证状态 |

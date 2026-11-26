@@ -3,7 +3,7 @@
 后续的完整对话恢复、BOS 修正、调度时间尺度消融和负载曲线见
 [完整对话与负载实验](experiment-design-review.md)。本页保留上一轮协议与结果。
 后续工作负载、修复和目录见[原始工作负载复现](paper-workload-experiment.md)与
-[服务器目录](server-layout.md)。最近的 SGLang 和 vLLM 配对见 [H20 overlap 读回复测](h20-reproduction.md#sglang-overlap-读回与-token-解析复测)。
+[服务器目录](server-layout.md)。最近的 SGLang 和 vLLM 配对见 [H20 首步解码接续复测](h20-reproduction.md#sglang-首步解码接续复测)。
 下文的服务进程、实现清单和差距对应 P40 验收时的版本。
 
 复现目标：[Autellix arXiv:2502.13965v1](https://arxiv.org/html/2502.13965v1)。
