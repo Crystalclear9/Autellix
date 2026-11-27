@@ -124,9 +124,10 @@ SGLang 适配设置 `disable_overlap_schedule=True`、`page_size=1`，`chunked_p
 打开 `scheduler_trace` 和 `autellix_measure_timing` 可另外记录真实预填充与恢复预填充的 token 数。
 单阶段 `paper` 模式可开启 `autellix_partial_retention`，默认关闭。整组低优先级解码与
 高优先级预填充无法同时驻留时，按窗口顺序保留可安全共存的最长解码前缀。
-`autellix_prefill_frontier=true` 在现代单阶段分段预填充下，按当前前向能到达的等待前缀
-估算解码保留预算。使用固定分离或自适应合批，并保留 `autellix_retain_running=true`。
-遇到已准备的 host KV 或候补请求时，预算仍覆盖原有候选集合。默认关闭。
+`autellix_prefill_frontier=true` 在现代单阶段分段预填充或 PP 下，按当前前向的预填充
+token 预算和可用请求槽位估算解码保留预算。使用固定分离或自适应合批，并保留
+`autellix_retain_running=true`。遇到已准备的 host KV 或候补请求时，预算仍覆盖原有
+候选集合。默认关闭。
 矩阵计划的单个用例可设 `last_queue_fifo=true`。最低队列的时间片用尽时保留原入队顺序，
 调用仍可因达到防饥饿阈值而提升。
 两个回放脚本均支持 `--resident-reserve-only`。该模式保持前 B 个活动请求的优先级顺序，

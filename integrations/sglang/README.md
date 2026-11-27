@@ -25,6 +25,7 @@ N=8、K=1 是项目默认参数。预备请求的已计算前缀通过 radix 锁
 
 `pipeline.py` 在原生 PP 微批次循环中传递首阶段的程序表读取结果与策略时钟。
 取消会覆盖全部在途微批次，包括尚未合并到 running batch 的 prefill。
+检查接纳容量时也计入这些 prefill，后续微批次回收槽位后即可继续接纳。
 首阶段维护全局程序历史，其余阶段复用同一策略输入，各自管理本阶段的 KV。
 每个微批次有独立的 N 步窗口和 K 个预备请求，B 在微批次间均分。
 模型执行时间由各阶段的 CUDA 计时累加，随采样结果返回首阶段并统一记账。
@@ -47,9 +48,10 @@ P40 路径同时修复了固定版本 Llama 模型在 PP 下的 tied embedding �
 
 抢占保留输出 token，将已计算 KV 打包到锁页 CPU 内存后释放 GPU 槽位。`--engine-args` 中的 `autellix_swap_space` 控制主机 KV 预算，单位 GiB，默认 1。预算不足会明确报错。
 
-换入、换出按层和 token 分块，每块最多 16 MiB；每块传输完成即释放临时 GPU
-张量。长对话的整段 KV 保存在锁页 CPU 内存，GPU 无需额外容纳所有层的副本。
-`scripts/check_host_swap_gpu.py` 验证大于 2 GiB 的 KV 往返及临时显存峰值。
+启用 `autellix_fused_swap` 时，将各层的 KV 按 token 打包到同一块 GPU 缓冲区。
+长段传输按 16 MiB 分块，在同一个 CUDA stream 排队复用缓冲区，整次换入或换出只同步一次。
+主机侧使用锁页内存。`scripts/check_host_swap_gpu.py --fused --output CHECKPOINT` 验证大于
+2 GiB 的 KV 往返及临时显存峰值。
 
 恢复时锁住已有共享前缀，仅分配和传输缺失后缀。恢复成功的前缀会保持锁定到原生接纳取得自己的锁，避免后续恢复逐出前面的请求。接纳失败时释放临时锁，并保留 CPU 副本供重试。
 

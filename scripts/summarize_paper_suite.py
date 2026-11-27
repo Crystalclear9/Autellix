@@ -344,7 +344,14 @@ def summarize(records, slo_targets=DEFAULT_SLO_TARGETS):
                                      "autellix_cache_paused_kv", "autellix_window_activity", "autellix_refill_idle_slots",
                                      "autellix_resident_reserve_only", "resident_reserve_only",
                                      "autellix_fused_swap", "fused_swap",
-                                     "autellix_retain_running", "autellix_mix_prefill_decode",
+                                     "autellix_retain_running", "autellix_partial_retention",
+                                     "autellix_mix_prefill_decode", "autellix_mix_prefill_max_tokens",
+                                     "autellix_pipeline_host_control", "autellix_compact_pipeline_control",
+                                     "autellix_prefill_frontier", "autellix_publish_activity",
+                                     "autellix_fill_chunk_tail", "autellix_decode_cached_resumes",
+                                     "autellix_stable_decode_overlap", "autellix_overlap_prefill_decode",
+                                     "autellix_overlap_retire_decode", "autellix_overlap_window_decode",
+                                     "autellix_overlap_prefill_refill",
                                      "autellix_mode", "preemption_mode", "observe_native", "batched_swap",
                                      "keep_resident_kv", "recompute_on_swap_full", "paper_chunked_prefill",
                                      "publish_activity_at_window", "refill_idle_slots", "resident_decode_headroom", "packed_host_kv",
@@ -361,6 +368,7 @@ def summarize(records, slo_targets=DEFAULT_SLO_TARGETS):
                     baseline_options.pop(opt, None)
             source, baseline_source = row.get("implementation_sha256"), native.get("implementation_sha256")
             paired = dict(same_trace=row["trace_sha256"] == native["trace_sha256"],
+                          same_arrivals=row["arrival_times"] == native["arrival_times"],
                           same_lengths=lengths(row) == lengths(native), same_options=row_options == baseline_options,
                           same_model=row["model"] == native["model"], same_versions=row["versions"] == native["versions"])
             if source and baseline_source:

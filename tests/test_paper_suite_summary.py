@@ -61,6 +61,18 @@ class PaperSuiteSummary(unittest.TestCase):
         with self.assertRaises(ValueError):
             summary.summarize(rows)
 
+    def test_pipeline_controls_keep_gpu_budgets_and_arrivals_paired(self):
+        rows = self.records()
+        for row in rows:
+            row["device_groups"] = ["1,3"]
+            row["effective_engine_args"].update(pp_size=2, max_total_tokens=65536)
+        rows[1]["effective_engine_args"].update(autellix_pipeline_host_control=True,
+                                                autellix_prefill_frontier=True)
+        self.assertTrue(all(summary.summarize(rows)["comparisons"][0]["pairing"].values()))
+        rows[1]["arrival_times"]["0"] += .1
+        with self.assertRaisesRegex(ValueError, "same_arrivals"):
+            summary.summarize(rows)
+
     def test_steady_window_counts_carry_in_completions_without_censoring_latency(self):
         row = self.records()[0]
         row["plan"]["steady_state_start_seconds"] = 15

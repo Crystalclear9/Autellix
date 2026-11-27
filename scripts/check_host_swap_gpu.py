@@ -11,6 +11,7 @@ from integrations.sglang.swap import HostKV
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--fused", action="store_true", help="use the packed Triton transfer path")
     args = parser.parse_args()
     count = 17408
     layers = [torch.full((count, 8, 128), i, dtype=torch.float16, device="cuda") for i in range(64)]
@@ -20,7 +21,7 @@ def main():
     tree = SimpleNamespace(match_prefix=lambda _: SimpleNamespace(device_indices=indices[:0], last_device_node=None),
                            inc_lock_ref=lambda _: None, dec_lock_ref=lambda _: None,
                            insert=lambda tokens, ids: 0)
-    swap = HostKV(allocator, tree, 4 * 1024**3)
+    swap = HostKV(allocator, tree, 4 * 1024**3, fused=args.fused)
     torch.cuda.synchronize()
     initial = torch.cuda.memory_allocated()
     torch.cuda.reset_peak_memory_stats()
@@ -37,7 +38,7 @@ def main():
     assert peak_extra < 64 * 1024**2, peak_extra
     result = dict(kv_bytes=swap.used_bytes, peak_temporary_gpu_bytes=peak_extra,
                   transfer_chunk_bytes=swap.transfer_bytes, layers=len(layers), tokens=count,
-                  round_trip_exact=True, device=torch.cuda.get_device_name())
+                  round_trip_exact=True, fused=args.fused, device=torch.cuda.get_device_name())
     Path(args.output).write_text(json.dumps(result, indent=2))
     print(json.dumps(result), flush=True)
 
