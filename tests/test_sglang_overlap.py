@@ -6,6 +6,7 @@ from unittest.mock import Mock, patch
 
 from autellix.runtime.window import SchedulingWindow
 from integrations.sglang.overlap import OverlapState, install, resolve_outputs
+from integrations.sglang.scheduler import encode_request
 
 
 class LengthFinish:
@@ -16,8 +17,15 @@ class TokenFinish:
     pass
 
 
+class GenerateInput:
+    def __init__(self, program):
+        self.rid = encode_request(program, "arrival")
+        self.session_params = None
+
+
 class StableDecodeOverlapTests(unittest.TestCase):
-    def scheduler(self, *, lazy_resolve=False, prefill_decode=False, retire_decode=False, window_decode=False):
+    def scheduler(self, *, lazy_resolve=False, prefill_decode=False, retire_decode=False, window_decode=False,
+                  prefill_refill=False):
         class Native:
             def __init__(self):
                 req = NS(rid="resident", finished=Mock(return_value=False), to_abort=False)
@@ -27,15 +35,19 @@ class StableDecodeOverlapTests(unittest.TestCase):
                 )
                 self.cur_batch = None
                 self._autellix_window = NS(remaining=4, active={"resident"}, reserve=set(),
+                                           capacity=2, capacity_limited=False, refill_idle_slots=True,
                                            can_continue_decode=Mock(return_value=False))
-                self._autellix_overlap = NS(deferred_inputs=[], drained=None, pending={31: None}, window_step=None)
+                self._autellix_overlap = NS(deferred_inputs=[], drained=None, pending={31: None},
+                                            window_step=None, parked_decode=None)
                 self._autellix_reserve = {}
+                self._autellix_host = None
                 self.waiting_queue, self.grammar_queue = [], []
                 self.chunked_req = None
                 self.token_to_kv_pool_allocator = NS(available_size=Mock(return_value=1))
                 self.decode_mem_cache_buf_multiplier = 1
-                self.autellix = NS(trace=True, emit=Mock(), calls={"resident": None},
+                self.autellix = NS(trace=True, emit=Mock(), calls={"resident": NS(pid="active")},
                                   publish_activity=False, publish_activity_at_window=False)
+                self.get_new_batch_prefill = Mock()
                 self.native_input = Mock()
                 self.native_next = Mock(return_value=NS(forward_mode=NS(is_extend=lambda: False)))
 
@@ -47,9 +59,11 @@ class StableDecodeOverlapTests(unittest.TestCase):
 
         module = ModuleType("sglang.srt.managers.schedule_batch")
         module.FINISH_LENGTH, module.FINISH_MATCHED_TOKEN = LengthFinish, TokenFinish
-        with patch.dict("sys.modules", {module.__name__: module}):
+        io = ModuleType("sglang.srt.managers.io_struct")
+        io.TokenizedGenerateReqInput = GenerateInput
+        with patch.dict("sys.modules", {module.__name__: module, io.__name__: io}):
             install(Native, lazy_resolve=lazy_resolve, prefill_decode=prefill_decode,
-                    retire_decode=retire_decode, window_decode=window_decode)
+                    retire_decode=retire_decode, window_decode=window_decode, prefill_refill=prefill_refill)
         return Native()
 
     def test_boundary_handoff_drains_when_the_next_cohort_is_not_fixed(self):
@@ -150,8 +164,8 @@ class StableDecodeOverlapTests(unittest.TestCase):
                 batch.filter_batch.assert_not_called()
                 batch.prepare_for_decode.assert_not_called()
 
-    def pending_prefill(self, *, resident=True):
-        scheduler = self.scheduler(prefill_decode=True)
+    def pending_prefill(self, *, resident=True, prefill_refill=False):
+        scheduler = self.scheduler(prefill_decode=True, prefill_refill=prefill_refill)
         running = scheduler.running_batch
         if not resident:
             running.reqs.clear()
@@ -211,6 +225,17 @@ class StableDecodeOverlapTests(unittest.TestCase):
                 prefill.prepare_for_decode.assert_not_called()
                 running.prepare_for_decode.assert_not_called()
 
+    def test_first_decode_handoff_precedes_refill_of_idle_slots(self):
+        scheduler, running, prefill = self.pending_prefill(prefill_refill=True)
+        scheduler._autellix_window.capacity = 3
+        arrival = GenerateInput("other")
+        scheduler.native_input.side_effect = lambda requests, _: scheduler.waiting_queue.extend(requests)
+        scheduler.process_input_requests([arrival])
+        self.assertEqual(scheduler.waiting_queue, [arrival])
+        self.assertIs(scheduler.get_next_batch_to_run(), running)
+        running.merge_batch.assert_called_once_with(prefill)
+        running.prepare_for_decode.assert_called_once_with()
+
     def test_stable_continuation_then_deferred_control_at_empty_boundary(self):
         scheduler = self.scheduler()
         batch = scheduler.last_batch
@@ -243,6 +268,40 @@ class StableDecodeOverlapTests(unittest.TestCase):
         scheduler._autellix_overlap.drained = None
         window.can_continue_decode.return_value = True
         self.assertIs(scheduler.get_next_batch_to_run(), scheduler.last_batch)
+
+    def test_refill_can_enqueue_other_programs_and_launch_prefill_before_readback(self):
+        scheduler = self.scheduler(prefill_refill=True)
+        batch = scheduler.last_batch
+        arrival = GenerateInput("other")
+        scheduler.native_input.side_effect = lambda requests, _: scheduler.waiting_queue.extend(requests)
+        scheduler.process_input_requests([arrival])
+        scheduler.native_input.assert_called_once_with([arrival], None)
+        prefill = NS(reqs=[arrival])
+        scheduler.get_new_batch_prefill.return_value = prefill
+
+        self.assertIs(scheduler.get_next_batch_to_run(), prefill)
+        self.assertIs(scheduler._autellix_overlap.parked_decode, batch)
+        self.assertIsNone(scheduler._autellix_overlap.drained)
+        self.assertEqual(scheduler._autellix_window.remaining, 4)
+        batch.prepare_for_decode.assert_not_called()
+
+    def test_refill_keeps_controls_and_program_service_dependencies_after_readback(self):
+        for requests in ([GenerateInput("active")], [GenerateInput("other"), "cancel"]):
+            with self.subTest(requests=requests):
+                scheduler = self.scheduler(prefill_refill=True)
+                scheduler.process_input_requests(requests)
+                self.assertIsNone(scheduler.get_next_batch_to_run())
+                scheduler.native_input.assert_not_called()
+                scheduler.get_new_batch_prefill.assert_not_called()
+                self.assertEqual(scheduler._autellix_overlap.deferred_inputs, requests)
+
+    def test_refill_does_not_replace_a_running_request_at_a_window_boundary(self):
+        scheduler = self.scheduler(prefill_refill=True)
+        scheduler.waiting_queue = [GenerateInput("other")]
+        scheduler._autellix_window.remaining = 0
+        self.assertIsNone(scheduler.get_next_batch_to_run())
+        scheduler.get_new_batch_prefill.assert_not_called()
+        self.assertIsNone(scheduler._autellix_overlap.parked_decode)
 
     def test_pending_decode_drains_before_new_window_retirement_or_pressure(self):
         for reason in ("window", "retire", "pressure", "prefill"):

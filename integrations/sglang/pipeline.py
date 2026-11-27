@@ -7,6 +7,7 @@ all stages perform the same admission, preemption and restoration decisions.
 import copy
 import json
 import time
+from collections import deque
 
 
 def install_pipeline_embeddings():
@@ -155,39 +156,58 @@ def install(cls, *, timing_metadata=True):
         self._autellix_completed_seconds = 0.
         original_recv = self.pp_group.recv_tensor_dict
         original_send = self.pp_group.send_tensor_dict
+        first = self.pp_group.is_first_rank
         runner = self.tp_worker.model_runner
         original_forward = runner.forward
-        start = torch.cuda.Event(enable_timing=True)
-        end = torch.cuda.Event(enable_timing=True)
+        available = deque((torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True))
+                          for _ in range(self.pp_size if first else 1))
+        pending = deque()
+
+        def elapsed(pair):
+            start, end = pair
+            end.synchronize()
+            return start.elapsed_time(end) / 1000
+
+        def payload(seconds):
+            return seconds if timing_metadata else torch.tensor(seconds, dtype=torch.float64, device=self.device)
 
         def recv(*args, **kwargs):
             tensors = original_recv(*args, **kwargs)
             seconds = tensors.pop("autellix_gpu_seconds", None)
-            if seconds is not None:
-                value = seconds if timing_metadata else seconds.item()
-                if "next_token_ids" in tensors:
-                    self._autellix_completed_seconds = value
-                    # Non-first stages forward this previous microbatch's outputs.
-                    tensors["autellix_gpu_seconds"] = seconds
-                else:
-                    self._autellix_incoming_seconds = value
+            if seconds is None:
+                self._autellix_incoming_seconds = 0.
+                return tensors
+            value = seconds if timing_metadata else seconds.item()
+            if "next_token_ids" not in tensors:
+                self._autellix_incoming_seconds = value
+                return tensors
+            if first:
+                # Returned tokens depend on the first stage's forward, so
+                # its CUDA events are ready without a wait on the send path.
+                pair = pending.popleft()
+                value += elapsed(pair)
+                available.append(pair)
+                seconds = payload(value)
+            self._autellix_completed_seconds = value
+            tensors["autellix_gpu_seconds"] = seconds
             return tensors
 
         def forward(*args, **kwargs):
+            pair = available.popleft() if first else available[0]
+            start, end = pair
             start.record()
             output = original_forward(*args, **kwargs)
             end.record()
-            end.synchronize()
-            self._autellix_model_seconds = self._autellix_incoming_seconds + start.elapsed_time(end) / 1000
+            if first:
+                pending.append(pair)
             return output
 
         def send(tensors, *args, **kwargs):
-            if "next_token_ids" not in tensors or self.pp_group.is_last_rank:
-                seconds = self._autellix_model_seconds
-                # SGLang already sends Python scalars with tensor metadata.
-                # The elapsed time is on the host and needs no NCCL payload.
-                tensors["autellix_gpu_seconds"] = (seconds if timing_metadata else
-                                                   torch.tensor(seconds, dtype=torch.float64, device=self.device))
+            if self.pp_group.is_last_rank or (not first and "next_token_ids" not in tensors):
+                # Intermediate ranks can handle the preceding microbatch's
+                # returned tokens before this forward needs to publish timing.
+                seconds = self._autellix_incoming_seconds + elapsed(available[0])
+                tensors["autellix_gpu_seconds"] = payload(seconds)
             return original_send(tensors, *args, **kwargs)
 
         self.pp_group.recv_tensor_dict = recv

@@ -6,12 +6,12 @@ def other_pipeline_requests(scheduler, batch):
                for other in getattr(scheduler, "running_mbs", ()))
 
 
-def make_decode_room(scheduler, batch):
+def make_decode_room(scheduler, batch, *, cache_paused_kv=False):
     from .reserve import release_reserves
     if batch.check_decode_mem(scheduler.decode_mem_cache_buf_multiplier):
         return
     ctl, window = scheduler.autellix, scheduler._autellix_window
-    release_reserves(scheduler)
+    release_reserves(scheduler, preserve=not cache_paused_kv)
     if window is not None:
         window.drop_reserve()
     while not batch.check_decode_mem(scheduler.decode_mem_cache_buf_multiplier):
@@ -23,13 +23,17 @@ def make_decode_room(scheduler, batch):
                            order[batch.reqs[i].rid] if order is not None else ctl.key(batch.reqs[i].rid))
         req = batch.reqs[victim_index]
         length = batch.seq_lens.cpu().tolist()[victim_index]
-        indices = batch.req_to_token_pool.req_to_token[req.req_pool_idx, :length]
         tokens = (req.origin_input_ids + req.output_ids)[:length]
-        saved = scheduler._autellix_host.save(req.rid, tokens, indices)
-        ctl.emit("recompute_retract" if saved is False else "swap_out", rid=req.rid,
-                 tokens=len(tokens), reason="decode_capacity")
-        tail = batch.req_to_token_pool.req_to_token[req.req_pool_idx, len(req.prefix_indices):length]
-        batch.token_to_kv_pool_allocator.free(tail)
+        if cache_paused_kv:
+            req.fill_ids = tokens
+            batch.tree_cache.cache_unfinished_req(req)
+            ctl.emit("pause_cached", rid=req.rid, tokens=len(tokens), reason="decode_capacity")
+        else:
+            indices = batch.req_to_token_pool.req_to_token[req.req_pool_idx, :length]
+            saved = scheduler._autellix_host.save(req.rid, tokens, indices)
+            ctl.emit("recompute_retract" if saved is False else "swap_out", rid=req.rid,
+                     tokens=len(tokens), reason="decode_capacity")
+            batch.token_to_kv_pool_allocator.free(indices[len(req.prefix_indices):])
         batch.req_to_token_pool.free(req.req_pool_idx)
         batch.tree_cache.dec_lock_ref(req.last_node)
         req.reset_for_retract()

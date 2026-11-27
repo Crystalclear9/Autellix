@@ -102,7 +102,8 @@ GPU 回归使用 `AUTELLIX_TEST_LEGACY_GPU=1`；仍需设置后端和模型环�
 `disable_overlap_schedule=true` 测量原生 overlap 的影响。
 单阶段 Autellix 默认在原生输出读回后结算 CUDA event 时间，并在程序完成前写入服务时间。
 `autellix_fused_decode_metadata=true` 可把稳定解码的序列长度和 KV 槽位更新合并为一次
-Triton 调用。调度 trace 用 `fused_decode_metadata` 记录实际执行的合并批次。
+Triton 调用。使用 overlap 时保留在途结果引用的长度张量。调度 trace 用
+`fused_decode_metadata` 记录实际执行的合并批次。
 `autellix_stable_decode_overlap=true` 用原生 overlap worker 执行稳定窗口内的解码。调度 trace
 记录 `overlap_continue_decode`、`overlap_drain` 和带批次编号的 `overlap_result`。
 `autellix_overlap_lazy_resolve=true` 把提前解析限制在独立预填充导致驻留解码等待的分支。
@@ -113,9 +114,13 @@ Triton 调用。调度 trace 用 `fused_decode_metadata` 记录实际执行的�
 `overlap_retire_decode` 记录继续和退出的请求 ID。
 `autellix_overlap_window_decode=true` 在全部请求都已驻留、没有候选请求需要接纳时，让
 首个新窗口解码提前提交，并在旧批次结算后刷新 PLAS。trace 用 `overlap_window_decode` 记录。
+`autellix_overlap_prefill_refill=true` 允许在已选请求保留原次序时，给当前窗口的空位提交独立
+prefill，调度 trace 用 `overlap_refill_prefill` 记录。需同时开启稳定解码 overlap 和空位补齐，
+并使用分离的 prefill 与 decode。
 配对结果和检查点见 [H20 窗口边界续跑复测](../../docs/h20-reproduction.md#sglang-窗口边界续跑复测)。
 `autellix_defer_model_timing=false` 可用于对照，恢复读回前的独立同步。
-流水线用各阶段的 CUDA event 累计前向时间，并通过原有消息的元数据传递累计值。
+流水线首段在采样结果返回时结算自己的 CUDA event 时间，其余阶段在原生消息中传递累计耗时。
+`autellix_cache_paused_kv=true` 也适用于流水线阶段的暂停 KV 和解码容量回收。
 `autellix_pipeline_timing_metadata=false` 可用来对照独立的 GPU 标量传输。
 仅当之后有需要保护的 KV 恢复时，调度器才提前锁住新的高优先级预填充前缀。
 单阶段在接纳普通等待请求时，只用排在选中运行请求前面的预填充判断是否需要抢占。

@@ -77,9 +77,9 @@ vLLM 的 paper 模式关闭异步输出处理，启用混合阶段执行，内�
 
 SGLang 适配设置 `disable_overlap_schedule=True`、`page_size=1`，`chunked_prefill_size` 默认 `-1`。支持单卡与 `pp_size>1` 的流水线并行；TP、DP attention、LoRA、HiCache 和推测解码尚未接入 Autellix 调度。
 
-| 单卡优化 | vLLM | SGLang |
+| 执行选项 | vLLM | SGLang |
 | --- | --- | --- |
-| 暂停期间保留 KV | `keep_resident_kv` 在有空余 GPU blocks 时保留暂停请求 | `autellix_cache_paused_kv` 把暂停请求的已计算前缀交给可回收的 GPU radix 缓存 |
+| 暂停期间保留 KV | `keep_resident_kv` 在有空余 GPU blocks 时保留暂停请求 | `autellix_cache_paused_kv` 在单阶段和流水线中把暂停请求的已计算前缀交给可回收的 GPU radix 缓存 |
 | 窗口边界发布活动视图 | `publish_activity_at_window` | `autellix_window_activity` |
 | 补齐闲置槽位 | `refill_idle_slots` | `autellix_refill_idle_slots` |
 | 候补从驻留 KV 选择 | `resident_reserve_only` | `autellix_resident_reserve_only` |
@@ -96,7 +96,7 @@ SGLang 适配设置 `disable_overlap_schedule=True`、`page_size=1`，`chunked_p
 `autellix_mix_prefill_decode=false` 把 prefill 和 decode 分开执行，可用于对照同一接纳策略下的模型执行成本。
 `autellix_fused_decode_metadata=true` 为现代单阶段 SGLang 的 `paper` 模式开启解码元数据融合。
 常规单 token CUDA 解码用一次 Triton 调用更新序列长度和 KV 槽位映射，首次从预填充转到解码、
-带采样惩罚等分支沿用原生准备。默认关闭。
+带采样惩罚等分支沿用原生准备。重叠解码用新的长度张量保存本步状态。默认关闭。
 `autellix_stable_decode_overlap=true` 为现代单阶段 SGLang 生成模型开启稳定解码 overlap。
 提前提交只发生在已确定的解码队列中，调度或 KV 状态需要变化时先读回在途结果。开启后使用
 原生 overlap worker 的解码准备，缓存恢复用 extend。默认关闭。
@@ -109,6 +109,9 @@ SGLang 适配设置 `disable_overlap_schedule=True`、`page_size=1`，`chunked_p
 `autellix_overlap_window_decode=true` 配合稳定解码 overlap。在没有新调度决策的窗口边界
 提前提交一步，按旧结果结算后更新的 PLAS 顺序计入新窗口。可配合 `autellix_window_activity=true`
 按窗口发布活动，或设 `autellix_publish_activity=false` 关闭发布。默认关闭。
+`autellix_overlap_prefill_refill=true` 配合稳定解码 overlap 和补齐闲置槽位，同时设置
+`autellix_mix_prefill_decode=false`。已选解码请求保留在窗口内，来自其他程序的普通生成请求
+可以提前入队，独立 prefill 可以在当前解码结果读回期间使用空位。默认关闭。
 单阶段现代 GPU 的 `paper` 模式可设置 `autellix_mix_prefill_max_tokens`。正整数开启分段预填充
 上的自适应合批，按实际接纳的未缓存 token 数选择是否混合执行，并检查当前分块和解码 KV 余量。
 默认 `0`，使用 `autellix_mix_prefill_decode` 指定的固定方式。

@@ -42,7 +42,7 @@ class DecodePressureTests(unittest.TestCase):
         make_decode_room(scheduler, NS(check_decode_mem=lambda _: True))
         self.assertEqual(scheduler._autellix_reserve, {"reserve": "cache"})
 
-    def test_pipeline_can_yield_its_last_request_to_another_microbatch(self):
+    def test_pipeline_can_yield_its_last_request_and_keep_its_prefix_in_radix(self):
         req = NS(rid="a", req_pool_idx=0, origin_input_ids=[1], output_ids=[2],
                  prefix_indices=[], last_node="cache", reset_for_retract=Mock())
         class Slots:
@@ -50,7 +50,8 @@ class DecodePressureTests(unittest.TestCase):
                 return [0, 1][key[1]]
         batch = NS(reqs=[req], seq_lens=NS(cpu=lambda: NS(tolist=lambda: [2])),
                    req_to_token_pool=NS(req_to_token=Slots(), free=Mock()),
-                   token_to_kv_pool_allocator=NS(free=Mock()), tree_cache=NS(dec_lock_ref=Mock()),
+                   token_to_kv_pool_allocator=NS(free=Mock()),
+                   tree_cache=NS(cache_unfinished_req=Mock(), dec_lock_ref=Mock()),
                    check_decode_mem=lambda _: False)
         batch.filter_batch = lambda keep_indices: setattr(batch, "reqs", [])
         window = NS(cohort=["a"], drop_reserve=Mock(), retain_prefix=Mock())
@@ -58,6 +59,11 @@ class DecodePressureTests(unittest.TestCase):
                        waiting_queue=[], _autellix_host=NS(save=Mock()), decode_mem_cache_buf_multiplier=1,
                        _extend_requests_to_queue=Mock(),
                        running_mbs=[batch, NS(reqs=[NS(finished=lambda: False)])])
-        make_decode_room(scheduler, batch)
+        make_decode_room(scheduler, batch, cache_paused_kv=True)
         self.assertEqual(batch.reqs, [])
+        self.assertEqual(req.fill_ids, [1, 2])
+        batch.tree_cache.cache_unfinished_req.assert_called_once_with(req)
+        batch.tree_cache.dec_lock_ref.assert_called_once_with(req.last_node)
+        batch.token_to_kv_pool_allocator.free.assert_not_called()
+        scheduler._autellix_host.save.assert_not_called()
         scheduler._extend_requests_to_queue.assert_called_once_with([req], is_retracted=True)

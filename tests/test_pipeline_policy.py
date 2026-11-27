@@ -21,14 +21,17 @@ class PipelinePolicyTests(unittest.TestCase):
                     def __init__(self, rank):
                         self.pp_size, self.device = len(wires), "cuda"
                         self.pp_group = NS(
+                            is_first_rank=rank == 0,
                             is_last_rank=rank == len(wires) - 1,
                             send_tensor_dict=wires[rank].append,
                             recv_tensor_dict=lambda: wires[rank - 1].pop(0),
                         )
                         self.tp_worker = NS(model_runner=NS(forward=lambda: "model output"))
 
+                synchronize = Mock()
+
                 def event(**kwargs):
-                    return Mock(elapsed_time=lambda _: 5.)
+                    return Mock(elapsed_time=lambda _: 5., synchronize=synchronize)
 
                 cuda_event = Mock(side_effect=event)
                 tensor = Mock(side_effect=lambda value, **kwargs: NS(item=lambda: value))
@@ -40,17 +43,52 @@ class PipelinePolicyTests(unittest.TestCase):
                 for _ in range(2):
                     for source, target, key in ((first, middle, "hidden_states"), (middle, last, "hidden_states"),
                                                 (last, first, "next_token_ids")):
+                        previous_waits = synchronize.call_count
                         self.assertEqual(source.tp_worker.model_runner.forward(), "model output")
+                        self.assertEqual(synchronize.call_count, previous_waits)
                         source.pp_group.send_tensor_dict({key: [7]})
+                        self.assertEqual(synchronize.call_count, previous_waits + (source is not first))
                         received = target.pp_group.recv_tensor_dict()
+                        self.assertEqual(synchronize.call_count,
+                                         previous_waits + (source is not first) + (target is first))
                         self.assertEqual(received[key], [7])
                         self.assertEqual("autellix_gpu_seconds" in received, key == "next_token_ids")
                     self.assertAlmostEqual(first._autellix_completed_seconds, .015)
                     first.pp_group.send_tensor_dict(received)
                     middle.pp_group.recv_tensor_dict()
                     self.assertAlmostEqual(middle._autellix_completed_seconds, .015)
-                self.assertEqual(cuda_event.call_count, 2 * len(wires))
+                self.assertEqual(cuda_event.call_count, 2 * (2 * len(wires) - 1))
                 self.assertEqual(tensor.call_count, 0 if metadata else 2 * len(wires))
+
+    def test_first_stage_pairs_overlapping_forwards_with_fifo_results(self):
+        returned = iter([{"next_token_ids": [1], "autellix_gpu_seconds": .010},
+                         {"next_token_ids": [2], "autellix_gpu_seconds": .020}])
+        sent = []
+
+        class FirstStage:
+            def __init__(self):
+                self.pp_size = 2
+                self.pp_group = NS(is_first_rank=True, is_last_rank=False,
+                                   recv_tensor_dict=lambda: next(returned), send_tensor_dict=sent.append)
+                self.tp_worker = NS(model_runner=NS(forward=Mock()))
+
+        start_one, end_one = Mock(elapsed_time=lambda end: 3.), Mock()
+        start_two, end_two = Mock(elapsed_time=lambda end: 7.), Mock()
+        fake_torch = NS(cuda=NS(Event=Mock(side_effect=[start_one, end_one, start_two, end_two])))
+        with patch.dict(sys.modules, {"torch": fake_torch}):
+            install(FirstStage)
+        stage = FirstStage()
+        for token in (1, 2):
+            stage.tp_worker.model_runner.forward()
+            stage.pp_group.send_tensor_dict({"hidden_states": [token]})
+        self.assertEqual(sent, [{"hidden_states": [1]}, {"hidden_states": [2]}])
+        end_one.synchronize.assert_not_called()
+        end_two.synchronize.assert_not_called()
+        self.assertAlmostEqual(stage.pp_group.recv_tensor_dict()["autellix_gpu_seconds"], .013)
+        end_one.synchronize.assert_called_once()
+        end_two.synchronize.assert_not_called()
+        self.assertAlmostEqual(stage.pp_group.recv_tensor_dict()["autellix_gpu_seconds"], .027)
+        end_two.synchronize.assert_called_once()
 
     def test_pipeline_applies_controller_and_window_options(self):
         packages = [ModuleType(name) for name in (

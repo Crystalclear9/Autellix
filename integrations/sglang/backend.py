@@ -76,6 +76,10 @@ class SGLangBackend:
         overlap_window_decode = engine_args.pop("autellix_overlap_window_decode", False)
         if overlap_window_decode and not stable_decode_overlap:
             raise ValueError("autellix_overlap_window_decode requires autellix_stable_decode_overlap")
+        overlap_prefill_refill = engine_args.pop("autellix_overlap_prefill_refill", False)
+        if overlap_prefill_refill and (not stable_decode_overlap or not refill_idle_slots
+                                       or mix_prefill_decode or mix_prefill_max_tokens):
+            raise ValueError("autellix_overlap_prefill_refill requires overlap, idle refill, and split prefill")
         pipeline_timing_metadata = engine_args.pop("autellix_pipeline_timing_metadata", True)
         fused_swap = engine_args.pop("autellix_fused_swap", False)
         measure_timing = engine_args.pop("autellix_measure_timing", False)
@@ -104,7 +108,7 @@ class SGLangBackend:
                        legacy_gpu=legacy_gpu, pipeline=pp > 1, prefix_attention=prefix_attention,
                        retain_running=retain_running, partial_retention=partial_retention,
                        prefill_frontier=prefill_frontier,
-                       cache_paused_kv=cache_paused_kv and pp == 1,
+                       cache_paused_kv=cache_paused_kv,
                        publish_activity_at_window=publish_activity_at_window and config.implementation == "paper",
                        publish_activity=publish_activity,
                        refill_idle_slots=refill_idle_slots and config.implementation == "paper",
@@ -121,6 +125,7 @@ class SGLangBackend:
                        overlap_prefill_decode=overlap_prefill_decode,
                        overlap_retire_decode=overlap_retire_decode,
                        overlap_window_decode=overlap_window_decode,
+                       overlap_prefill_refill=overlap_prefill_refill,
                        pipeline_timing_metadata=pipeline_timing_metadata,
                        fused_swap=fused_swap,
                        measure_timing=measure_timing,

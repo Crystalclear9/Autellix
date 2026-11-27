@@ -9,6 +9,7 @@ class OverlapState:
         self.worker_events = {}
         self.deferred_inputs = []
         self.drained = None
+        self.parked_decode = None
         self.window_step = None
         self.free_events = deque((torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True))
                                  for _ in range(2))
@@ -62,10 +63,10 @@ class OverlapState:
             window.executed()
 
 
-def prepared_window(scheduler, running):
+def prepared_window(scheduler, running, *, refill_now=True):
     window = scheduler._autellix_window
     prepared = scheduler._autellix_reserve
-    if scheduler.waiting_queue:
+    if refill_now and scheduler.waiting_queue:
         # A queued request alone need not break a full or capacity-limited plan.
         return window.can_continue_decode(running, prepared)
     return running == window.active and window.reserve.issubset(prepared)
@@ -93,7 +94,26 @@ def drain_reason(scheduler, pending, state):
     return "refill" if scheduler.waiting_queue else "cohort"
 
 
-def prepare_first_decode(scheduler, prefill):
+def prefill_into_idle_slots(scheduler, running, state):
+    window, host = scheduler._autellix_window, scheduler._autellix_host
+    if (not window.refill_idle_slots or window.capacity_limited
+            or window.reserve or scheduler._autellix_reserve
+            or len(running.reqs) >= window.capacity
+            or {req.rid for req in running.reqs} != window.active
+            or (host is not None and any(req.rid in host.saved for req in scheduler.waiting_queue))):
+        return None
+
+    # At a refill point inside the window, new admissions are an append-only
+    # suffix. The running requests keep their slots and radix locks.
+    batch = scheduler.get_new_batch_prefill()
+    if batch is not None:
+        state.parked_decode = running
+        if scheduler.autellix.trace:
+            scheduler.autellix.emit("overlap_refill_prefill", requests=[req.rid for req in batch.reqs])
+    return batch
+
+
+def prepare_first_decode(scheduler, prefill, *, refill_now=True):
     """Use the native prefill handoff without making an admission decision."""
     window, running = scheduler._autellix_window, scheduler.running_batch
     if (not window.remaining or scheduler.chunked_req is not None or scheduler.grammar_queue
@@ -104,7 +124,7 @@ def prepare_first_decode(scheduler, prefill):
     requests = running.reqs + prefill.reqs
     rids = {req.rid for req in requests}
     if (len(rids) != len(requests) or any(req.finished() or req.to_abort for req in requests)
-            or not prepared_window(scheduler, rids)
+            or not prepared_window(scheduler, rids, refill_now=refill_now)
             or scheduler.token_to_kv_pool_allocator.available_size()
             < len(requests) * scheduler.decode_mem_cache_buf_multiplier):
         return None
@@ -192,8 +212,20 @@ def resolve_outputs(scheduler, resident, *, policy):
             scheduler.autellix.emit("overlap_resolve", policy=policy, requests=[req.rid for req in resident.reqs])
 
 
-def install(cls, *, lazy_resolve=False, prefill_decode=False, retire_decode=False, window_decode=False):
+def install(cls, *, lazy_resolve=False, prefill_decode=False, retire_decode=False, window_decode=False,
+            prefill_refill=False, prepare_decode=None):
     native_input, native_next = cls.process_input_requests, cls.get_next_batch_to_run
+    if prefill_refill:
+        from sglang.srt.managers.io_struct import TokenizedGenerateReqInput
+        from .scheduler import decode_request
+
+        def independent_arrivals(scheduler, pending, requests):
+            calls = scheduler.autellix.calls
+            pending_programs = {calls[req.rid].pid for req in pending.reqs if req.rid in calls}
+            return all(isinstance(req, TokenizedGenerateReqInput) and req.session_params is None
+                       and req.rid.startswith("autellix_")
+                       and decode_request(req.rid)[0] not in pending_programs for req in requests)
+
     if retire_decode:
         from sglang.srt.managers.schedule_batch import FINISH_LENGTH, FINISH_MATCHED_TOKEN
         natural_finish = (FINISH_LENGTH, FINISH_MATCHED_TOKEN)
@@ -201,6 +233,11 @@ def install(cls, *, lazy_resolve=False, prefill_decode=False, retire_decode=Fals
     def process_input(self, requests):
         state = self._autellix_overlap
         if self.last_batch is not None:
+            # Queue-only arrivals from other programs cannot change the
+            # pending result or inherit service that it has yet to publish.
+            if (prefill_refill and requests and not state.deferred_inputs
+                    and independent_arrivals(self, self.last_batch, requests)):
+                return native_input(self, requests)
             state.deferred_inputs.extend(requests)
             return
         if state.drained is not None:
@@ -217,12 +254,18 @@ def install(cls, *, lazy_resolve=False, prefill_decode=False, retire_decode=Fals
         if pending is not None:
             reason = drain_reason(self, pending, state)
             if reason is None:
-                pending.prepare_for_decode()
+                if prepare_decode is not None and prepare_decode(pending):
+                    if self.autellix.trace:
+                        self.autellix.emit("fused_decode_metadata", requests=[req.rid for req in pending.reqs])
+                else:
+                    pending.prepare_for_decode()
                 if self.autellix.trace:
                     self.autellix.emit("overlap_continue_decode", requests=[req.rid for req in pending.reqs])
                 return pending
             if prefill_decode and reason == "prefill":
-                batch = prepare_first_decode(self, pending)
+                # Launch the admitted cohort's first decode. Its readback
+                # can then overlap any prefill that fills the idle slots.
+                batch = prepare_first_decode(self, pending, refill_now=not prefill_refill)
                 if batch is not None:
                     return batch
             if retire_decode and reason == "retire":
@@ -231,6 +274,10 @@ def install(cls, *, lazy_resolve=False, prefill_decode=False, retire_decode=Fals
                     return batch
             if window_decode and reason == "window":
                 batch = prepare_window_decode(self, pending, state)
+                if batch is not None:
+                    return batch
+            if prefill_refill and reason == "refill":
+                batch = prefill_into_idle_slots(self, pending, state)
                 if batch is not None:
                     return batch
             state.drained = pending

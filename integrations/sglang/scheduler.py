@@ -63,6 +63,8 @@ def install(cls, options):
     overlap_prefill_decode = options.get("overlap_prefill_decode", False)
     overlap_retire_decode = options.get("overlap_retire_decode", False)
     overlap_window_decode = options.get("overlap_window_decode", False)
+    overlap_prefill_refill = options.get("overlap_prefill_refill", False)
+    cache_paused_kv = options.get("cache_paused_kv", False)
     prepare_fused_decode = None
     if options.get("fused_decode_metadata"):
         from .decode import prepare_decode as prepare_fused_decode
@@ -228,7 +230,7 @@ def install(cls, options):
             if departing:
                 # A rotation leaves the prefix resident and evictable in radix.
                 # Use the same residency policy as other paused requests.
-                release_reserves(self, departing, preserve=not options.get("cache_paused_kv"))
+                release_reserves(self, departing, preserve=not cache_paused_kv)
             if self._autellix_paper and old_remaining > 0 and selected == running:
                 ctl.emit("continue_plan", requests=[r.rid for r in batch.reqs])
                 return None
@@ -274,7 +276,7 @@ def install(cls, options):
                     req = batch.reqs[i]
                     reserve = (len(self._autellix_reserve) < ctl.config.overprovision and
                                (self._autellix_window is None or req.rid in self._autellix_window.reserve))
-                    if reserve or options.get("cache_paused_kv"):
+                    if reserve or cache_paused_kv:
                         # Transfer ownership to radix. A reserve holds a lock;
                         # other paused prefixes are reclaimed under pressure.
                         req.fill_ids = (req.origin_input_ids + req.output_ids)[:lengths[i]]
@@ -390,7 +392,7 @@ def install(cls, options):
                 current_waiting = self.waiting_queue
                 self.waiting_queue = current_waiting + held
                 try:
-                    release_reserves(self)
+                    release_reserves(self, preserve=not cache_paused_kv)
                 finally:
                     self.waiting_queue = current_waiting
                 if self._autellix_window is not None:
@@ -530,7 +532,7 @@ def install(cls, options):
         # Advance the admitted plan; never use native length-based retraction
         # to replace paper priorities in the middle of a scheduling window.
         from .pressure import make_decode_room
-        make_decode_room(self, batch)
+        make_decode_room(self, batch, cache_paused_kv=cache_paused_kv)
         if batch.is_empty():
             return batch
         if prepare_fused_decode is not None and prepare_fused_decode(batch):
@@ -550,13 +552,17 @@ def install(cls, options):
             self.cur_batch = self._autellix_overlap.drained
         ret = original_result(self, batch, result, *a, **kw)
         if stable_decode_overlap and result is not None:
-            self._autellix_overlap.finish(result.bid, self.autellix)
-            drained = self._autellix_overlap.drained
-            if drained is not None and not overlap_lazy_resolve:
+            overlap = self._autellix_overlap
+            overlap.finish(result.bid, self.autellix)
+            resident, output_policy = overlap.parked_decode, "prefill_refill"
+            overlap.parked_decode = None
+            if resident is None and not overlap_lazy_resolve:
+                resident, output_policy = overlap.drained, "eager"
+            if resident is not None:
                 # The native future ring can be overwritten by later prefills
-                # before these resident requests run again. Materialize at drain.
+                # before these resident requests run again.
                 from .overlap import resolve_outputs
-                resolve_outputs(self, drained, policy="eager")
+                resolve_outputs(self, resident, policy=output_policy)
         elif self.pp_size == 1 and self._autellix_pending_timing is not None:
             rids, prefill_count, phase = self._autellix_pending_timing
             self._autellix_pending_timing = None
@@ -616,7 +622,8 @@ def install(cls, options):
     if stable_decode_overlap:
         from .overlap import install as install_overlap
         install_overlap(cls, lazy_resolve=overlap_lazy_resolve, prefill_decode=overlap_prefill_decode,
-                        retire_decode=overlap_retire_decode, window_decode=overlap_window_decode)
+                        retire_decode=overlap_retire_decode, window_decode=overlap_window_decode,
+                        prefill_refill=overlap_prefill_refill, prepare_decode=prepare_fused_decode)
     if measure_timing:
         original_next = cls.get_next_batch_to_run
 

@@ -36,7 +36,7 @@ class FusedDecodeMetadataTests(unittest.TestCase):
         slots = batch.alloc_token_slots.return_value
         self.kernel.__getitem__.assert_called_once_with((1,))
         self.kernel.__getitem__.return_value.assert_called_once_with(
-            batch.req_to_token_pool.req_to_token, batch.req_pool_indices, batch.seq_lens, slots,
+            batch.req_to_token_pool.req_to_token, batch.req_pool_indices, batch.seq_lens, batch.seq_lens, slots,
             2, 128, 1, 32, num_warps=1,
         )
         self.assertIs(batch.out_cache_loc, slots)
@@ -44,10 +44,24 @@ class FusedDecodeMetadataTests(unittest.TestCase):
         self.assertIsNone(batch.output_ids)
         self.assertEqual(batch.seq_lens_sum, 20)
 
+    def test_overlap_preserves_the_inflight_batch_lengths(self):
+        batch = self.batch()
+        batch.enable_overlap = True
+        previous = batch.seq_lens
+        previous.new_empty = Mock(return_value=object())
+
+        self.assertTrue(self.prepare(batch))
+        previous.new_empty.assert_called_once_with((2,))
+        self.assertIs(batch.seq_lens, previous.new_empty.return_value)
+        self.kernel.__getitem__.return_value.assert_called_once_with(
+            batch.req_to_token_pool.req_to_token, batch.req_pool_indices, previous, batch.seq_lens,
+            batch.out_cache_loc, 2, 128, 1, 32, num_warps=1,
+        )
+
     def test_fallback_does_not_allocate_or_mutate(self):
         for changes in (
                 dict(forward_mode=NS(is_decode=lambda: False)),
-                dict(enable_overlap=True), dict(is_hybrid=True),
+                dict(is_hybrid=True),
                 dict(token_to_kv_pool_allocator=NS(page_size=16)),
                 dict(model_config=NS(is_encoder_decoder=True)),
                 dict(sampling_info=NS(penalizer_orchestrator=NS(is_required=True)))):
