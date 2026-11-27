@@ -89,10 +89,30 @@ SGLang 有 5 项吞吐提高、6 项平均延迟下降。8B BFCL 的吞吐提升
 汇总逐组核对模型、后端版本、设备、到达时间、输入轨迹、输入和输出 token 数及
 实现指纹。Autellix 的每次调用都有非零 CUDA 服务计时。运行参数、输入指纹、原始
 检查点和校验值统一放在本地
-`outputs/fjr-h20-full-matrix-20261127-fdXNx3/checkpoints.tar.gz`。
+`outputs/archive/h20/h20-20261127-matrix.tar.gz`。
 
 H20 的分块 Triton KV 往返测试覆盖 64 层、17,408 个 token，共 2.125 GiB。
 恢复后的数据逐元素一致，临时 GPU 显存峰值为 16 MiB。
+
+## 本地实验归档
+
+最新矩阵归档保留 24 组配对、48 次回放，另有驻留候补和 KV 往返验证。归档内
+`plans/`、`results/` 和 `validation/` 分别存放计划、逐次回放以及补测，
+`manifest.json` 记录运行提交和每个文件的 SHA-256。
+
+下文的 `runs/...` 路径均为本地 `outputs/archive/h20/h20-20261125-27-history.tar.gz` 的成员。
+该归档收录 19 个历史实验目录的计划、检查点、定向验证和源码指纹。`checkpoints/`
+和 `local-validation/` 保留各自的内容和校验清单。可按归档成员路径提取所需实验。
+
+```bash
+tar -xOf outputs/archive/h20/h20-20261127-matrix.tar.gz manifest.json
+tar -tf outputs/archive/h20/h20-20261125-27-history.tar.gz
+```
+
+`outputs/archive/h20/h20-20261119-evidence.tar.gz` 保留迁移时的回放数据、采集与结果校验记录。
+其中 `manifest.json` 将重复数据定位到 `outputs/paper-sources/pinned/` 的固定版本，
+并记录可从 Git 重建的源码快照及其原始文件列表。P40 的历史验收资料位于
+`outputs/archive/p40/`。归档在本机的 `outputs/` 中，Git 提交保存代码和文档。
 
 ## 历史部署与检查点
 
@@ -207,7 +227,7 @@ PP2 CUDA Graph 路径上由 39.35 变为 37.84 token/s（−3.84%）。新版的
 8B、14B 的回放快照包含自然结束补位和在途批次记账更新。后续添加的同节点流水线控制
 和微批接纳前缀由 1B 双卡验收。完整测量计划、逐调用检查点、模型配置、数据指纹
 和源码快照 SHA-256 保存在
-`outputs/fjr-h20-paper-slo-20261127/checkpoints.tar.gz`。
+`runs/fjr-h20-paper-slo-20261127/checkpoints/`。
 
 ## 解码补位和流水线计时复测
 
@@ -251,8 +271,8 @@ LATS 使用已采集的完整调用依赖，8B 回放两个程序，14B 和 70B 
 三个和三个程序，ShareGPT、BFCL 与 LATS 等量抽样。
 
 本轮 41 组共 76 次有效回放。配对核对了轨迹哈希、逐调用输入长度和生成长度。遇到 GPU
-启动重叠或外部进程争用的试跑已剔除，按同卡配对重做。源码指纹、运行参数和紧凑检查点保存在本地
-`outputs/fjr-h20-overlap-20261127-M14qi4/checkpoints.tar.gz`。
+启动重叠或外部进程争用的试跑已剔除，按同卡配对重做。源码指纹、运行参数和紧凑检查点保存在历史归档的
+`runs/fjr-h20-overlap-20261127-M14qi4/checkpoints/`。
 常驻代码通过环境节点同步，计算节点用同一份清单核验 Git 文件的 SHA-256。
 
 ## 8B、14B、70B 后端配对
@@ -282,8 +302,8 @@ LATS 使用已采集的完整调用依赖，8B 回放两个程序，14B 和 70B 
 14B 的 Autellix 吞吐相对 vLLM-opt 下降 4.2%。70B 提高 6.7%，平均延迟下降 5.0%，
 P95 从 343.45 增至 358.62 毫秒/token。
 
-9 份计划、22 次运行的压缩检查点及两条 14B 输入轨迹保存在本地
-`outputs/fjr-h20-model-pairs-20261126/`。复跑使用
+9 份计划、22 次运行的压缩检查点及两条 14B 输入轨迹保存在历史归档的
+`runs/fjr-h20-model-pairs-20261126/`。复跑使用
 `python scripts/run_sglang_matrix.py --plan PLAN --output CHECKPOINT`。
 本地副本通过 SHA-256 和逐调用 token 数校验后，已释放三张实验卡并清理 H20 上的本轮临时目录。
 
@@ -315,7 +335,7 @@ GPU 执行时间继续由各阶段的前向计时累计，外层批次调用移�
 | 离线 ShareGPT，vLLM | 266.79 → 275.71 | +3.3% |
 
 16 组配对的 32 次运行、对应计划和选中的 LATS、Mixed 输入保存在
-`outputs/fjr-h20-backend-tuning-20261126/`。所有已完成配对均已逐调用核对长度，并校验
+`runs/fjr-h20-backend-tuning-20261126/`。所有已完成配对均已逐调用核对长度，并校验
 轨迹与源码指纹。70B 聚合 KV 换出的额外对照因未取得两张空闲 GPU，跳过执行。
 
 ## 原生配置与调度路径消融
@@ -347,7 +367,7 @@ GPU 检查点记录的源码指纹以 `4a020197` 开头。H20 常驻 NFS 部署�
 357.81 毫秒/token。
 
 顺序生成验收中，两种计时方式的三个调用输出哈希一致，每次调用均记录了正的 GPU 服务时间。
-计划、验收输入及 21 次运行的检查点保存在 `outputs/fjr-h20-sglang-readback-20261126/`。
+计划、验收输入及 21 次运行的检查点保存在 `runs/fjr-h20-sglang-readback-20261126/`。
 校验本地检查点后，已释放本轮使用的 GPU 并清理本轮专用的 H20 临时目录。
 
 ## 流水线计时通信与调度复测
@@ -377,8 +397,8 @@ Llama-3.2-1B 在同一个 12 GB H20 MIG 分区上回放 4 个 BFCL 程序。SGLa
 平均程序延迟为 26.69 和 25.17 毫秒/token（−5.7%）。
 
 计算节点运行快照来自 `2bde84c`，与本地和 GitHub 逐文件核对了 200 个文件。
-H20 常驻 NFS 副本更新遇到磁盘配额限制。检查点和实际运行计划保存在本地
-`outputs/fjr-h20-pp-metadata-20261126/checkpoints.tar.gz`。
+H20 常驻 NFS 副本更新遇到磁盘配额限制。检查点和实际运行计划保存在历史归档的
+`runs/fjr-h20-pp-metadata-20261126/checkpoints/`。
 H20 重连后，取回 8B vLLM 整卡的完整配对。24 个 BFCL 程序、300 次调用的吞吐为
 201.86 → 213.18 token/s（+5.6%），平均程序延迟为 33.09 → 28.85 毫秒/token（−12.8%）。
 检查点已补入同一归档，运行进程退出后清理了该次专用临时目录。70B PP2 需要两张同时空闲的整卡。
@@ -421,7 +441,7 @@ token 超过原始输入长度。调到 32 步后为 17 次，吞吐相对原生
 8 程序的 MIG SGLang 压力组遇到运行时浮点异常。SGLang 的性能对照采用 14B 整卡结果，MIG 保留定向验收。
 
 两份运行快照来自 `7ce032f` 和 `4ef3ce4`，逐文件核验后加载。H20 常驻 NFS 副本仍受写入配额限制。
-原始检查点、计划和定向验证脚本保存在本地 `outputs/fjr-h20-prefill-prefix-20261126/checkpoints.tar.gz`。
+原始检查点、计划和定向验证脚本保存在历史归档的 `runs/fjr-h20-prefill-prefix-20261126/checkpoints/`。
 核验归档后，实验进程退出并释放 GPU，随后清理本轮专用临时目录。
 
 ## 分块余量与缓存恢复对照
@@ -463,8 +483,8 @@ vLLM-opt 与 Autellix 的 BFCL 复测中，8B 吞吐为 178.70 → 213.42 token/
 
 测试快照为 `c101f16`，默认值调整后的运行快照为 `3d39c03`。计算节点在启动前逐文件校验源码。
 H20 常驻 NFS 副本更新遇到磁盘配额限制。
-27 次性能运行的计划和检查点位于本地 `outputs/fjr-h20-prefill-batching-20261126/checkpoints.tar.gz`。
-WSL 验收及对应脚本位于同目录的 `local-validation.tar.gz`。
+27 次性能运行的计划和检查点位于历史归档的 `runs/fjr-h20-prefill-batching-20261126/checkpoints/`。
+WSL 验收及对应脚本位于同一实验的 `local-validation/`。
 归档校验后释放了实验 GPU，并清理本轮专用的临时目录。
 
 ## SGLang 解码量子与窗口复测
@@ -504,10 +524,10 @@ token/s。门槛组平均程序级延迟为 154.91 毫秒/token，原生为 160.
 平均程序级延迟从 33.07 降至 29.12 毫秒/token。14B 吞吐为 112.75 → 116.60 token/s（+3.4%），
 平均程序级延迟从 121.05 降至 113.87 毫秒/token。
 
-本轮运行快照为 `b24a313`。26 组的计划、逐调用检查点、计时轨迹和源码指纹保存在本地
-`outputs/fjr-h20-decode-quantum-20261126/checkpoints.tar.gz`。32 步分离执行组与原生
+本轮运行快照为 `b24a313`。26 组的计划、逐调用检查点、计时轨迹和源码指纹保存在历史归档的
+`runs/fjr-h20-decode-quantum-20261126/checkpoints/`。32 步分离执行组与原生
 的文本哈希在首条和独立轨迹中分别匹配 306/339、337/354 个调用，两边逐调用的输入和输出
-长度一致。独立的 WSL 验收脚本与检查点位于同目录的 `local-validation.tar.gz`。
+长度一致。独立的 WSL 验收脚本与检查点位于同一实验的 `local-validation/`。
 回放前后逐文件核对 H20 运行源码。常驻 NFS 目录本轮写入仍遇到配额限制。归档下载并核验后，
 确认实验进程已退出，清理 `/tmp/fjr-autellix-h20-decode-quantum-20261126`。
 
@@ -551,10 +571,10 @@ WSL 的 vLLM 优化组在同样高负载下，默认 PLAS 组合为 224.35，对
 253.57 token/s。另一次消融中，最低队列保留 FIFO 时得到 299.68，对应 vLLM-opt 为
 275.63 token/s（+8.7%）。该回放用 135M 权重并关闭 CUDA Graph。
 
-H20 的 19 组结果、同卡回放计划和逐文件源码指纹保存在本地
-`outputs/fjr-h20-partial-retain-20261126/checkpoints.tar.gz`。各组逐调用输入与输出长度一致，
+H20 的 19 组结果、同卡回放计划和逐文件源码指纹保存在历史归档的
+`runs/fjr-h20-partial-retain-20261126/checkpoints/`。各组逐调用输入与输出长度一致，
 三个 65,536 KV token 配对中，最高吞吐配置的文本哈希分别与原生匹配 307/339、322/354 和
-190/212。WSL 的 16 组回放及定向验证位于同目录的 `local-validation.tar.gz`。
+190/212。WSL 的 16 组回放及定向验证位于同一实验的 `local-validation/`。
 H20 实测提交为 `000d458`，常驻 NFS 目录写入遇到配额限制。
 下载并核验归档后释放本轮进程并清理 `/tmp/fjr-autellix-h20-partial-retain-20261126`。
 
@@ -598,11 +618,10 @@ vLLM 8B 首次配对的 vLLM-opt → Autellix 吞吐为 196.34 → 189.81 token/
 为 191.03 token/s。vLLM 14B 为 109.69 → 116.26 token/s（+6.0%），P95 从 220.04 降至
 178.00 毫秒/token。两份实测快照的 vLLM 实现和共享调度源码逐文件一致。
 
-26 组 H20 回放含完整计划、逐调用检查点、文本哈希和两份源码指纹，保存在本地
-`outputs/fjr-h20-adaptive-20261126/checkpoints.tar.gz`。配对输入和生成长度逐调用一致，
+26 组 H20 回放含完整计划、逐调用检查点、文本哈希和两份源码指纹，保存在历史归档的
+`runs/fjr-h20-adaptive-20261126/checkpoints/`。配对输入和生成长度逐调用一致，
 512 阈值组在 8B 高负载 BFCL、14B 大 KV 和 ShareGPT 中与原生文本哈希分别匹配
-307/354（1.8 程序/秒）、193/207 和 33/59。定向 GPU 脚本和核验结果在同目录的
-`local-validation.tar.gz`。H20 常驻 NFS 目录仍受写入配额限制，实测版本在运行前做了源码
+307/354（1.8 程序/秒）、193/207 和 33/59。定向 GPU 脚本和核验结果在同一实验的 `local-validation/`。H20 常驻 NFS 目录仍受写入配额限制，实测版本在运行前做了源码
 校验。验收后释放本轮 GPU 进程，并清理 `/tmp/fjr-autellix-h20-adaptive-20261126`。
 
 ## SGLang 按本步预填充估算解码保留
@@ -637,10 +656,10 @@ P95 从 260.76 降至 224.03。独立 14B 的 2,048-token 分块组 P95 为 310.
 token 和 1.8 程序/秒时，原生、512 阈值自适应合批及再加新检查分别为 298.64、295.51、
 294.55 token/s，P95 为 124.92、113.87、111.96 毫秒/token。新选项默认关闭。
 
-H20 的 27 组有效回放、参数和源码指纹保存在本地 `outputs/fjr-h20-prefill-capacity-20261126/checkpoints.tar.gz`。
+H20 的 27 组有效回放、参数和源码指纹保存在历史归档的 `runs/fjr-h20-prefill-capacity-20261126/checkpoints/`。
 首条 8B 的争用试跑剔除后换卡完成配对。全部配对逐调用输入和生成长度一致，首条 8B、首条
 14B 和独立 14B 最优组与原生的文本哈希分别匹配 307/339、190/212、191/207。定向 GPU
-验收在同目录的 `local-validation.tar.gz`。H20 实测调度源码逐文件核验，SGLang 提交为
+验收在同一实验的 `local-validation/`。H20 实测调度源码逐文件核验，SGLang 提交为
 `b13cc76`。常驻 NFS 目录受写入配额限制。
 归档下载并校验后，释放了本轮 GPU 进程并清理 `/tmp/fjr-autellix-h20-prefill-capacity-20261126`。
 
@@ -682,10 +701,10 @@ vLLM 的 8B BFCL 吞吐从 187.92 提高到 191.88 token/s（+2.1%），P95 从 
 40.86 毫秒/token。14B 从 106.82 提高到 112.05 token/s（+4.9%），P95 从 225.34 降至
 181.95 毫秒/token。vLLM 和共享调度代码与上轮逐文件一致。
 
-H20 的 16 组有效回放、参数、逐调用检查点和源码指纹位于本地
-`outputs/fjr-h20-decode-fast-20261126/checkpoints.tar.gz`。轨迹哈希和逐调用输入 token 数及生成
+H20 的 16 组有效回放、参数、逐调用检查点和源码指纹位于历史归档的
+`runs/fjr-h20-decode-fast-20261126/checkpoints/`。轨迹哈希和逐调用输入 token 数及生成
 长度一致。融合组对普通 Autellix 的文本哈希匹配数按上表顺序为 307/339、200/207、34/59、101/130。
-定向 GPU 检查、完整小模型回放和元数据微基准保存在同目录的 `local-validation.tar.gz`。
+定向 GPU 检查、完整小模型回放和元数据微基准保存在同一实验的 `local-validation/`。
 H20 执行时校验了 `8ab65c2` 源码快照，常驻目录写入仍受 NFS 配额限制。ShareGPT 的一次
 争用试跑剔除后，三组在另一张卡重跑。校验本地归档后退出了本轮 GPU 进程，
 并清理 `/tmp/fjr-autellix-h20-decode-fast-20261126`。
@@ -710,8 +729,8 @@ WSL 的 SmolLM2-135M 定向验证观察到最多两批在途。198 次原生结�
 
 保留活动状态发布的同样对照中，overlap 分别比同步 Autellix 多 21.3% 和 27.4% 吞吐。
 两种发布配置的逐调用生成长度一致。同步与 overlap 的文本哈希在关闭发布时匹配 59/60，
-保留发布时匹配 60/60。完整检查点和定向验证保存在本地
-`outputs/fjr-h20-native-overlap-20261126/local-validation.tar.gz`。
+保留发布时匹配 60/60。完整检查点和定向验证保存在历史归档的
+`runs/fjr-h20-native-overlap-20261126/local-validation/`。
 
 H20 配对使用 Llama-3.1-8B 和 Qwen3-14B 的共享 BF16 权重。对同一到达轨迹，所有组
 使用同一张卡，比较原生 SGLang、同步 Autellix 和稳定解码 overlap。两个 Autellix 组只
@@ -742,8 +761,8 @@ vLLM 与共享调度代码的文件内容和上轮一致，重新测量 vLLM-opt
 | 14B BFCL | 112.30 → 115.13 | +2.5% | 214.45 → 180.68 |
 | 8B ShareGPT | 310.95 → 314.00 | +1.0% | 11.73 → 11.84 |
 
-H20 的 23 组有效回放及源码指纹位于本地
-`outputs/fjr-h20-native-overlap-20261126/checkpoints.tar.gz`。同一计划的到达轨迹、输入
+H20 的 23 组有效回放及源码指纹位于历史归档的
+`runs/fjr-h20-native-overlap-20261126/checkpoints/`。同一计划的到达轨迹、输入
 token 数和生成长度逐调用一致。overlap 与同步组的文本哈希按 SGLang 表格顺序
 匹配 303/339、195/207、36/59、101/130。争用中断的试跑在空闲卡上重新执行整套配对。
 H20 实测的 SGLang 快照与 `4995b20` 逐文件一致，常驻 NFS 目录仍受写入配额限制。
@@ -763,7 +782,7 @@ GPU 序列长度、前缀长度和扩展长度。同批次形状的 19 次对照
 
 关闭 trace 的 WSL 性能对照中，每档三次配对。延后解析相对提前解析的中位吞吐在平稳、
 突发流量下分别低 4.3% 和 6.4%，60 条输出的文本哈希和长度一致。延后解析默认关闭。
-源码校验、测试和回放在本地 `outputs/fjr-h20-overlap-readback-20261126/local-validation.tar.gz`。
+源码校验、测试和回放在历史归档的 `runs/fjr-h20-overlap-readback-20261126/local-validation/`。
 
 H20 的 ShareGPT 复用完整会话，在 0.8 和 1.6 程序/秒下比较原生 SGLang、原 overlap
 和延后解析。两档的窗口长度分别是 16 和 32，每档的两个 Autellix 组只切换解析时机。
@@ -795,8 +814,8 @@ vLLM 与共享调度源码同上轮逐文件一致。复测结果如下。
 | 14B BFCL | 112.42 → 116.07 | +3.2% | 213.32 → 178.48 |
 | 8B ShareGPT | 313.46 → 320.87 | +2.4% | 11.61 → 11.41 |
 
-H20 的 19 组性能回放、两组 trace 回放、读回原因计数和源码指纹位于本地
-`outputs/fjr-h20-overlap-readback-20261126/checkpoints.tar.gz`。同组到达轨迹、逐调用输入
+H20 的 19 组性能回放、两组 trace 回放、读回原因计数和源码指纹位于历史归档的
+`runs/fjr-h20-overlap-readback-20261126/checkpoints/`。同组到达轨迹、逐调用输入
 token 数和生成长度一致。ShareGPT 两档性能回放中，延后与提前解析分别有 48/59 和 125/130
 条文本哈希匹配。常驻 NFS 目录受配额限制，H20 实测使用逐文件核验的 `e0290d2` 源码快照。
 校验归档后释放本轮 GPU 进程，并清理 `/tmp/fjr-autellix-h20-overlap-readback-20261126`。
@@ -846,7 +865,7 @@ H20 回放使用 Llama-3.1-8B 和 Qwen3-14B 的共享 BF16 权重。ShareGPT 复
 关闭 trace、两组都开启首步接续时，WSL 的突发与短多调用回放各做三次配对。自然结束
 接续的中位吞吐分别增加 10.1% 和 5.4%，程序级 P95 分别上升 5.4% 和下降 8.7%。
 168 条输入与输出长度一致，165 条文本哈希匹配。定向和计时检查点都在本地
-`outputs/fjr-h20-prefill-handoff-20261126/local-validation.tar.gz`。
+`runs/fjr-h20-prefill-handoff-20261126/local-validation/`。
 
 H20 换序复跑低负载 ShareGPT，同卡原生为 387.60 token/s，普通 overlap 为 378.97，
 同时开启两条接续路径为 379.63。两开关组比原生低 2.1%，比同卡普通 overlap 多 0.2%。
@@ -871,8 +890,8 @@ vLLM 的代码和共享调度源码同上轮逐文件一致。三套同卡回放
 | 14B BFCL | 112.60 → 119.27 | +5.9% | 211.92 → 176.52 |
 | 8B ShareGPT | 314.23 → 321.90 | +2.4% | 11.66 → 11.35 |
 
-H20 的 27 组计时回放、两组 trace 回放和三个源码快照的指纹保存在本地
-`outputs/fjr-h20-prefill-handoff-20261126/checkpoints.tar.gz`。各同卡对照的输入轨迹和
+H20 的 27 组计时回放、两组 trace 回放和三个源码快照的指纹保存在历史归档的
+`runs/fjr-h20-prefill-handoff-20261126/checkpoints/`。各同卡对照的输入轨迹和
 逐调用生成长度一致。文本哈希随各组检查点保存。H20 实测分别核对了 `aa11aaa` 和
 `40c6fb4` 的运行源码。常驻目录写入受 NFS 配额限制。归档校验后释放本轮 GPU 进程，
 并清理 `/tmp/fjr-autellix-h20-prefill-handoff-20261126`。
@@ -895,7 +914,7 @@ FIFO 顺序。受控用例中，两组均在完成第 4 和第 8 步解码后按
 WSL 的 SmolLM2-135M 使用 8 步窗口，两组都开启首步和自然结束接续。关闭 trace 后，每档
 各三次配对。窗口续跑在平稳、突发和短多调用三种负载的中位吞吐分别提高 3.4%、4.8%、6.0%，
 程序级 P95 分别降低 4.4%、2.8%、9.0%。180 条输入与生成长度一致，178 条文本哈希匹配。
-GPU 验证及源码校验见本地 `outputs/fjr-h20-window-rollover-20261126/local-validation.tar.gz`。
+GPU 验证及源码校验见历史归档的 `runs/fjr-h20-window-rollover-20261126/local-validation/`。
 
 H20 的基准复用 Llama-3.1-8B 和 Qwen3-14B 的 BF16 权重。ShareGPT 的 1.6 程序/秒
 轨迹用同一张卡、同一个种子先跑原生、普通 overlap、窗口续跑，再把顺序反过来复跑。
@@ -926,8 +945,8 @@ KV 空间检查 27 次、窗口结束 10 次、请求结束 6 次。同次追踪
 | 14B BFCL | 107.49 → 115.25 | +7.2% | 218.49 → 180.68 |
 | 8B ShareGPT | 302.84 → 310.07 | +2.4% | 12.19 → 12.76 |
 
-H20 的 22 组计时回放、两组 trace 回放、完整计划和逐文件源码指纹保存在本地
-`outputs/fjr-h20-window-rollover-20261126/checkpoints.tar.gz`。每套同卡对照的输入轨迹和
+H20 的 22 组计时回放、两组 trace 回放、完整计划和逐文件源码指纹保存在历史归档的
+`runs/fjr-h20-window-rollover-20261126/checkpoints/`。每套同卡对照的输入轨迹和
 逐调用生成长度一致，文本哈希随检查点保存。H20 实测的 SGLang 版本为 `a75dedd`，生产
 代码与 WSL 验证的 `42190e7` 逐文件一致。vLLM 与共享调度源码和之前的 `3d99de6`
 一致。常驻源码目录受 NFS 写入配额限制。归档完整性校验后释放本轮 GPU，并清理
@@ -1105,8 +1124,8 @@ Autellix 在 0.72 程序/秒下完成 70 个程序，平均延迟 32.96 毫秒/t
 | Autellix PLAS | 70 | 32.96 | 45.36 | 372.69 |
 
 FCFS 与 PLAS 共用解码输入复用和连续主机 KV。PLAS 相对 FCFS 的平均延迟降低 5.7%，
-P95 降低 9.9%，整批吞吐降低 0.7%。实验计划和压缩检查点保存在本地
-`outputs/fjr-autellix-8b-current-20261125/`。
+P95 降低 9.9%，整批吞吐降低 0.7%。实验计划和压缩检查点保存在历史归档的
+`runs/fjr-autellix-8b-current-20261125/`。
 
 图 12、13 的单卡套件也可用 `--graph-context 32768` 为各 vLLM 组统一 CUDA Graph
 覆盖范围，适用于 BFCL 的长工具调用上下文。

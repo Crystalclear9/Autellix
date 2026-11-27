@@ -8,9 +8,9 @@
 
 2026-11-17 15:41:22（Asia/Shanghai）完成逐文件校验：主目录 164949 个文件/链接、
 142286847353 字节文件内容，运行状态目录 148 项、379074711 字节，SHA256 比较
-均无差异。完整清单保存在服务器 `logs/migration-47541-*-files.json`，本地副本位于
-`outputs/archive/p40/migration-47541/`。[精简验收结果](results/server-migration-20261117.json)记录
-清单哈希、硬件、检查点及 GPU 验证结果。
+均无差异。完整清单保存在服务器 `logs/migration-47541-*-files.json`，本地副本压缩为
+`outputs/archive/p40/migration-47541/files.json.gz`。解压后的内容沿用原清单的 SHA-256。
+迁移的硬件、检查点和 GPU 验证结果见验收记录。[精简验收结果](results/server-migration-20261117.json)
 
 新实例补装系统依赖 `libnuma1`，SGLang/Torch 与 vLLM/Torch 两套环境均成功导入。
 146 项回归中 139 项通过、7 项跳过。GPU 0 完成 2.125 GiB KV 精确往返，临时 GPU
