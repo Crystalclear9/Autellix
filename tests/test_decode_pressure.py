@@ -2,10 +2,17 @@ import unittest
 from types import SimpleNamespace as NS
 from unittest.mock import Mock
 
-from integrations.sglang.pressure import make_decode_room
+from integrations.sglang.pressure import make_decode_room, other_pipeline_requests
 
 
 class DecodePressureTests(unittest.TestCase):
+    def test_pipeline_counts_prefill_until_its_result_is_processed(self):
+        batch = NS(reqs=[NS(rid="decode")])
+        scheduler = NS(running_mbs=[batch], _autellix_inflight={"decode", "prefill"})
+        self.assertTrue(other_pipeline_requests(scheduler, batch))
+        scheduler._autellix_inflight.remove("prefill")
+        self.assertFalse(other_pipeline_requests(scheduler, batch))
+
     def test_pressure_retracts_lowest_priority_not_longest_request(self):
         high = NS(rid="high", req_pool_idx=0, origin_input_ids=list(range(8)), output_ids=[8],
                   prefix_indices=[], last_node="high-cache", reset_for_retract=Mock())

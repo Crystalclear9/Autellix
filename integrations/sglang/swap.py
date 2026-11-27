@@ -40,17 +40,20 @@ class HostKV:
         layout = self.packed
         count = max(1, self.transfer_bytes // layout.bytes_per_block)
         stream = torch.cuda.current_stream(layout.device)
+        buffer = torch.empty_like(host[:count], device=layout.device)
         for start in range(0, len(indices), count):
             end = min(start + count, len(indices))
             staging = host[start:end]
+            payload = buffer[:end - start]
             if pack:
-                payload = torch.empty_like(staging, device=layout.device)
                 layout.move(indices[start:end], payload, pack=True)
                 staging.copy_(payload, non_blocking=True)
             else:
-                payload = staging.to(layout.device, non_blocking=True)
+                payload.copy_(staging, non_blocking=True)
                 layout.move(indices[start:end], payload, pack=False)
-            stream.synchronize()
+        # Every kernel and copy uses this stream, so each chunk consumes the buffer
+        # before the next one reuses it. Complete the transaction at its boundary.
+        stream.synchronize()
         return ceil(len(indices) / count)
 
     def save(self, rid, tokens, indices):

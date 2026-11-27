@@ -2,8 +2,11 @@
 
 
 def other_pipeline_requests(scheduler, batch):
-    return any(other is not batch and any(not req.finished() for req in other.reqs)
-               for other in getattr(scheduler, "running_mbs", ()))
+    if any(other is not batch and any(not req.finished() for req in other.reqs)
+           for other in getattr(scheduler, "running_mbs", ())):
+        return True
+    # A prefill owns KV and request slots until its result is merged into running_mbs.
+    return bool(getattr(scheduler, "_autellix_inflight", set()).difference(req.rid for req in batch.reqs))
 
 
 def make_decode_room(scheduler, batch, *, cache_paused_kv=False):
