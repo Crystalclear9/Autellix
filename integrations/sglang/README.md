@@ -117,7 +117,7 @@ Triton 调用。使用 overlap 时保留在途结果引用的长度张量。调�
 `autellix_overlap_prefill_refill=true` 允许在已选请求保留原次序时，给当前窗口的空位提交独立
 prefill，调度 trace 用 `overlap_refill_prefill` 记录。需同时开启稳定解码 overlap 和空位补齐，
 并使用分离的 prefill 与 decode。
-配对结果和检查点见 [H20 窗口边界续跑复测](../../docs/h20-reproduction.md#sglang-窗口边界续跑复测)。
+配对结果和检查点见 [H20 解码补位和流水线计时复测](../../docs/h20-reproduction.md#解码补位和流水线计时复测)。
 `autellix_defer_model_timing=false` 可用于对照，恢复读回前的独立同步。
 流水线首段在采样结果返回时结算自己的 CUDA event 时间，其余阶段在原生消息中传递累计耗时。
 `autellix_cache_paused_kv=true` 也适用于流水线阶段的暂停 KV 和解码容量回收。

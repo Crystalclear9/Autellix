@@ -57,11 +57,68 @@ python scripts/run_h20_paper.py sharegpt --model "$model" --datasets "$data/data
 长任务在 `tmux -L fjr-autellix` 的独立会话中运行。接口回归启动的 HTTP 服务会随测试退出，
 每次配对结束后关闭引擎。结果保存后，通过 `nvidia-smi` 核对任务进程是否已释放 GPU。
 
+本轮 H20 的 vLLM 0.6.1 BF16 回放使用服务器已有的 cuBLAS 12.6。原环境的 cuBLAS 12.1
+在模型预热的输出投影中触发 SIGFPE。通过启动命令向原生组和 Autellix 组加载同一套库，
+保留现有模型、权重精度和 Python 环境。
+
+```bash
+conda activate autellix-vllm061
+fjr_blas="$HOME/stu/fjr/miniconda3/envs/autellix-sglang/lib/python3.10/site-packages/nvidia/cublas/lib"
+LD_PRELOAD="$fjr_blas/libcublasLt.so.12:$fjr_blas/libcublas.so.12" \
+  python scripts/run_sglang_matrix.py --plan PLAN --output CHECKPOINT
+```
+
 论文第 6 节按程序级秒/token 对照可承载的程序到达率，另报 P95 和 P99。结果汇总记录
 这三项，并记录实际程序完成率、输出 token/s、到达阶段积压和排空时间。8B 使用单张
 H20，70B 在 SGLang 使用流水线并行，在 vLLM 使用四卡张量并行。论文的主要对照包括 vLLM
 0.6.1、启用分块 prefill 和前缀缓存的 vLLM-opt，以及 MLFQ。
 [Autellix 论文，第 6 节](https://arxiv.org/html/2502.13965v1#S6)
+
+## 解码补位和流水线计时复测
+
+2026-11-27 在 H20-2 复用 Llama-3.1-8B、Qwen3-14B 和 Llama-3.1-70B 的 BF16 权重。
+8B 和 14B 使用单卡，70B 使用 SGLang PP2 和 vLLM TP2。对照组与接入组共用物理卡、模型、
+活动批次和 KV 预算、程序到达轨迹及逐调用的生成长度。BFCL 和 ShareGPT 使用 PLAS，
+LATS 和等比例 Mixed 使用 ATLAS。
+
+SGLang 将可独立接纳的普通生成请求提前入队，并用调度窗口内的空位提交独立 prefill。
+8B ShareGPT 的同策略消融由 635.85 提高到 644.78 token/s（+1.4%），同期原生为
+645.38 token/s。稳定解码可复用 Triton 元数据更新，在途结果保留原有的长度张量。
+
+70B BFCL 的同轨迹拆分中，原生为 38.94 token/s。接入组由 33.85 提高到 37.17
+token/s（radix 保留），再到 37.75 token/s（首段在采样结果返回后结算 GPU 时间）。
+独立 BFCL 样本使用 32 步窗口和一个驻留候补，原生与接入组为 42.59 和 41.78 token/s。
+把流水线调度元数据移到 Gloo 后，旧样本回落到 37.32 token/s，ShareGPT 也略降，已移除该试验路径。
+
+| 模型 | BFCL 对原生 SGLang | ShareGPT 对原生 SGLang | BFCL 对 vLLM-opt | ShareGPT 对 vLLM-opt |
+| --- | ---: | ---: | ---: | ---: |
+| 8B | 145.11 → 195.02（+34.4%） | 650.40 → 647.14（−0.50%） | 206.00 → 214.76（+4.3%） | 315.87 → 321.94（+1.9%） |
+| 14B | 87.82 → 102.05（+16.2%） | 250.83 → 250.21（−0.25%） | 113.60 → 119.04（+4.8%） | 217.91 → 219.43（+0.7%） |
+| 70B | 38.94 → 37.75（−3.1%） | 45.89 → 45.42（−1.0%） | 61.66 → 68.84（+11.6%） | 72.70 → 74.12（+2.0%） |
+
+表中吞吐单位为 token/s，每格对应独立的同卡配对。8B 的 SGLang ShareGPT 在独立的 2.4
+程序/秒轨迹中由 344.36 到 344.27 token/s（−0.03%）。在 3.2 程序/秒、40 个程序、
+194 次调用的轨迹中由 650.68 到 653.09 token/s（+0.37%），程序级平均延迟由
+14.64 降到 12.07 毫秒/token。三档 ShareGPT 用各自固定的到达轨迹和种子。
+14B 的 SGLang ShareGPT 在 1.6 程序/秒的独立轨迹中由 217.12 到 214.22 token/s（−1.33%），
+程序级平均延迟由 19.56 降到 16.48 毫秒/token。
+
+8B、1.6 程序/秒的定向 trace 记录了 108 次重叠 prefill 补位和 52 次等待读回。
+130 次调用都记录了实际 GPU 时间，106 次继承了非零程序服务时间。
+
+| 模型 | LATS 对原生 SGLang | LATS 对 vLLM-opt | Mixed 对原生 SGLang | Mixed 对 vLLM-opt |
+| --- | ---: | ---: | ---: | ---: |
+| 8B | 332.45 → 333.94（+0.5%） | 272.20 → 278.19（+2.2%） | 370.70 → 370.61（−0.02%） | 307.39 → 308.05（+0.2%） |
+| 14B | 130.25 → 133.38（+2.4%） | 113.83 → 115.27（+1.3%） | 140.90 → 142.85（+1.4%） | 125.69 → 129.26（+2.8%） |
+| 70B | 29.88 → 29.43（−1.5%） | 49.87 → 50.23（+0.7%） | 32.69 → 32.37（−1.0%） | 53.30 → 53.78（+0.9%） |
+
+LATS 使用已采集的完整调用依赖，8B 回放两个程序，14B 和 70B 各回放一个程序。Mixed 分别取六个、
+三个和三个程序，ShareGPT、BFCL 与 LATS 等量抽样。
+
+本轮 41 组共 76 次有效回放。配对核对了轨迹哈希、逐调用输入长度和生成长度。遇到 GPU
+启动重叠或外部进程争用的试跑已剔除，按同卡配对重做。源码指纹、运行参数和紧凑检查点保存在本地
+`outputs/fjr-h20-overlap-20261127-M14qi4/checkpoints.tar.gz`。
+常驻代码通过环境节点同步，计算节点用同一份清单核验 Git 文件的 SHA-256。
 
 ## 8B、14B、70B 后端配对
 
