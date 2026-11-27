@@ -372,7 +372,7 @@ class RuntimeScheduler:
             self._publish(affected)
         self.emit("batch", requests=list(rids))
 
-    def executed(self, rids, seconds: float, *, prefill_count: int | None = None):
+    def executed(self, rids, seconds: float, *, prefill_count: int | None = None, still_running=()):
         if not math.isfinite(seconds) or seconds < 0:
             raise ValueError("execution time must be finite and nonnegative")
         now = self.clock()
@@ -385,7 +385,7 @@ class RuntimeScheduler:
             call.quantum -= seconds
             if prefill_count is not None and index >= prefill_count:
                 call.decode_steps += 1
-            call.scheduled = False
+            call.scheduled = rid in still_running
             call.last_update = now
         if not self.publish_activity_at_window:
             self._publish(self.calls[rid] for rid in rids)

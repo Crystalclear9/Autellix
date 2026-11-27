@@ -6,6 +6,7 @@ all stages perform the same admission, preemption and restoration decisions.
 """
 import copy
 import json
+import pickle
 import time
 from collections import deque
 
@@ -76,13 +77,66 @@ class PipelineTable:
         return invoke
 
 
+def compact_control_transfer(device):
+    """Use one existing P2P message for steps that only carry policy clocks."""
+    import torch
+    import torch.distributed as dist
+
+    header = torch.empty(4, device=device, dtype=torch.float64)
+
+    def transfer(data, rank, group, src, dst):
+        if rank == src:
+            requests, entries = data
+            clocks = [value for name, value in entries if name == "clock"]
+            if requests or len(clocks) != len(entries) or len(clocks) > 2:
+                payload = pickle.dumps(data, protocol=pickle.HIGHEST_PROTOCOL)
+                clocks = []
+            else:
+                payload = b""
+            header.copy_(torch.tensor([len(payload), len(clocks), *(clocks + [0.] * (2 - len(clocks)))],
+                                      dtype=header.dtype))
+            dist.send(header, dst=dst, group=group)
+            if payload:
+                buf = torch.frombuffer(bytearray(payload), dtype=torch.uint8).to(device)
+                dist.send(buf, dst=dst, group=group)
+            return data
+        dist.recv(header, src=src, group=group)
+        size, count, *clocks = header.tolist()
+        if size:
+            buf = torch.empty(int(size), device=device, dtype=torch.uint8)
+            dist.recv(buf, src=src, group=group)
+            return pickle.loads(buf.cpu().numpy().tobytes())
+        return [], [("clock", tick) for tick in clocks[:int(count)]]
+
+    return transfer
+
+
+def host_control_transfer(rank, channels):
+    """Keep colocated pipeline control on a local FIFO between ranks."""
+    incoming = channels[rank - 1][0] if rank else None
+    outgoing = channels[rank][1] if rank < len(channels) else None
+    for reader, writer in channels:
+        if reader is not incoming:
+            reader.close()
+        if writer is not outgoing:
+            writer.close()
+
+    def transfer(data, rank, group, src, dst):
+        if rank == src:
+            outgoing.send(data)
+            return data
+        return incoming.recv()
+
+    return transfer
+
+
 def configure(scheduler, options):
     from autellix.runtime.policy import PolicyConfig, ProgramTable, RuntimeScheduler
     from autellix.runtime.window import SchedulingWindow
     import sglang.srt.managers.scheduler as module
 
     leader = scheduler.pp_rank == 0
-    tape = scheduler._autellix_tape = PolicyTape(leader)
+    tape = PolicyTape(leader)
     table = ProgramTable(options["table_path"]) if leader else None
     controller = RuntimeScheduler(PipelineTable(tape, table), PolicyConfig(**options["config"]),
                                   options.get("trace") if leader else None, clock=tape.clock,
@@ -123,12 +177,18 @@ def configure(scheduler, options):
         return requests
 
     scheduler.recv_requests = recv
-    original_transfer = module.point_to_point_pyobj
+    channels = options.get("pipeline_control_channels")
+    if channels:
+        transfer_control = host_control_transfer(scheduler.pp_rank, channels)
+    elif options.get("compact_pipeline_control"):
+        transfer_control = compact_control_transfer(scheduler.device)
+    else:
+        transfer_control = module.point_to_point_pyobj
 
     def transfer(data, rank, group, src, dst):
         if rank == src:
             data = (data, tape.entries)
-        return original_transfer(data, rank, group, src, dst)
+        return transfer_control(data, rank, group, src, dst)
 
     module.point_to_point_pyobj = transfer
 

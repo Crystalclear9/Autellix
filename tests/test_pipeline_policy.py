@@ -8,10 +8,50 @@ from unittest.mock import Mock, patch
 
 from autellix.runtime import ReplicaConfig
 from autellix.runtime.policy import PolicyConfig, ProgramTable, RuntimeScheduler
-from integrations.sglang.pipeline import PipelineTable, PolicyTape, abort_inflight, configure, install
+from integrations.sglang.pipeline import (PipelineTable, PolicyTape, abort_inflight,
+                                          compact_control_transfer, configure, host_control_transfer, install)
 
 
 class PipelinePolicyTests(unittest.TestCase):
+    def test_host_control_relays_only_through_the_current_ranks_endpoints(self):
+        frame = (["request"], [("clock", 12.34), ("table.snapshot", {"p": (.031, .025)})])
+        incoming, outgoing, unused_read, unused_write = Mock(), Mock(), Mock(), Mock()
+        incoming.recv.return_value = frame
+        relay = host_control_transfer(1, [(incoming, unused_write), (unused_read, outgoing)])
+        value = relay([], 1, None, 0, 1)
+        self.assertEqual(value, frame)
+        self.assertEqual(relay(value, 1, None, 1, 2), frame)
+        outgoing.send.assert_called_once_with(frame)
+        unused_read.close.assert_called_once_with()
+        unused_write.close.assert_called_once_with()
+        incoming.close.assert_not_called()
+        outgoing.close.assert_not_called()
+
+    def test_compact_control_replays_clocks_and_full_policy_payloads(self):
+        try:
+            import torch
+        except ImportError:
+            self.skipTest("requires tensors for pipeline control transport")
+        wire = []
+        leader, follower = compact_control_transfer("cpu"), compact_control_transfer("cpu")
+
+        def recv(tensor, **kwargs):
+            tensor.copy_(wire.pop(0))
+
+        frames = [
+            ([], [], 1),
+            ([], [("clock", 12.34), ("clock", 12.35)], 1),
+            (["arrival"], [("table.take_context", {"call_id": "first"})], 2),
+            ([], [("clock", 12.36), ("table.snapshot", {"p": (.031, .025)})], 2),
+        ]
+        with patch.object(torch.distributed, "send", side_effect=lambda tensor, **kw: wire.append(tensor.clone())), \
+             patch.object(torch.distributed, "recv", side_effect=recv):
+            for requests, entries, messages in frames:
+                leader((requests, entries), 0, None, 0, 1)
+                self.assertEqual(len(wire), messages)
+                self.assertEqual(follower([], 1, None, 0, 1), (requests, entries))
+                self.assertEqual(wire, [])
+
     def test_pipeline_timing_follows_activations_and_sampled_tokens(self):
         for metadata in (True, False):
             with self.subTest(metadata=metadata):

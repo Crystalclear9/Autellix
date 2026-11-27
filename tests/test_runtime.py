@@ -63,6 +63,23 @@ class RuntimePolicyTests(unittest.TestCase):
         self.ctl.finish("b")
         self.assertEqual(self.table.snapshot()["p"][0], 2)
 
+    def test_overlapped_result_publishes_each_calls_current_state(self):
+        self.ctl.admit("old", "p", {"request_id": "old"})
+        self.ctl.admit("continuing", "p", {"request_id": "continuing"})
+        for rid in self.ctl.calls:
+            self.table.record_submission(rid, "p", {})
+        self.ctl.begin(["old", "continuing"])
+        self.clock.now = 1
+        self.ctl.begin(["continuing"], active_rids=["old", "continuing"])
+        self.clock.now = 2
+        self.ctl.executed(["old", "continuing"], 2, still_running={"continuing"})
+        states = {row["request_id"]: row["state"] for row in self.table.describe()["p"]["calls"]}
+        self.assertEqual(states, {"old": "waiting", "continuing": "running"})
+        self.clock.now = 3
+        self.ctl.begin(["continuing"])
+        self.assertEqual(self.ctl.calls["old"].waited, 1)
+        self.assertEqual(self.ctl.calls["continuing"].waited, 0)
+
     def test_priority_snapshot_omits_only_zero_history(self):
         self.table.open("new")
         self.ctl.admit("queued", "p")

@@ -6,7 +6,7 @@
 
 - 单 GPU 副本或 PP 多 GPU 副本，文本生成，每次调用一个输出序列。
 - MHA KV token pool、radix 前缀缓存、page size 1。
-- 非重叠执行、不分块 prefill；允许多个独立副本由真实协调器管理。
+- 支持同步执行、现代单卡的稳定解码 overlap 和分块 prefill。协调器可管理多个独立副本。
 - Autellix 的模型并行使用 PP；TP、DP attention、推测解码、LoRA 和 HiCache 尚未接入。
 
 `backend.py` 启动真实 Engine，`scheduler.py` 在生成进程内安装钩子，不修改已安装的 SGLang 文件。程序和调用信息随请求传递，用户无需提供执行时间估计或 DAG。
@@ -27,7 +27,11 @@ N=8、K=1 是项目默认参数。预备请求的已计算前缀通过 radix 锁
 取消会覆盖全部在途微批次，包括尚未合并到 running batch 的 prefill。
 首阶段维护全局程序历史，其余阶段复用同一策略输入，各自管理本阶段的 KV。
 每个微批次有独立的 N 步窗口和 K 个预备请求，B 在微批次间均分。
-模型执行时间由三个阶段的 CUDA 计时累加，随采样结果返回首阶段并统一记账。
+模型执行时间由各阶段的 CUDA 计时累加，随采样结果返回首阶段并统一记账。
+纯时钟控制帧默认使用固定长度的单条 GPU 消息。可用
+`autellix_compact_pipeline_control=false` 对照完整序列化路径。
+同节点流水线可设置 `autellix_pipeline_host_control=true`，让相邻阶段通过进程间管道传递
+请求与调度输入。模型激活、采样结果与 CUDA 计时继续沿原生流水线路径传递。
 跨阶段的 `batch`、`execute`、`swap_out`、`swap_in` 与完成事件可逐条核对。
 
 P40 路径同时修复了固定版本 Llama 模型在 PP 下的 tied embedding 加载：
@@ -128,6 +132,8 @@ prefill，调度 trace 用 `overlap_refill_prefill` 记录。需同时开启稳�
 `autellix_partial_retention=true` 允许从放不下的低优先级运行批次中保留最长可共存前缀。
 调度 trace 用 `retain_decode_prefix` 记录保留的请求。
 `autellix_prefill_frontier=true` 可把保留判断限制到当前预填充可达的优先级前缀。
+分离 prefill 的流水线同样可开启此选项。每一轮按照原生可接纳的微批槽位与预填充预算，
+保留仍可驻留的解码。达到本轮计算预算的高优先级后续请求继续留在调度窗口内。
 适用于现代单阶段的分离分块和自适应合批，默认关闭。
 `autellix_mix_prefill_max_tokens` 为正数时按已接纳的未缓存预填充 token 数动态决定合批。
 启用分段预填充后，短预填充可与现有解码同批，长预填充单独运行。实际合批记录为

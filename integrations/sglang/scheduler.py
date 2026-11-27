@@ -416,7 +416,7 @@ def install(cls, options):
         # Native NO_TOKEN/slot exhaustion sets batch_is_full; hitting only
         # the per-forward prefill budget can leave a batch and pending work.
         # Keep those requests in the cohort for the next iteration.
-        forward_limited = (self.pp_size == 1 and result is not None
+        forward_limited = ((self.pp_size == 1 or options.get("prefill_frontier")) and result is not None
                            and not self.running_batch.batch_is_full and not blocked)
         if (self._autellix_paper and self._autellix_window is not None and not forward_limited
                 and getattr(self, "chunked_req", None) is None):
@@ -545,8 +545,7 @@ def install(cls, options):
     def process(self, batch, result, *a, **kw):
         reqs = list(batch.reqs or ())
         if self.pp_size > 1:
-            seconds = self._autellix_tape.value("gpu_seconds", lambda: self._autellix_completed_seconds)
-            self.autellix.executed([req.rid for req in reqs], seconds)
+            self.autellix.executed([req.rid for req in reqs], self._autellix_completed_seconds)
             self._autellix_inflight.difference_update(req.rid for req in reqs)
         if stable_decode_overlap and self._autellix_overlap.drained is not None:
             self.cur_batch = self._autellix_overlap.drained

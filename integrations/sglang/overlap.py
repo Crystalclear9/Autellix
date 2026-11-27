@@ -37,12 +37,9 @@ class OverlapState:
         # An earlier result can finish a request while its one delayed decode
         # is still in flight. That discarded result does not extend service.
         rids = [rid for rid in original_rids if rid in controller.calls]
-        controller.executed(rids, seconds, prefill_count=prefill_count)
-        ongoing = [controller.calls[rid] for rid in self.active_requests() if rid in controller.calls]
-        for call in ongoing:
-            call.scheduled = True
-        if ongoing and controller.publish_activity and not controller.publish_activity_at_window:
-            controller._publish(ongoing)
+        if prefill_count:
+            prefill_count = sum(rid in controller.calls for rid in original_rids[:prefill_count])
+        controller.executed(rids, seconds, prefill_count=prefill_count, still_running=self.active_requests())
         if phase is not None:
             controller.emit("model_phase_time", seconds=seconds, requests=rids, **phase)
         if controller.trace:
@@ -144,10 +141,11 @@ def prepare_first_decode(scheduler, prefill, *, refill_now=True):
     return running
 
 
-def prepare_survivor_decode(scheduler, batch, natural_finish):
-    """Shrink a decode window after normal terminal results arrive."""
+def retire_finished(scheduler, batch, natural_finish, *, refill):
+    """Remove finished entries while preserving the queued result's KV frees."""
     window = scheduler._autellix_window
-    if (scheduler.waiting_queue or window.reserve or scheduler._autellix_reserve
+    if ((scheduler.waiting_queue and (not refill or window.capacity_limited))
+            or window.reserve or scheduler._autellix_reserve
             or {req.rid for req in batch.reqs} != window.active):
         return None
     survivors, retired = [], []
@@ -170,10 +168,7 @@ def prepare_survivor_decode(scheduler, batch, natural_finish):
     batch.batch_is_full = False
     rids = {req.rid for req in batch.reqs}
     window.select(rids, rids)
-    batch.prepare_for_decode()
-    if scheduler.autellix.trace:
-        scheduler.autellix.emit("overlap_retire_decode", requests=[req.rid for req in batch.reqs], retired=retired)
-    return batch
+    return retired
 
 
 def prepare_window_decode(scheduler, batch, state):
@@ -269,9 +264,18 @@ def install(cls, *, lazy_resolve=False, prefill_decode=False, retire_decode=Fals
                 if batch is not None:
                     return batch
             if retire_decode and reason == "retire":
-                batch = prepare_survivor_decode(self, pending, natural_finish)
-                if batch is not None:
-                    return batch
+                retired = retire_finished(self, pending, natural_finish, refill=prefill_refill)
+                if retired is not None:
+                    if self.waiting_queue and self._autellix_window.refill_idle_slots:
+                        batch = prefill_into_idle_slots(self, pending, state)
+                        if batch is not None:
+                            return batch
+                    else:
+                        pending.prepare_for_decode()
+                        if self.autellix.trace:
+                            self.autellix.emit("overlap_retire_decode", requests=[req.rid for req in pending.reqs],
+                                               retired=retired)
+                        return pending
             if window_decode and reason == "window":
                 batch = prepare_window_decode(self, pending, state)
                 if batch is not None:

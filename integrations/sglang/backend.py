@@ -41,10 +41,10 @@ class SGLangBackend:
         resident_reserve_only = engine_args.pop("autellix_resident_reserve_only", False)
         mix_prefill_decode = engine_args.pop("autellix_mix_prefill_decode", True)
         mix_prefill_max_tokens = engine_args.pop("autellix_mix_prefill_max_tokens", 0)
-        if prefill_frontier and (self.native or pp != 1 or legacy_gpu or config.implementation != "paper"
+        if prefill_frontier and (self.native or legacy_gpu or config.implementation != "paper"
                                  or not retain_running or (mix_prefill_decode and not mix_prefill_max_tokens)
-                                 or (engine_args.get("chunked_prefill_size") or 0) <= 0):
-            raise ValueError("autellix_prefill_frontier requires single-stage paper mode with split chunked admission")
+                                 or (pp == 1 and (engine_args.get("chunked_prefill_size") or 0) <= 0)):
+            raise ValueError("autellix_prefill_frontier requires modern paper mode with split prefill")
         if type(mix_prefill_max_tokens) is not int or mix_prefill_max_tokens < 0:
             raise ValueError("autellix_mix_prefill_max_tokens must be a nonnegative integer")
         if mix_prefill_max_tokens and (self.native or pp != 1 or legacy_gpu or config.implementation != "paper"
@@ -81,6 +81,10 @@ class SGLangBackend:
                                        or mix_prefill_decode or mix_prefill_max_tokens):
             raise ValueError("autellix_overlap_prefill_refill requires overlap, idle refill, and split prefill")
         pipeline_timing_metadata = engine_args.pop("autellix_pipeline_timing_metadata", True)
+        compact_pipeline_control = engine_args.pop("autellix_compact_pipeline_control", True)
+        pipeline_host_control = engine_args.pop("autellix_pipeline_host_control", False)
+        if pipeline_host_control and (self.native or pp == 1 or engine_args.get("nnodes", 1) != 1):
+            raise ValueError("host pipeline control requires a single-node Autellix pipeline")
         fused_swap = engine_args.pop("autellix_fused_swap", False)
         measure_timing = engine_args.pop("autellix_measure_timing", False)
         if legacy_gpu:
@@ -127,6 +131,7 @@ class SGLangBackend:
                        overlap_window_decode=overlap_window_decode,
                        overlap_prefill_refill=overlap_prefill_refill,
                        pipeline_timing_metadata=pipeline_timing_metadata,
+                       compact_pipeline_control=compact_pipeline_control,
                        fused_swap=fused_swap,
                        measure_timing=measure_timing,
                        attention_score_elements=score_elements,
@@ -160,11 +165,19 @@ class SGLangBackend:
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)
         self.table = ProgramTable(table_path)
+        channels = []
+        if pipeline_host_control:
+            from multiprocessing import Pipe
+            channels = [Pipe(duplex=False) for _ in range(pp - 1)]
+            options["pipeline_control_channels"] = channels
         try:
             entry.run_scheduler_process = scheduler_target
             self.engine = entry.Engine(model_path=model, **args)
         finally:
             entry.run_scheduler_process = target
+            for reader, writer in channels:
+                reader.close()
+                writer.close()
         self.pending = {}
         self.programs = {}
         self.updates = []

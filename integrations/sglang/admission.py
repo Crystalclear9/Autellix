@@ -4,7 +4,7 @@
 def can_keep_running(scheduler, pending, selected, *, order=None, prefill_frontier=False):
     running = [r for r in scheduler.running_batch.reqs if r.rid in selected]
     limit_to_forward = False
-    if running and order is not None and scheduler.pp_size == 1:
+    if running and order is not None and (scheduler.pp_size == 1 or prefill_frontier):
         host = scheduler._autellix_host
         prepared = any(r.rid in scheduler._autellix_reserve or (host is not None and r.rid in host.saved)
                        for r in pending)
@@ -24,13 +24,16 @@ def can_keep_running(scheduler, pending, selected, *, order=None, prefill_fronti
         # admission requires its full request footprint before chunking it.
         frontier = []
         prefill_tokens = 0
+        slots = scheduler.get_num_allocatable_reqs(len(running)) if scheduler.pp_size > 1 else len(pending)
+        if pending and slots <= 0:
+            return False
         for request in sorted(pending, key=lambda req: order[req.rid]):
             request.init_next_round_input(cache)
             if frontier and request.extend_input_len >= scheduler.max_prefill_tokens - prefill_tokens:
                 break
             frontier.append(request)
             prefill_tokens += request.extend_input_len
-            if prefill_tokens >= chunk_budget:
+            if len(frontier) >= slots or (chunk_budget is not None and 0 < chunk_budget <= prefill_tokens):
                 break
         pending = frontier
         if len(running) + len(pending) > scheduler.server_args.max_running_requests:
@@ -43,7 +46,7 @@ def can_keep_running(scheduler, pending, selected, *, order=None, prefill_fronti
     # A forward can defer some prefills while keeping the selected KV on GPU.
     if chunk_budget is not None and 0 < chunk_budget <= mixed_decode:
         return False
-    if scheduler.pp_size > 1 and prefill_tokens + len(running) >= scheduler.max_prefill_tokens:
+    if scheduler.pp_size > 1 and not limit_to_forward and prefill_tokens + len(running) >= scheduler.max_prefill_tokens:
         return False
     config = scheduler.autellix.config
     horizon = config.schedule_interval if config.implementation == "paper" else float("inf")

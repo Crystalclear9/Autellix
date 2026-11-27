@@ -98,8 +98,8 @@ class StableDecodeOverlapTests(unittest.TestCase):
                 self.assertIsNone(scheduler._autellix_overlap.window_step)
                 batch.prepare_for_decode.assert_not_called()
 
-    def pending_retirement(self):
-        scheduler = self.scheduler(retire_decode=True)
+    def pending_retirement(self, *, prefill_refill=False):
+        scheduler = self.scheduler(retire_decode=True, prefill_refill=prefill_refill)
         batch = scheduler.last_batch
         batch.reqs = [NS(rid="short", finished=Mock(return_value=True), to_abort=False, finished_reason=LengthFinish()),
                       batch.reqs[0],
@@ -163,6 +163,19 @@ class StableDecodeOverlapTests(unittest.TestCase):
                 self.assertIs(scheduler._autellix_overlap.drained, batch)
                 batch.filter_batch.assert_not_called()
                 batch.prepare_for_decode.assert_not_called()
+
+    def test_retired_slot_can_prefill_while_its_delayed_result_is_in_flight(self):
+        scheduler, running = self.pending_retirement(prefill_refill=True)
+        queued = NS(reqs=running.reqs, out_cache_loc=running.out_cache_loc)
+        scheduler.waiting_queue.append(NS(rid="waiting"))
+        prefill = NS(reqs=scheduler.waiting_queue)
+        scheduler.get_new_batch_prefill.return_value = prefill
+        self.assertIs(scheduler.get_next_batch_to_run(), prefill)
+        self.assertIs(scheduler._autellix_overlap.parked_decode, running)
+        self.assertEqual([req.rid for req in running.reqs], ["resident"])
+        self.assertEqual([req.rid for req in queued.reqs], ["short", "resident", "eos"])
+        self.assertIsNotNone(queued.out_cache_loc)
+        running.prepare_for_decode.assert_not_called()
 
     def pending_prefill(self, *, resident=True, prefill_refill=False):
         scheduler = self.scheduler(prefill_decode=True, prefill_refill=prefill_refill)
@@ -386,17 +399,17 @@ class StableDecodeOverlapTests(unittest.TestCase):
         state = OverlapState(worker, torch)
         for bid in (41, 42):
             self.assertEqual(worker.forward_batch_generation(NS(bid=bid)), "native")
-            state.pending[bid] = (["resident", "retires"], 0, None)
+            state.pending[bid] = (["retires", "resident"], 1, None)
 
         calls = {rid: NS(scheduled=False) for rid in ("resident", "retires")}
         controller = NS(calls=calls, executed=Mock(), emit=Mock(), trace=True,
                         publish_activity=False)
         state.finish(41, controller)
-        self.assertTrue(calls["resident"].scheduled)
-        controller.executed.assert_called_once_with(["resident", "retires"], .007, prefill_count=0)
+        controller.executed.assert_called_once_with(["retires", "resident"], .007, prefill_count=1,
+                                                    still_running={"resident", "retires"})
         calls.pop("retires")
         state.finish(42, controller)
-        controller.executed.assert_called_with(["resident"], .013, prefill_count=0)
+        controller.executed.assert_called_with(["resident"], .013, prefill_count=0, still_running=set())
         self.assertEqual(state.pending, {})
         self.assertEqual(state.worker_events, {})
         self.assertEqual(len(state.free_events), 2)

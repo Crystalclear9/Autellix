@@ -5,6 +5,30 @@ from integrations.sglang.admission import can_keep_running, fitting_decode_prefi
 
 
 class KeepRunningTests(unittest.TestCase):
+    def test_pipeline_split_prefill_can_defer_later_prefills_without_retraction(self):
+        sampling = NS(max_new_tokens=2)
+        decode = NS(rid="decode", sampling_params=sampling, output_ids=[1])
+        def prefill(rid, length):
+            return NS(rid=rid, extend_input_len=length, sampling_params=sampling,
+                      init_next_round_input=lambda _: None, last_node=rid)
+        first, later = prefill("first", 8), prefill("later", 10)
+        order = {"first": 0, "later": 1, "decode": 2}
+        locks = []
+        scheduler = NS(pp_size=2, is_mixed_chunk=False, chunked_prefill_size=None, max_prefill_tokens=16,
+                       running_batch=NS(reqs=[decode]), server_args=NS(max_running_requests=8),
+                       get_num_allocatable_reqs=lambda _: 2,
+                       token_to_kv_pool_allocator=NS(available_size=lambda: 16),
+                       tree_cache=NS(evictable_size=lambda: 0, inc_lock_ref=locks.append, dec_lock_ref=locks.remove),
+                       autellix=NS(config=NS(implementation="paper", schedule_interval=8)),
+                       _autellix_host=None, _autellix_reserve={})
+        self.assertFalse(can_keep_running(scheduler, [later, first], set(order), order=order))
+        self.assertTrue(can_keep_running(scheduler, [later, first], set(order), order=order,
+                                        prefill_frontier=True))
+        self.assertEqual(locks, [])
+        scheduler.get_num_allocatable_reqs = lambda _: 0
+        self.assertFalse(can_keep_running(scheduler, [later, first], set(order), order=order,
+                                         prefill_frontier=True))
+
     def test_split_retention_only_charges_prefills_reachable_in_this_forward(self):
         sampling = NS(max_new_tokens=2)
         running = NS(rid="decode", sampling_params=sampling, output_ids=[1])
